@@ -277,7 +277,7 @@ func main() {
 	client.SetMaxTokens(500)
 
 	// Настройка stop sequences для явного завершения ответа
-	client.SetStopSequences([]string{"<END>", "<STOP>"})
+	client.SetStopSequences([]string{"[END]", "[STOP]"})
 
 	// Настройка формата ответа с явными инструкциями
 	formatDesc := `Ответь кратко и по делу. 
