@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+const (
+	defaultModel = "deepseek/deepseek-v3.2"
+	apiURL       = "https://routerai.ru/api/v1/chat/completions"
+	apiKeyEnv    = "ROUTERAI_API_KEY"
+)
+
 // Request представляет структуру запроса к API
 type Request struct {
 	Model    string    `json:"model"`
@@ -34,108 +40,188 @@ type Choice struct {
 	Message Message `json:"message"`
 }
 
-func main() {
-	// Настройка логирования: убираем временные метки, выводим в stdout
-	log.SetFlags(0)
-	log.SetOutput(os.Stdout)
+// APIClient представляет клиент для работы с API
+type APIClient struct {
+	apiKey string
+	client *http.Client
+	model  string
+}
 
-	// Получаем API ключ из переменной окружения
-	apiKey := os.Getenv("ROUTERAI_API_KEY")
-	if apiKey == "" {
-		log.Println("Error: ROUTERAI_API_KEY environment variable not set")
-		os.Exit(1)
+// NewAPIClient создает новый клиент API
+func NewAPIClient(apiKey string) *APIClient {
+	return &APIClient{
+		apiKey: apiKey,
+		client: &http.Client{Timeout: 30 * time.Second},
+		model:  defaultModel,
 	}
+}
 
-	// URL API эндпоинта
-	url := "https://routerai.ru/api/v1/chat/completions"
+// SetModel устанавливает модель для запросов
+func (c *APIClient) SetModel(model string) {
+	c.model = model
+}
 
-	// Запрос сообщения у пользователя
-	fmt.Print("Введите сообщение: ")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	userMessage := scanner.Text()
-
-	// Формирование тела запроса
+// CreateChatRequest создает запрос к API чата
+func (c *APIClient) CreateChatRequest(userMessage string) (*http.Request, error) {
 	reqBody := Request{
-		Model: "deepseek/deepseek-v3.2",
+		Model: c.model,
 		Messages: []Message{
 			{Role: "user", Content: userMessage},
 		},
 	}
 
-	// Преобразование структуры запроса в JSON с форматированием
-	jsonData, err := json.MarshalIndent(reqBody, "", "  ")
+	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		log.Printf("Error marshaling JSON: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("ошибка маршалинга JSON: %w", err)
 	}
 
-	// Логирование исходящего запроса
-	log.Println("→ Request:")
-	log.Println(string(jsonData))
-
-	// Создание HTTP запроса
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Printf("Error creating request: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("ошибка создания запроса: %w", err)
 	}
 
-	// Установка заголовков запроса
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	// Замер времени начала запроса
+	return req, nil
+}
+
+// SendRequest отправляет запрос и возвращает ответ
+func (c *APIClient) SendRequest(req *http.Request) ([]byte, time.Duration, error) {
 	start := time.Now()
-
-	// Отправка HTTP запроса
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
-		log.Printf("Error making request: %v\n", err)
-		os.Exit(1)
+		return nil, 0, fmt.Errorf("ошибка отправки запроса: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Логирование времени выполнения и статуса ответа
-	log.Printf("← Response time: %v, status: %d", time.Since(start), resp.StatusCode)
+	duration := time.Since(start)
 
-	// Чтение тела ответа
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Error reading response: %v\n", err)
-		os.Exit(1)
+		return nil, duration, fmt.Errorf("ошибка чтения ответа: %w", err)
 	}
 
-	// Парсинг ответа в generic map для красивого вывода JSON
-	var rawResponse map[string]interface{}
-	if err := json.Unmarshal(body, &rawResponse); err != nil {
-		log.Printf("Error parsing response: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Форматирование и логирование ответа в JSON
-	formattedResponse, _ := json.MarshalIndent(rawResponse, "", "  ")
-	log.Println("← Response:")
-	log.Println(string(formattedResponse))
-
-	// Проверка статуса ответа
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Error: HTTP %d\n%s\n", resp.StatusCode, string(body))
-		os.Exit(1)
+		return body, duration, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Парсинг ответа в структуру для получения текста
+	return body, duration, nil
+}
+
+// ParseResponse парсит ответ API
+func ParseResponse(body []byte) (*Response, error) {
 	var result Response
 	if err := json.Unmarshal(body, &result); err != nil {
-		log.Printf("Error parsing JSON: %v\n", err)
+		return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
+	}
+	return &result, nil
+}
+
+// LogRequest логирует запрос
+func LogRequest(reqBody Request) error {
+	jsonData, err := json.MarshalIndent(reqBody, "", "  ")
+	if err != nil {
+		return err
+	}
+	log.Println("→ Request:")
+	log.Println(string(jsonData))
+	return nil
+}
+
+// LogResponse логирует ответ
+func LogResponse(body []byte, duration time.Duration, statusCode int) {
+	log.Printf("← Response time: %v, status: %d", duration, statusCode)
+
+	var rawResponse map[string]interface{}
+	if err := json.Unmarshal(body, &rawResponse); err == nil {
+		formattedResponse, _ := json.MarshalIndent(rawResponse, "", "  ")
+		log.Println("← Response:")
+		log.Println(string(formattedResponse))
+	}
+}
+
+// ReadUserInput читает ввод пользователя
+func ReadUserInput(prompt string) (string, error) {
+	fmt.Print(prompt)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("ошибка чтения ввода: %w", err)
+		}
+		return "", fmt.Errorf("ввод прерван")
+	}
+	return scanner.Text(), nil
+}
+
+// PrintAnswer выводит ответ
+func PrintAnswer(response *Response) {
+	if len(response.Choices) > 0 {
+		log.Println("→ Answer:", response.Choices[0].Message.Content)
+	} else {
+		log.Println("Нет ответа от API")
+	}
+}
+
+// GetAPIKey получает API ключ из переменной окружения
+func GetAPIKey() (string, error) {
+	apiKey := os.Getenv(apiKeyEnv)
+	if apiKey == "" {
+		return "", fmt.Errorf("переменная окружения %s не установлена", apiKeyEnv)
+	}
+	return apiKey, nil
+}
+
+// SetupLogging настраивает логирование
+func SetupLogging() {
+	log.SetFlags(0)
+	log.SetOutput(os.Stdout)
+}
+
+func main() {
+	SetupLogging()
+
+	apiKey, err := GetAPIKey()
+	if err != nil {
+		log.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Вывод ответа от API
-	if len(result.Choices) > 0 {
-		log.Println("→ Answer:", result.Choices[0].Message.Content)
-	} else {
-		log.Println("No response from API")
+	userMessage, err := ReadUserInput("Введите сообщение: ")
+	if err != nil {
+		log.Printf("Error: %v\n", err)
+		os.Exit(1)
 	}
+
+	client := NewAPIClient(apiKey)
+
+	reqBody := Request{
+		Model: defaultModel,
+		Messages: []Message{
+			{Role: "user", Content: userMessage},
+		},
+	}
+	LogRequest(reqBody)
+
+	req, err := client.CreateChatRequest(userMessage)
+	if err != nil {
+		log.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	body, duration, err := client.SendRequest(req)
+	if err != nil {
+		log.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	LogResponse(body, duration, http.StatusOK)
+
+	response, err := ParseResponse(body)
+	if err != nil {
+		log.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	PrintAnswer(response)
 }
