@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -15,6 +16,22 @@ func GetAnswerContent(resp *Response) string {
 		return resp.Choices[0].Message.Content
 	}
 	return ""
+}
+
+// truncateText обрезает текст до maxLen символов, показывая начало и конец
+// text - исходный текст
+// maxLen - максимальная длина (должна быть >= 10)
+// Возвращает: обрезанный текст с <вырезаный текст> в середине
+func truncateText(text string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+
+	// Оставляем половину от maxLen для начала и конца
+	// Учитываем длину маркера "\n<вырезаный текст>\n" (19 символов)
+	markerLen := 19
+	half := (maxLen - markerLen) / 2
+	return text[:half] + "\n<вырезаный текст>\n" + text[len(text)-half:]
 }
 
 // PrintComparison выводит сравнение двух ответов в консоль
@@ -36,7 +53,8 @@ func PrintComparison(resp1, resp2 *Response, dur1, dur2 time.Duration) {
 	log.Printf("   Токенов (примерно): %d", len(content1)/4)
 	log.Println("   Ответ:")
 	log.Println("   " + strings.Repeat("-", 50))
-	for _, line := range strings.Split(content1, "\n") {
+	truncated1 := truncateText(content1, 500)
+	for _, line := range strings.Split(truncated1, "\n") {
 		log.Println("   " + line)
 	}
 
@@ -46,7 +64,8 @@ func PrintComparison(resp1, resp2 *Response, dur1, dur2 time.Duration) {
 	log.Printf("   Токенов (примерно): %d", len(content2)/4)
 	log.Println("   Ответ:")
 	log.Println("   " + strings.Repeat("-", 50))
-	for _, line := range strings.Split(content2, "\n") {
+	truncated2 := truncateText(content2, 500)
+	for _, line := range strings.Split(truncated2, "\n") {
 		log.Println("   " + line)
 	}
 
@@ -67,4 +86,17 @@ func limitLines(text string, maxLines int) string {
 		return text
 	}
 	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (+%d строк)", len(lines)-maxLines)
+}
+
+// LogRequestJSON логирует тело запроса в формате JSON
+// reqBody - тело запроса для логирования
+// Вывод ограничен 3000 символами, с показом начала и конца
+func LogRequestJSON(reqBody *Request) {
+	jsonData, err := json.MarshalIndent(reqBody, "", "  ")
+	if err != nil {
+		log.Printf("Ошибка маршалинга запроса: %v", err)
+		return
+	}
+	log.Println("→ Request JSON:")
+	log.Println(truncateText(string(jsonData), 3000))
 }

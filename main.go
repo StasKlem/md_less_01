@@ -44,6 +44,8 @@ func main() {
 	client1 := api.NewHTTPChatClient(builder1, parser, httpClient, cfg.Timeout)
 
 	log.Println("\n🔄 Отправка запроса С ОГРАНИЧЕНИЯМИ...")
+	reqBody1 := builder1.GetRequestBody(userMessage)
+	api.LogRequestJSON(reqBody1)
 	resp1, dur1, err := client1.SendMessage(context.Background(), userMessage)
 	if err != nil {
 		log.Printf("Error в запросе с ограничениями: %v\n", err)
@@ -60,6 +62,8 @@ func main() {
 	client2 := api.NewHTTPChatClient(builder2, parser, httpClient, cfg.Timeout)
 
 	log.Println("\n🔄 Отправка запроса БЕЗ ОГРАНИЧЕНИЙ...")
+	reqBody2 := builder2.GetRequestBody(userMessage)
+	api.LogRequestJSON(reqBody2)
 	resp2, dur2, err := client2.SendMessage(context.Background(), userMessage)
 	if err != nil {
 		log.Printf("Error в запросе без ограничений: %v\n", err)

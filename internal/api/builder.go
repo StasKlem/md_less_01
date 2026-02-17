@@ -54,10 +54,10 @@ func NewRequestBuilderWithOptions(
 	}
 }
 
-// Build создает HTTP POST запрос к API
+// GetRequestBody создает тело запроса без создания HTTP запроса
 // userMessage - сообщение пользователя для отправки
-// Возвращает: HTTP запрос с заголовками Authorization и Content-Type
-func (b *ChatRequestBuilder) Build(userMessage string) (*http.Request, error) {
+// Возвращает: структуру Request для логирования или дальнейшей обработки
+func (b *ChatRequestBuilder) GetRequestBody(userMessage string) *Request {
 	messages := []Message{}
 
 	// Добавляем системное сообщение с инструкциями, если задано
@@ -84,6 +84,15 @@ func (b *ChatRequestBuilder) Build(userMessage string) (*http.Request, error) {
 	if len(b.stopSequences) > 0 {
 		reqBody.Stop = b.stopSequences
 	}
+
+	return &reqBody
+}
+
+// Build создает HTTP POST запрос к API
+// userMessage - сообщение пользователя для отправки
+// Возвращает: HTTP запрос с заголовками Authorization и Content-Type
+func (b *ChatRequestBuilder) Build(userMessage string) (*http.Request, error) {
+	reqBody := b.GetRequestBody(userMessage)
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
