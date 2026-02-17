@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -72,7 +73,7 @@ type APIClient struct {
 func NewAPIClient(apiKey string) *APIClient {
 	return &APIClient{
 		apiKey:        apiKey,
-		client:        &http.Client{Timeout: 30 * time.Second},
+		client:        &http.Client{Timeout: 240 * time.Second},
 		model:         defaultModel,
 		maxTokens:     defaultMaxTokens,
 		stopSequences: []string{},
@@ -203,7 +204,7 @@ func LogRequest(reqBody Request) error {
 		return err
 	}
 	log.Println("→ Request:")
-	log.Println(string(jsonData))
+	log.Println(limitLines(string(jsonData), 20))
 	return nil
 }
 
@@ -215,8 +216,17 @@ func LogResponse(body []byte, duration time.Duration, statusCode int) {
 	if err := json.Unmarshal(body, &rawResponse); err == nil {
 		formattedResponse, _ := json.MarshalIndent(rawResponse, "", "  ")
 		log.Println("← Response:")
-		log.Println(string(formattedResponse))
+		log.Println(limitLines(string(formattedResponse), 20))
 	}
+}
+
+// limitLines ограничивает вывод указанным количеством строк
+func limitLines(text string, maxLines int) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) <= maxLines {
+		return text
+	}
+	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (+%d строк)", len(lines)-maxLines)
 }
 
 // ReadUserInput читает ввод пользователя
@@ -241,6 +251,58 @@ func PrintAnswer(response *Response) {
 	}
 }
 
+// GetAnswerContent возвращает текст ответа
+func GetAnswerContent(response *Response) string {
+	if len(response.Choices) > 0 {
+		return response.Choices[0].Message.Content
+	}
+	return ""
+}
+
+// ResetConstraints сбрасывает все ограничения клиента (устанавливает maxTokens = 4096 вместо неограниченного)
+func (c *APIClient) ResetConstraints() {
+	c.maxTokens = 4096
+	c.stopSequences = []string{}
+	c.responseFormat = nil
+	c.formatDescription = ""
+}
+
+// PrintComparison выводит сравнение двух ответов
+func PrintComparison(response1 *Response, duration1 time.Duration, response2 *Response, duration2 time.Duration) {
+	content1 := GetAnswerContent(response1)
+	content2 := GetAnswerContent(response2)
+
+	log.Println("\n" + strings.Repeat("=", 60))
+	log.Println("СРАВНЕНИЕ ОТВЕТОВ")
+	log.Println(strings.Repeat("=", 60))
+
+	log.Println("\n📋 ЗАПРОС 1 (с ограничениями):")
+	log.Printf("   Время: %v", duration1)
+	log.Printf("   Длина: %d символов", len(content1))
+	log.Printf("   Токенов (примерно): %d", len(content1)/4)
+	log.Println("   Ответ:")
+	log.Println("   " + strings.Repeat("-", 50))
+	for _, line := range strings.Split(content1, "\n") {
+		log.Println("   " + line)
+	}
+
+	log.Println("\n📋 ЗАПРОС 2 (без ограничений):")
+	log.Printf("   Время: %v", duration2)
+	log.Printf("   Длина: %d символов", len(content2))
+	log.Printf("   Токенов (примерно): %d", len(content2)/4)
+	log.Println("   Ответ:")
+	log.Println("   " + strings.Repeat("-", 50))
+	for _, line := range strings.Split(content2, "\n") {
+		log.Println("   " + line)
+	}
+
+	log.Println("\n" + strings.Repeat("=", 60))
+	log.Println("РАЗНИЦА:")
+	log.Printf("   Длина: %d символов", len(content2)-len(content1))
+	log.Printf("   Время: %v", duration2-duration1)
+	log.Println(strings.Repeat("=", 60))
+}
+
 // GetAPIKey получает API ключ из переменной окружения
 func GetAPIKey() (string, error) {
 	apiKey := os.Getenv(apiKeyEnv)
@@ -254,6 +316,41 @@ func GetAPIKey() (string, error) {
 func SetupLogging() {
 	log.SetFlags(0)
 	log.SetOutput(os.Stdout)
+}
+
+// makeRequest выполняет один запрос и возвращает ответ
+func makeRequest(client *APIClient, userMessage string, withConstraints bool) (*Response, time.Duration, error) {
+	if withConstraints {
+		// Настройка ограничений
+		client.SetMaxTokens(500)
+		client.SetStopSequences([]string{"[END]", "[STOP]"})
+		formatDesc := `Ответь кратко и по делу. 
+Заверши ответ маркером <END>.
+Используй не более 2-3 предложений.`
+		client.SetFormatDescription(formatDesc)
+		log.Println("\n🔄 Отправка запроса С ОГРАНИЧЕНИЯМИ...")
+	} else {
+		// Сброс ограничений
+		client.ResetConstraints()
+		log.Println("\n🔄 Отправка запроса БЕЗ ОГРАНИЧЕНИЙ...")
+	}
+
+	req, err := client.CreateChatRequest(userMessage)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	body, duration, err := client.SendRequest(req)
+	if err != nil {
+		return nil, duration, err
+	}
+
+	response, err := ParseResponse(body)
+	if err != nil {
+		return nil, duration, err
+	}
+
+	return response, duration, nil
 }
 
 func main() {
@@ -273,45 +370,20 @@ func main() {
 
 	client := NewAPIClient(apiKey)
 
-	// Настройка ограничения на длину ответа (500 токенов)
-	client.SetMaxTokens(500)
-
-	// Настройка stop sequences для явного завершения ответа
-	client.SetStopSequences([]string{"[END]", "[STOP]"})
-
-	// Настройка формата ответа с явными инструкциями
-	formatDesc := `Ответь кратко и по делу. 
-Заверши ответ маркером <END>.
-Используй не более 2-3 предложений.`
-	client.SetFormatDescription(formatDesc)
-
-	req, err := client.CreateChatRequest(userMessage)
+	// Запрос 1: с ограничениями
+	response1, duration1, err := makeRequest(client, userMessage, true)
 	if err != nil {
-		log.Printf("Error: %v\n", err)
+		log.Printf("Error в запросе с ограничениями: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Логируем тело запроса для отладки
-	bodyBytes, _ := io.ReadAll(req.Body)
-	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	var reqBody Request
-	json.Unmarshal(bodyBytes, &reqBody)
-	LogRequest(reqBody)
-	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	body, duration, err := client.SendRequest(req)
+	// Запрос 2: без ограничений
+	response2, duration2, err := makeRequest(client, userMessage, false)
 	if err != nil {
-		log.Printf("Error: %v\n", err)
+		log.Printf("Error в запросе без ограничений: %v\n", err)
 		os.Exit(1)
 	}
 
-	LogResponse(body, duration, http.StatusOK)
-
-	response, err := ParseResponse(body)
-	if err != nil {
-		log.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	PrintAnswer(response)
+	// Вывод сравнения
+	PrintComparison(response1, duration1, response2, duration2)
 }
