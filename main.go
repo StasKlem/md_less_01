@@ -13,15 +13,32 @@ import (
 )
 
 const (
-	defaultModel = "deepseek/deepseek-v3.2"
-	apiURL       = "https://routerai.ru/api/v1/chat/completions"
-	apiKeyEnv    = "ROUTERAI_API_KEY"
+	defaultModel     = "deepseek/deepseek-v3.2"
+	apiURL           = "https://routerai.ru/api/v1/chat/completions"
+	apiKeyEnv        = "ROUTERAI_API_KEY"
+	defaultMaxTokens = 500
 )
 
 // Request представляет структуру запроса к API
 type Request struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	Stop           []string        `json:"stop,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+}
+
+// ResponseFormat представляет формат ответа
+type ResponseFormat struct {
+	Type       string      `json:"type"`
+	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
+}
+
+// JSONSchema представляет JSON схему для структурированного вывода
+type JSONSchema struct {
+	Name   string                 `json:"name"`
+	Strict bool                   `json:"strict"`
+	Schema map[string]interface{} `json:"schema"`
 }
 
 // Message представляет сообщение в чате
@@ -42,17 +59,23 @@ type Choice struct {
 
 // APIClient представляет клиент для работы с API
 type APIClient struct {
-	apiKey string
-	client *http.Client
-	model  string
+	apiKey            string
+	client            *http.Client
+	model             string
+	maxTokens         int
+	stopSequences     []string
+	responseFormat    *ResponseFormat
+	formatDescription string
 }
 
 // NewAPIClient создает новый клиент API
 func NewAPIClient(apiKey string) *APIClient {
 	return &APIClient{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 30 * time.Second},
-		model:  defaultModel,
+		apiKey:        apiKey,
+		client:        &http.Client{Timeout: 30 * time.Second},
+		model:         defaultModel,
+		maxTokens:     defaultMaxTokens,
+		stopSequences: []string{},
 	}
 }
 
@@ -61,13 +84,68 @@ func (c *APIClient) SetModel(model string) {
 	c.model = model
 }
 
+// SetMaxTokens устанавливает максимальное количество токенов
+func (c *APIClient) SetMaxTokens(tokens int) {
+	c.maxTokens = tokens
+}
+
+// SetStopSequences устанавливает stop sequences для завершения генерации
+func (c *APIClient) SetStopSequences(sequences []string) {
+	c.stopSequences = sequences
+}
+
+// SetResponseFormat устанавливает формат ответа (json_object или text)
+func (c *APIClient) SetResponseFormat(formatType string) {
+	c.responseFormat = &ResponseFormat{
+		Type: formatType,
+	}
+}
+
+// SetJSONSchema устанавливает JSON схему для структурированного вывода
+func (c *APIClient) SetJSONSchema(name string, schema map[string]interface{}) {
+	c.responseFormat = &ResponseFormat{
+		Type: "json_schema",
+		JSONSchema: &JSONSchema{
+			Name:   name,
+			Strict: true,
+			Schema: schema,
+		},
+	}
+}
+
+// SetFormatDescription устанавливает текстовое описание формата ответа (через системное сообщение)
+func (c *APIClient) SetFormatDescription(description string) {
+	c.formatDescription = description
+}
+
 // CreateChatRequest создает запрос к API чата
 func (c *APIClient) CreateChatRequest(userMessage string) (*http.Request, error) {
+	messages := []Message{}
+
+	// Добавляем системное сообщение с инструкциями о формате, если оно задано
+	if c.formatDescription != "" {
+		messages = append(messages, Message{
+			Role:    "system",
+			Content: c.formatDescription,
+		})
+	}
+
+	// Добавляем сообщение пользователя
+	messages = append(messages, Message{
+		Role:    "user",
+		Content: userMessage,
+	})
+
 	reqBody := Request{
-		Model: c.model,
-		Messages: []Message{
-			{Role: "user", Content: userMessage},
-		},
+		Model:          c.model,
+		Messages:       messages,
+		MaxTokens:      c.maxTokens,
+		ResponseFormat: c.responseFormat,
+	}
+
+	// Добавляем stop sequences, если они заданы
+	if len(c.stopSequences) > 0 {
+		reqBody.Stop = c.stopSequences
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -195,19 +273,31 @@ func main() {
 
 	client := NewAPIClient(apiKey)
 
-	reqBody := Request{
-		Model: defaultModel,
-		Messages: []Message{
-			{Role: "user", Content: userMessage},
-		},
-	}
-	LogRequest(reqBody)
+	// Настройка ограничения на длину ответа (500 токенов)
+	client.SetMaxTokens(500)
+
+	// Настройка stop sequences для явного завершения ответа
+	client.SetStopSequences([]string{"<END>", "<STOP>"})
+
+	// Настройка формата ответа с явными инструкциями
+	formatDesc := `Ответь кратко и по делу. 
+Заверши ответ маркером <END>.
+Используй не более 2-3 предложений.`
+	client.SetFormatDescription(formatDesc)
 
 	req, err := client.CreateChatRequest(userMessage)
 	if err != nil {
 		log.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Логируем тело запроса для отладки
+	bodyBytes, _ := io.ReadAll(req.Body)
+	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	var reqBody Request
+	json.Unmarshal(bodyBytes, &reqBody)
+	LogRequest(reqBody)
+	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	body, duration, err := client.SendRequest(req)
 	if err != nil {
