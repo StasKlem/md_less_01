@@ -348,9 +348,18 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleWindowSize обрабатывает изменение размера окна
 func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
-	// Устанавливаем размеры viewport во весь экран
+	// Устанавливаем размеры viewport
+	// Высота: msg.Height минус:
+	// - 1 строка: заголовок
+	// - 1 строка: пустая
+	// - 2 строки: статус
+	// - 1 строка: пустая
+	// - 1 строка: спиннер
+	// - 1 строка: поле ввода
+	// - 1 строка: подсказки
+	// Итого: -8 строк
 	m.viewport.Width = msg.Width
-	m.viewport.Height = msg.Height - 8  // -6 для заголовка и статуса, -2 для отступов
+	m.viewport.Height = msg.Height - 8
 
 	m.logger.Debug("Window size updated", "width", msg.Width, "height", msg.Height)
 	return m, m.updateViewportContent()
@@ -631,6 +640,9 @@ func (m *Model) View() string {
 
 	// История сообщений
 	b.WriteString(m.renderHistory())
+
+	// Пустая строка после viewport
+	b.WriteString("\n")
 
 	// Спиннер над полем ввода
 	b.WriteString(m.renderSpinner())
