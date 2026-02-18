@@ -96,6 +96,7 @@ func run(args []string) int {
 		model,
 		tea.WithAltScreen(),
 		tea.WithInputTTY(),
+		tea.WithMouseCellMotion(),
 	)
 
 	log.Info("Starting TUI program")

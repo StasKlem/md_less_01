@@ -1,0 +1,27 @@
+{
+  "server": {
+    "address": "http://localhost:11434",
+    "api_endpoint": "/v1/chat/completions"
+  },
+  "model": {
+    "name": "llama3",
+    "system_prompt": "You are a helpful assistant.",
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 0,
+    "stream": true
+  },
+  "ui": {
+    "show_timestamps": false,
+    "theme": "dark",
+    "scroll_speed": 10
+  },
+  "log": {
+    "enabled": false,
+    "file_path": "",
+    "level": "info",
+    "log_requests": true,
+    "log_responses": true,
+    "log_stream_chunks": false
+  }
+}

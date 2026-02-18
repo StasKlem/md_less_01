@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -80,8 +81,7 @@ var (
 			MarginTop(1)
 
 	// Стили для скролл-области
-	historyStyle = lipgloss.NewStyle().
-			Margin(0, 0, 1, 0)
+	historyStyle = lipgloss.NewStyle()
 )
 
 // === Статусы приложения ===
@@ -144,17 +144,15 @@ type Model struct {
 	history *chat.ChatHistory
 
 	// Ввод пользователя
-	input      string
-	inputWidth int
+	input string
+
+	// Viewport для прокрутки истории
+	viewport viewport.Model
 
 	// Состояние UI
 	status       AppStatus
 	errorMsg     string
 	streamingBuf strings.Builder
-
-	// Скроллинг истории
-	scrollOffset int
-	maxHeight    int
 
 	// Контекст для отмены запроса
 	ctx    context.Context
@@ -181,19 +179,20 @@ func NewModel(appConfig *config.Config, opts ...ModelOption) *Model {
 
 	log := logger.DefaultLogger
 
+	vp := viewport.New(80, 20)
+	vp.Style = historyStyle
+
 	model := &Model{
-		appConfig:    appConfig,
-		runtime:      runtimeConfig,
-		client:       client.NewClient(appConfig.Server.Address, appConfig.Server.APIEndpoint, client.WithLogger(log)),
-		history:      chat.NewChatHistory(runtimeConfig.SystemPrompt),
-		input:        "",
-		inputWidth:   80,
-		maxHeight:    20,
-		status:       StatusIdle,
-		scrollOffset: 0,
-		ctx:          ctx,
-		cancel:       cancel,
-		logger:       log,
+		appConfig:  appConfig,
+		runtime:    runtimeConfig,
+		client:     client.NewClient(appConfig.Server.Address, appConfig.Server.APIEndpoint, client.WithLogger(log)),
+		history:    chat.NewChatHistory(runtimeConfig.SystemPrompt),
+		input:      "",
+		viewport:   vp,
+		status:     StatusIdle,
+		ctx:        ctx,
+		cancel:     cancel,
+		logger:     log,
 	}
 
 	// Применяем опции
@@ -229,8 +228,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrorMsg:
 		return m.handleErrorMsg(msg)
 
+	case tea.MouseMsg:
+		// Обработка событий мыши для скролла и выделения
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+
 	default:
-		return m, nil
+		// Передаём сообщение в viewport для обработки (скролл мышью и т.д.)
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 }
 
@@ -266,36 +274,34 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.logger.Debug("Sending message", "input", m.input)
 		return m.sendMessage()
 
-	case "up":
+	case "up", "k":
 		// Скролл вверх
-		if m.scrollOffset > 0 {
-			m.scrollOffset--
-		}
+		m.viewport.ScrollUp(1)
 		return m, nil
 
-	case "down":
+	case "down", "j":
 		// Скролл вниз
-		maxScroll := m.getMaxScroll()
-		if m.scrollOffset < maxScroll {
-			m.scrollOffset++
-		}
+		m.viewport.ScrollDown(1)
 		return m, nil
 
 	case "pgup":
 		// Страница вверх
-		m.scrollOffset -= 10
-		if m.scrollOffset < 0 {
-			m.scrollOffset = 0
-		}
+		m.viewport.HalfPageUp()
 		return m, nil
 
 	case "pgdown":
 		// Страница вниз
-		m.scrollOffset += 10
-		maxScroll := m.getMaxScroll()
-		if m.scrollOffset > maxScroll {
-			m.scrollOffset = maxScroll
-		}
+		m.viewport.HalfPageDown()
+		return m, nil
+
+	case "home":
+		// В начало
+		m.viewport.GotoTop()
+		return m, nil
+
+	case "end":
+		// В конец
+		m.viewport.GotoBottom()
 		return m, nil
 
 	default:
@@ -309,13 +315,12 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleWindowSize обрабатывает изменение размера окна
 func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
-	m.inputWidth = msg.Width - 4
-	m.maxHeight = msg.Height - 10
-	if m.maxHeight < 5 {
-		m.maxHeight = 5
-	}
+	// Устанавливаем размеры viewport во весь экран
+	m.viewport.Width = msg.Width
+	m.viewport.Height = msg.Height - 6
+
 	m.logger.Debug("Window size updated", "width", msg.Width, "height", msg.Height)
-	return m, nil
+	return m, m.updateViewportContent()
 }
 
 // handleStreamMsg обрабатывает полученный чанк от LLM
@@ -334,20 +339,20 @@ func (m *Model) handleStreamMsg(msg StreamMsg) (tea.Model, tea.Cmd) {
 		// Сохраняем полный ответ в историю
 		m.history.AddAssistant(m.streamingBuf.String())
 		m.streamingBuf.Reset()
-		// Скроллим вниз чтобы показать конец ответа
-		m.scrollOffset = m.getMaxScroll()
-		return m, nil
+		// Прокручиваем вниз
+		m.viewport.GotoBottom()
+		return m, m.updateViewportContent()
 	}
 
 	// Добавляем полученный текст к буферу
 	m.streamingBuf.WriteString(msg.Content)
 	// Обновляем последнее сообщение в истории (для контекста)
 	m.history.UpdateLastAssistant(m.streamingBuf.String())
-	// Скроллим вниз
-	m.scrollOffset = m.getMaxScroll()
+	// Прокручиваем вниз
+	m.viewport.GotoBottom()
 
-	// Запрашиваем следующий чанк
-	return m, readStreamChunk(m.streamChan)
+	// Обновляем viewport и запрашиваем следующий чанк
+	return m, tea.Batch(m.updateViewportContent(), readStreamChunk(m.streamChan))
 }
 
 // handleErrorMsg обрабатывает ошибку
@@ -393,9 +398,10 @@ func (m *Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "clear", "cls":
 		m.logger.Info("Clearing chat history")
 		m.history.Clear(m.runtime.SystemPrompt)
-		m.scrollOffset = 0
+		m.viewport.GotoTop()
 		m.errorMsg = "История очищена"
 		m.status = StatusIdle
+		return m, m.updateViewportContent()
 
 	case "help", "h":
 		m.errorMsg = "Команды: /set <param> <value>, /clear, /help, /config, /save, /stream"
@@ -452,7 +458,6 @@ func (m *Model) sendMessage() (tea.Model, tea.Cmd) {
 	m.input = ""
 	m.status = StatusSending
 	m.errorMsg = ""
-	m.scrollOffset = m.getMaxScroll()
 
 	// Создаём запрос
 	req := &client.ChatRequest{
@@ -504,30 +509,43 @@ func readStreamChunk(stream <-chan client.StreamChunk) tea.Cmd {
 	}
 }
 
-// getMaxScroll возвращает максимальное значение скролла
-func (m *Model) getMaxScroll() int {
+// updateViewportContent обновляет содержимое viewport
+func (m *Model) updateViewportContent() tea.Cmd {
+	content := m.renderHistoryContent()
+	m.viewport.SetContent(content)
+	return nil
+}
+
+// renderHistoryContent рендерит историю сообщений как строку
+func (m *Model) renderHistoryContent() string {
+	var b strings.Builder
+
 	messages := m.history.GetDisplayMessages()
+
 	if len(messages) == 0 {
-		return 0
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Italic(true).
+			Render("Начните диалог, напишите сообщение и нажмите Enter"))
+		b.WriteString("\n")
+	} else {
+		lines := m.renderMessagesToLines(messages)
+		for _, line := range lines {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
 	}
 
-	totalLines := 0
-	for _, msg := range messages {
-		// +1 для заголовка сообщения
-		lines := strings.Count(msg.Content, "\n") + 1 + 1
-		totalLines += lines
-	}
-
-	// Добавляем текущий стриминг буфер
+	// Добавляем текущий стриминг буфер если есть
 	if m.streamingBuf.Len() > 0 {
-		totalLines += strings.Count(m.streamingBuf.String(), "\n") + 2
+		lines := m.renderAssistantMessage(m.streamingBuf.String())
+		for _, line := range lines {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
 	}
 
-	maxScroll := totalLines - m.maxHeight
-	if maxScroll < 0 {
-		return 0
-	}
-	return maxScroll
+	return b.String()
 }
 
 // View рендерит UI
@@ -552,7 +570,7 @@ func (m *Model) View() string {
 
 	// Подсказки
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓: скролл | Enter: отправить | /help: команды | Ctrl+C: выход"))
+	b.WriteString(helpStyle.Render("↑↓/j/k: скролл | PgUp/PgDn: страница | Home/End: начало/конец | Enter: отправить | /help: команды | Ctrl+C: выход"))
 
 	result := b.String()
 	m.logger.Debug("View rendered", "bytes", len(result))
@@ -571,53 +589,9 @@ func (m *Model) renderStatus() string {
 	}
 }
 
-// renderHistory рендерит историю сообщений
+// renderHistory рендерит историю сообщений через viewport
 func (m *Model) renderHistory() string {
-	var b strings.Builder
-
-	messages := m.history.GetDisplayMessages()
-
-	if len(messages) == 0 {
-		b.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			Italic(true).
-			Render("Начните диалог, напишите сообщение и нажмите Enter"))
-		b.WriteString("\n")
-	} else {
-		// Рендерим сообщения с учётом скролла
-		lines := m.renderMessagesToLines(messages)
-
-		// Применяем скролл
-		start := m.scrollOffset
-		end := start + m.maxHeight
-		if end > len(lines) {
-			end = len(lines)
-		}
-		if start > end {
-			start = end
-		}
-
-		for i := start; i < end; i++ {
-			b.WriteString(lines[i])
-			b.WriteString("\n")
-		}
-
-		// Индикатор скролла
-		if m.scrollOffset > 0 {
-			b.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("241")).
-				Render("... ▲"))
-			b.WriteString("\n")
-		}
-		if end < len(lines) {
-			b.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("241")).
-				Render("... ▼"))
-			b.WriteString("\n")
-		}
-	}
-
-	return historyStyle.Render(b.String())
+	return m.viewport.View()
 }
 
 // renderMessagesToLines конвертирует сообщения в строки для рендеринга
@@ -631,11 +605,6 @@ func (m *Model) renderMessagesToLines(messages []chat.Message) []string {
 		case chat.RoleAssistant:
 			lines = append(lines, m.renderAssistantMessage(msg.Content)...)
 		}
-	}
-
-	// Добавляем текущий стриминг буфер если есть
-	if m.streamingBuf.Len() > 0 {
-		lines = append(lines, m.renderAssistantMessage(m.streamingBuf.String())...)
 	}
 
 	return lines
@@ -689,7 +658,7 @@ func (m *Model) formatMessage(content, prefix string, style lipgloss.Style, cont
 
 // getContentWidth возвращает доступную ширину для контента
 func (m *Model) getContentWidth() int {
-	width := m.inputWidth - 6 // Учитываем отступы и префиксы
+	width := m.viewport.Width - 6 // Учитываем префиксы и отступы
 	if width < 20 {
 		width = 20
 	}

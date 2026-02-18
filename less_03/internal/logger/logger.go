@@ -4,6 +4,7 @@ package logger
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -115,21 +116,33 @@ func NewLogger(cfg Config) *Logger {
 	opts := &slog.HandlerOptions{
 		Level:     cfg.Level.ToSlogLevel(),
 		AddSource: cfg.AddSource,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Убираем время из логов если не нужно
-			if a.Key == slog.TimeKey {
-				return a
-			}
-			return a
-		},
+		ReplaceAttr: formatJSONAttrs,
 	}
 
-	handler = slog.NewJSONHandler(output, opts)
+	handler = slog.NewTextHandler(output, opts)
 
 	return &Logger{
 		logger: slog.New(handler),
 		config: cfg,
 	}
+}
+
+// formatJSONAttrs форматирует JSON атрибуты с отступами для красоты
+func formatJSONAttrs(groups []string, a slog.Attr) slog.Attr {
+	// Если ключ содержит "body" или "json", форматируем значение с отступами
+	if a.Key == "body" || a.Key == "json" || a.Key == "request" || a.Key == "response" {
+		if a.Value.Kind() == slog.KindString {
+			jsonStr := a.Value.String()
+			// Пробуем отформатировать JSON
+			var jsonData interface{}
+			if err := json.Unmarshal([]byte(jsonStr), &jsonData); err == nil {
+				if formatted, err := json.MarshalIndent(jsonData, "", "  "); err == nil {
+					return slog.String(a.Key, string(formatted))
+				}
+			}
+		}
+	}
+	return a
 }
 
 // SetDefault устанавливает логгер по умолчанию

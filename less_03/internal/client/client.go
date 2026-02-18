@@ -402,26 +402,24 @@ func (c *Client) parseStreamData(data []byte) []StreamChunk {
 
 // logRequest записывает детали запроса в лог
 func (c *Client) logRequest(req *ChatRequest, jsonData []byte) {
-	c.logger.Debug("Sending request",
+	c.logger.Info("Sending request",
 		"endpoint", c.getEndpoint(),
 		"model", req.Model,
 		"messages_count", len(req.Messages),
 		"stream", req.Stream,
 	)
 
-	if c.logger.Enabled() {
-		c.logger.Debug("Request body", "body", string(jsonData))
-	}
+	c.logger.Debug("Request body", "body", string(jsonData))
 }
 
 // logResponse записывает детали ответа в лог
 func (c *Client) logResponse(resp *http.Response, body []byte) {
-	c.logger.Debug("Received response",
+	c.logger.Info("Received response",
 		"status", resp.StatusCode,
 		"content_length", resp.ContentLength,
 	)
 
-	if body != nil && c.logger.Enabled() {
+	if body != nil {
 		c.logger.Debug("Response body", "body", string(body))
 	}
 }
@@ -447,7 +445,7 @@ func (c *Client) logFullResponse(content string) {
 		c.logger.Error("Failed to marshal full response", "error", err)
 		return
 	}
-	c.logger.Debug("Full response", "body", string(jsonData))
+	c.logger.Info("Full response", "body", string(jsonData))
 }
 
 // GetBaseURL возвращает базовый URL клиента
