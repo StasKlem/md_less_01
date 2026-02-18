@@ -55,8 +55,9 @@ func TestModel_Init(t *testing.T) {
 	m := NewModel(cfg)
 
 	cmd := m.Init()
-	if cmd != nil {
-		t.Errorf("Init() should return nil command")
+	// Init возвращает команду для тика спиннера
+	if cmd == nil {
+		t.Errorf("Init() should return spinner.Tick command")
 	}
 }
 

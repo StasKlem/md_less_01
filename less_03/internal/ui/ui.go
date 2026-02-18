@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -150,6 +151,9 @@ type Model struct {
 	// Viewport для прокрутки истории
 	viewport viewport.Model
 
+	// Спиннер для индикатора загрузки
+	spinner spinner.Model
+
 	// Состояние UI
 	status       AppStatus
 	errorMsg     string
@@ -186,6 +190,11 @@ func NewModel(appConfig *config.Config, opts ...ModelOption) *Model {
 	vp := viewport.New(80, 20)
 	vp.Style = historyStyle
 
+	// Инициализируем спиннер
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
 	model := &Model{
 		appConfig:  appConfig,
 		runtime:    runtimeConfig,
@@ -193,6 +202,7 @@ func NewModel(appConfig *config.Config, opts ...ModelOption) *Model {
 		history:    chat.NewChatHistory(runtimeConfig.SystemPrompt),
 		input:      "",
 		viewport:   vp,
+		spinner:    s,
 		status:     StatusIdle,
 		ctx:        ctx,
 		cancel:     cancel,
@@ -212,7 +222,7 @@ func NewModel(appConfig *config.Config, opts ...ModelOption) *Model {
 // Init инициализирует модель (требуется для bubbletea.Model)
 func (m *Model) Init() tea.Cmd {
 	m.logger.Debug("Model initialized")
-	return nil
+	return m.spinner.Tick
 }
 
 // Update обрабатывает сообщения и обновляет состояние
@@ -235,6 +245,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.updateViewportContent(), tickCommand())
 		}
 		return m, nil
+
+	case spinner.TickMsg:
+		// Обновление спиннера
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 
 	case ErrorMsg:
 		return m.handleErrorMsg(msg)
@@ -363,7 +379,7 @@ func (m *Model) handleStreamMsg(msg StreamMsg) (tea.Model, tea.Cmd) {
 	m.viewport.GotoBottom()
 
 	// Продолжаем читать сообщения и обновлять UI
-	return m, tea.Batch(readStreamMsg(m.streamMsgChan), tickCommand())
+	return m, tea.Batch(readStreamMsg(m.streamMsgChan), tickCommand(), m.spinner.Tick)
 }
 
 // handleErrorMsg обрабатывает ошибку
@@ -489,7 +505,7 @@ func (m *Model) sendMessage() (tea.Model, tea.Cmd) {
 	)
 
 	// Возвращаем команду для стриминга
-	return m, tea.Sequence(m.updateViewportContent(), m.startStreaming(req))
+	return m, tea.Sequence(m.updateViewportContent(), m.startStreaming(req), m.spinner.Tick)
 }
 
 // startStreaming запускает потоковое получение ответа
@@ -628,9 +644,9 @@ func (m *Model) renderStatus() string {
 	case StatusError:
 		return statusErrorStyle.Render(fmt.Sprintf("✗ %s: %s", m.status, m.errorMsg))
 	case StatusSending:
-		return statusStreamingStyle.Render(fmt.Sprintf("● %s", m.status))
+		return statusStreamingStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), m.status))
 	case StatusStreaming:
-		return statusStreamingStyle.Render(fmt.Sprintf("● %s", m.status))
+		return statusStreamingStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), m.status))
 	default:
 		return statusStyle.Render(fmt.Sprintf("○ %s | %s", m.status, m.runtime.String()))
 	}
