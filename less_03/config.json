@@ -1,0 +1,28 @@
+{
+  "server": {
+    "address": "https://routerai.ru",
+    "api_endpoint": "/api/v1/chat/completions"
+  },
+  "model": {
+    "name": "deepseek/deepseek-v3.2",
+    "system_prompt": "You are a helpful assistant.",
+    "temperature": 0.8,
+    "top_p": 0.9,
+    "max_tokens": 0,
+    "stream": true
+  },
+  "ui": {
+    "show_timestamps": false,
+    "theme": "dark",
+    "scroll_speed": 10,
+    "line_spacing": 0
+  },
+  "log": {
+    "enabled": true,
+    "file_path": "/tmp/llm-client.log",
+    "level": "info",
+    "log_requests": true,
+    "log_responses": true,
+    "log_stream_chunks": false
+  }
+}
