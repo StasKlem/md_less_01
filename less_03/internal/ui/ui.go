@@ -255,11 +255,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Обновление спиннера
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		// Продолжаем тикать только во время активности
-		if m.status == StatusSending || m.status == StatusStreaming {
-			return m, tea.Batch(cmd, tickCommand())
-		}
-		return m, cmd
+		// Продолжаем тикать всегда
+		return m, tea.Batch(cmd, tickCommand())
 
 	case ErrorMsg:
 		return m.handleErrorMsg(msg)
@@ -664,10 +661,7 @@ func (m *Model) renderStatus() string {
 
 // renderSpinner рендерит спиннер над полем ввода
 func (m *Model) renderSpinner() string {
-	if m.status == StatusSending || m.status == StatusStreaming {
-		return statusStreamingStyle.Render(m.spinner.View() + " Загрузка...") + "\n"
-	}
-	return ""
+	return statusStreamingStyle.Render(m.spinner.View() + " Загрузка...") + "\n"
 }
 
 // renderHistory рендерит историю сообщений через viewport
