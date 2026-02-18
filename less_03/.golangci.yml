@@ -1,0 +1,192 @@
+# .golangci.yml - конфигурация линтера golangci-lint
+# https://golangci-lint.run/usage/configuration/
+
+run:
+  # Таймаут для всего запуска
+  timeout: 5m
+  # Модуль для анализа
+  modules-download-mode: readonly
+  # Разрешить использовать только указанные версии Go
+  go: "1.21"
+
+linters:
+  # Включаем только указанные линтеры
+  enable:
+    - errcheck          # Проверка необработанных ошибок
+    - govet             # Стандартный анализатор Go
+    - gosimple          # Упрощения кода
+    - staticcheck       # Статический анализ
+    - unused            # Неиспользуемый код
+    - ineffassign       # Неэффективные присваивания
+    - typecheck         # Проверка типов
+    - gofmt             # Форматирование кода
+    - goimports         # Импорт пакетов
+    - misspell          # Опечатки в комментариях
+    - revive            # Улучшенный golint
+    - unconvert         # Лишние преобразования типов
+    - unparam           # Неиспользуемые параметры
+    - nakedret          # Возврат без значения
+    - cyclop            # Сложность функций
+    - gocognit          # Когнитивная сложность
+    - dupl              # Дублирование кода
+    - prealloc          # Предварительное выделение памяти
+    - asciicheck        # Проверка ASCII идентификаторов
+    - bodyclose         # Закрытие HTTP тел
+    - contextcheck      # Проверка передачи контекста
+    - exportloopref     # Проверка экспорта ссылок
+    - goprintffuncname  # Имена printf функций
+    - noctx             # HTTP запросы без контекста
+    - whitespace        # Лишние пробелы
+
+  # Отключаем стандартный набор
+  disable-all: true
+
+linters-settings:
+  errcheck:
+    # Проверять присваивания в бланк идентификатор
+    check-blank: true
+    # Игнорировать ошибки в функциях
+    exclude-functions: []
+
+  govet:
+    # Включить все проверки govet
+    enable-all: true
+    # Отключить конкретные проверки
+    disable:
+      - fieldalignment  # Выравнивание полей (слишком строгая)
+
+  gocognit:
+    # Минимальная когнитивная сложность для отчёта
+    min-complexity: 25
+
+  cyclop:
+    # Максимальная цикломатическая сложность
+    max-complexity: 15
+    # Игнорировать тесты
+    skip-tests: false
+
+  dupl:
+    # Порог для дублирования кода
+    threshold: 100
+
+  gofmt:
+    # Упрощать код
+    simplify: true
+
+  goimports:
+    # Локальные импорты (для группировки)
+    local-prefixes: llm-client
+
+  misspell:
+    # Использовать британский английский
+    locale: US
+    # Игнорировать слова
+    ignore-words: []
+
+  revive:
+    # Минимальная уверенность для отчёта
+    confidence: 0.8
+    # Правила revive
+    rules:
+      - name: blank-imports
+        severity: warning
+      - name: context-as-argument
+        severity: warning
+      - name: context-keys-type
+        severity: warning
+      - name: dot-imports
+        severity: warning
+      - name: error-return
+        severity: warning
+      - name: error-strings
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: exported
+        severity: warning
+        arguments:
+          - "checkPrivateReceivers"
+      - name: if-return
+        severity: warning
+      - name: increment-decrement
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: var-declaration
+        severity: warning
+      - name: package-comments
+        severity: warning
+      - name: range
+        severity: warning
+      - name: receiver-naming
+        severity: warning
+      - name: time-naming
+        severity: warning
+      - name: unexported-return
+        severity: warning
+      - name: indent-error-flow
+        severity: warning
+      - name: errorf
+        severity: warning
+      - name: empty-block
+        severity: warning
+      - name: superfluous-else
+        severity: warning
+      - name: unused-parameter
+        severity: warning
+      - name: unreachable-code
+        severity: warning
+      - name: redefines-builtin-id
+        severity: warning
+
+  unparam:
+    # Всегда проверять exported функции
+    check-exported: false
+
+issues:
+  # Максимальное количество проблем для отчёта
+  max-issues-per-linter: 0
+  # Максимальное количество одинаковых проблем
+  max-same-issues: 0
+
+  # Исключить некоторые проблемы
+  exclude-rules:
+    # Исключить проверки сложности для тестов
+    - path: _test\.go$
+      linters:
+        - gocognit
+        - cyclop
+        - dupl
+        - funlen
+        - gocyclo
+
+    # Исключить проверку exported для internal пакетов
+    - path: internal/
+      text: "exported (function|method|type|const|var) .* should have comment"
+
+    # Разрешить длинные строки в тестах
+    - path: _test\.go$
+      text: "string .* is too long"
+
+  # Включить проблемы из excluded по умолчанию
+  exclude-use-default: false
+
+# Настройки вывода
+output:
+  # Формат вывода
+  format: colored-line-number
+  # Печатать инструкцию по исправлению
+  print-issued-lines: true
+  # Печатать линтер для каждой проблемы
+  print-linter-name: true
+  # Уникализировать сообщения об ошибках
+  uniq-by-line: true
+  # Путь для вывода (по умолчанию stdout)
+  path-prefix: ""
+  # Показывать информацию о настройках
+  show-stats: true
+
+# Настройки для IDE
+service:
+  # Использовать кэш
+  golangci-lint-version: "1.55.x"
