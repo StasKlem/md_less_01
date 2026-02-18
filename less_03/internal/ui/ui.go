@@ -745,7 +745,7 @@ func (m *Model) formatMessage(content, prefix string, style lipgloss.Style, cont
 
 // getContentWidth возвращает доступную ширину для контента
 func (m *Model) getContentWidth() int {
-	width := m.viewport.Width - 8 // Учитываем префикс "▸ AI: " (6) + отступы (2)
+	width := m.viewport.Width - 2 // Минимальные отступы
 	if width < 20 {
 		width = 20
 	}

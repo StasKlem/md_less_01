@@ -479,7 +479,7 @@ func TestModel_getContentWidth(t *testing.T) {
 	m.viewport.Width = 50
 
 	width := m.getContentWidth()
-	expected := 42 // 50 - 8
+	expected := 48 // 50 - 2
 
 	if width != expected {
 		t.Errorf("getContentWidth() = %d, want %d", width, expected)
