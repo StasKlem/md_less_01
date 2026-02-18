@@ -78,8 +78,8 @@ func TestModel_handleWindowSize(t *testing.T) {
 	if model.viewport.Width != 100 { // msg.Width
 		t.Errorf("viewport.Width = %d, want %d", model.viewport.Width, 100)
 	}
-	if model.viewport.Height != 24 { // 30 - 6
-		t.Errorf("viewport.Height = %d, want %d", model.viewport.Height, 24)
+	if model.viewport.Height != 22 { // 30 - 8
+		t.Errorf("viewport.Height = %d, want %d", model.viewport.Height, 22)
 	}
 }
 
