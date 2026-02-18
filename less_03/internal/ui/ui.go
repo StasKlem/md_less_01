@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -160,6 +161,9 @@ type Model struct {
 
 	// Канал для получения стрима
 	streamChan <-chan client.StreamChunk
+
+	// Канал для сообщений стрима в UI
+	streamMsgChan <-chan StreamMsg
 }
 
 // ModelOption - функция опция для настройки модели
@@ -224,6 +228,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StreamMsg:
 		return m.handleStreamMsg(msg)
+
+	case StreamTickMsg:
+		// Обновление UI во время стриминга
+		if m.status == StatusStreaming {
+			return m, tea.Batch(m.updateViewportContent(), tickCommand())
+		}
+		return m, nil
 
 	case ErrorMsg:
 		return m.handleErrorMsg(msg)
@@ -351,8 +362,8 @@ func (m *Model) handleStreamMsg(msg StreamMsg) (tea.Model, tea.Cmd) {
 	// Прокручиваем вниз
 	m.viewport.GotoBottom()
 
-	// Обновляем viewport и запрашиваем следующий чанк
-	return m, tea.Batch(m.updateViewportContent(), readStreamChunk(m.streamChan))
+	// Продолжаем читать сообщения и обновлять UI
+	return m, tea.Batch(readStreamMsg(m.streamMsgChan), tickCommand())
 }
 
 // handleErrorMsg обрабатывает ошибку
@@ -490,24 +501,55 @@ func (m *Model) startStreaming(req *client.ChatRequest) tea.Cmd {
 	m.streamChan = m.client.ChatStream(ctx, req)
 	m.status = StatusStreaming
 
-	// Возвращаем команду для чтения первого чанка
-	return readStreamChunk(m.streamChan)
+	// Создаём канал для отправки сообщений в UI
+	streamMsgChan := make(chan StreamMsg, 64)
+
+	// Запускаем горутину для чтения чанков и отправки их в UI
+	go func() {
+		for chunk := range m.streamChan {
+			if chunk.Done {
+				streamMsgChan <- StreamMsg{Done: true}
+				close(streamMsgChan)
+				return
+			}
+			if chunk.Error != nil {
+				streamMsgChan <- StreamMsg{Err: chunk.Error}
+				close(streamMsgChan)
+				return
+			}
+			if chunk.Content != "" {
+				streamMsgChan <- StreamMsg{Content: chunk.Content}
+			}
+		}
+	}()
+
+	// Сохраняем канал сообщений в модели
+	m.streamMsgChan = streamMsgChan
+
+	// Возвращаем команду для чтения сообщений и обновления UI
+	return tea.Batch(readStreamMsg(streamMsgChan), tickCommand())
 }
 
-// readStreamChunk создаёт команду для чтения одного чанка из стрима
-func readStreamChunk(stream <-chan client.StreamChunk) tea.Cmd {
+// readStreamMsg читает сообщение из канала стрима
+func readStreamMsg(ch <-chan StreamMsg) tea.Cmd {
 	return func() tea.Msg {
-		chunk, ok := <-stream
+		msg, ok := <-ch
 		if !ok {
-			return StreamMsg{Done: true}
+			return nil
 		}
-		return StreamMsg{
-			Content: chunk.Content,
-			Done:    chunk.Done,
-			Err:     chunk.Error,
-		}
+		return msg
 	}
 }
+
+// tickCmd отправляет сообщение для обновления UI
+func tickCommand() tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg {
+		return StreamTickMsg{}
+	})
+}
+
+// StreamTickMsg сообщение для обновления UI при стриминге
+type StreamTickMsg struct{}
 
 // updateViewportContent обновляет содержимое viewport
 func (m *Model) updateViewportContent() tea.Cmd {
