@@ -470,6 +470,9 @@ func (m *Model) sendMessage() (tea.Model, tea.Cmd) {
 	m.status = StatusSending
 	m.errorMsg = ""
 
+	// Сразу обновляем viewport чтобы показать сообщение
+	m.viewport.GotoBottom()
+
 	// Создаём запрос
 	req := &client.ChatRequest{
 		Model:       m.runtime.Model,
@@ -486,7 +489,7 @@ func (m *Model) sendMessage() (tea.Model, tea.Cmd) {
 	)
 
 	// Возвращаем команду для стриминга
-	return m, m.startStreaming(req)
+	return m, tea.Sequence(m.updateViewportContent(), m.startStreaming(req))
 }
 
 // startStreaming запускает потоковое получение ответа
@@ -624,6 +627,8 @@ func (m *Model) renderStatus() string {
 	switch m.status {
 	case StatusError:
 		return statusErrorStyle.Render(fmt.Sprintf("✗ %s: %s", m.status, m.errorMsg))
+	case StatusSending:
+		return statusStreamingStyle.Render(fmt.Sprintf("● %s", m.status))
 	case StatusStreaming:
 		return statusStreamingStyle.Render(fmt.Sprintf("● %s", m.status))
 	default:
@@ -700,7 +705,7 @@ func (m *Model) formatMessage(content, prefix string, style lipgloss.Style, cont
 
 // getContentWidth возвращает доступную ширину для контента
 func (m *Model) getContentWidth() int {
-	width := m.viewport.Width - 6 // Учитываем префиксы и отступы
+	width := m.viewport.Width - 8 // Учитываем префикс "▸ AI: " (6) + отступы (2)
 	if width < 20 {
 		width = 20
 	}
