@@ -1,17 +1,39 @@
 import Foundation
 
+// MARK: - Available Models
+
+enum AvailableModel: String, CaseIterable {
+    case claudeSonnet = "anthropic/claude-sonnet-4.6"
+    case deepseekV3 = "deepseek/deepseek-v3.2"
+    case qwen35Plus = "qwen/qwen3.5-plus-02-15"
+    case minimaxM25 = "minimax/minimax-m2.5"
+    case glm5 = "z-ai/glm-5"
+    
+    var displayName: String {
+        switch self {
+        case .claudeSonnet: return "Claude Sonnet 4.6"
+        case .deepseekV3: return "DeepSeek V3.2"
+        case .qwen35Plus: return "Qwen3.5-Plus"
+        case .minimaxM25: return "MiniMax M2.5"
+        case .glm5: return "GLM-5"
+        }
+    }
+    
+    static let defaultModel: AvailableModel = .deepseekV3
+}
+
 // MARK: - Message Model
 
 struct Message: Codable, Equatable {
     let role: String
     var content: String
-    
+
     enum Role: String {
         case system = "system"
         case user = "user"
         case assistant = "assistant"
     }
-    
+
     init(role: Role, content: String) {
         self.role = role.rawValue
         self.content = content
@@ -26,9 +48,9 @@ struct ChatSettings: Equatable {
     var topP: Double
     var stream: Bool
     var systemPrompt: String
-    
+
     static let `default` = ChatSettings(
-        model: "deepseek/deepseek-v3.2",
+        model: AvailableModel.defaultModel.rawValue,
         temperature: 0.7,
         topP: 0.9,
         stream: true,

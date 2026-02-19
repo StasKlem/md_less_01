@@ -9,10 +9,11 @@ import Cocoa
 
 @main
 class AppDelegate: NSObject, NSApplicationDelegate {
+    
+    private var toolbarManager: ToolbarManager?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        // Setup menu bar extra items if needed
-        setupMenuBar()
+        setupMainWindow()
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
@@ -23,8 +24,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     
-    private func setupMenuBar() {
-        // Menu bar is configured in Main.storyboard
+    private func setupMainWindow() {
+        guard let window = NSApp.windows.first else { return }
+        
+        // Создаём SplitViewController
+        let splitVC = SplitViewController()
+        
+        // Устанавливаем как contentViewController окна
+        window.contentViewController = splitVC
+        window.minSize = NSSize(width: 800, height: 600)
+        window.setContentSize(NSSize(width: 1200, height: 700))
+        window.center()
+        
+        // Создаём ToolbarManager после того как view загрузились
+//        DispatchQueue.main.async { [weak self] in
+//            guard let self = self,
+//                  let chatVC = splitVC.chatViewController else { return }
+//            self.toolbarManager = ToolbarManager(
+//                splitViewController: splitVC,
+//                chatViewController: chatVC
+//            )
+//            self.toolbarManager?.setupToolbar(for: window)
+//        }
     }
 }
 
