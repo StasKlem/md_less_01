@@ -292,7 +292,7 @@ final class SettingsViewController: NSViewController {
     // MARK: - Actions
     
     @objc private func temperatureChanged() {
-        settings.temperature = temperatureSlider.doubleValue
+        settings.temperature = temperatureSlider.doubleValue.rounded(toPlaces: 1)
         temperatureLabel.stringValue = "Температура: \(String(format: "%.2f", settings.temperature))"
         notifySettingsChanged()
     }
@@ -320,6 +320,13 @@ final class SettingsViewController: NSViewController {
     
     func getApiKey() -> String {
         return apiKeyInputView.text
+    }
+}
+
+extension Double {
+    func rounded(toPlaces places: Int) -> Double {
+        let divisor = pow(10.0, Double(places))
+        return (self * divisor).rounded() / divisor
     }
 }
 
