@@ -1,0 +1,88 @@
+# Xcode
+.DS_Store
+*.xcuserstate
+*.xcuserdatad
+*.xccheckout
+*.xcscmblueprint
+*.xcworkspace
+!default.xcworkspace
+
+# Xcode - generated files
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Xcode - private settings
+*.xcsettings
+
+# Xcode - Swift Package Manager
+.swiftpm/
+Packages/
+Package.resolved
+
+# Xcode - analysis
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on malicious AFP network
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xcworkspace/contents.xcworkspacedata
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+Carthage/DerivedData/
+
+# SwiftLint
+.swiftlint/
+
+# IDE
+.idea/
+*.sublime-*
+
+# Build products
+build/
+*.app
+*.dmg
+*.ipa
+*.xcarchive
+
+# Secrets/Keys
+*.pem
+*.key
