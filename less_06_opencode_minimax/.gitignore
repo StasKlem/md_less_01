@@ -1,0 +1,23 @@
+# Binaries
+kbju-bot
+*.exe
+
+# Data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment
+.env
+
+# OS
+.DS_Store
