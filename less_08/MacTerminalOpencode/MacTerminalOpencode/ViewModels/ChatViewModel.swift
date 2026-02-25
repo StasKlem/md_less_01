@@ -150,6 +150,13 @@ final class ChatViewModel {
         onEvent?(.messagesUpdated(messages))
     }
     
+    /// Adds a new message to the display list
+    private func addMessage(_ message: Message) {
+        let displayItem = MessageDisplayItem(from: message)
+        messages.append(displayItem)
+        onEvent?(.messagesUpdated(messages))
+    }
+    
     private func handleSendEvent(_ event: SendMessageEvent) {
         print("[ChatViewModel] Handling event: \(event)")
 
@@ -157,7 +164,7 @@ final class ChatViewModel {
         case .messageAdded(let message):
             print("[ChatViewModel] Message added: \(message.role) - \(message.content.prefix(30))")
             Task { @MainActor [weak self] in
-                await self?.updateLastMessage()
+                self?.addMessage(message)
             }
         case .chunkReceived(let messageId, let content):
             let wordCount = content.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
