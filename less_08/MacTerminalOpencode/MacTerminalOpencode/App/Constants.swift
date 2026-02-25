@@ -38,7 +38,8 @@ enum Constants {
             ModelOption(id: "deepseek/deepseek-r1", displayName: "deepseek-r1"),
             ModelOption(id: "anthropic/claude-sonnet-4.6", displayName: "claude-sonnet-4.6"),
             ModelOption(id: "minimax/minimax-m2.5", displayName: "minimax-m2.5"),
-            ModelOption(id: "google/gemini-3.1-pro-preview", displayName: "gemini-3.1-pro-preview")
+            ModelOption(id: "google/gemini-3.1-pro-preview", displayName: "gemini-3.1-pro-preview"),
+            ModelOption(id: "openai/gpt-3.5-turbo-0613", displayName: "gpt-3.5-turbo-0613")
         ]
     }
 }

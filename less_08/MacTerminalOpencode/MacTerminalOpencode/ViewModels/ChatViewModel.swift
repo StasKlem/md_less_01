@@ -134,6 +134,22 @@ final class ChatViewModel {
         onEvent?(.messagesUpdated(messages))
     }
     
+    /// Updates only the last streaming message
+    private func updateLastMessage() async {
+        guard let lastMessage = await chatSession.messages.last else { return }
+        
+        // Find existing message or create new one
+        if let index = messages.firstIndex(where: { $0.id == lastMessage.id }) {
+            // Update existing
+            messages[index] = MessageDisplayItem(from: lastMessage)
+        } else {
+            // Add new
+            messages.append(MessageDisplayItem(from: lastMessage))
+        }
+        
+        onEvent?(.messagesUpdated(messages))
+    }
+    
     private func handleSendEvent(_ event: SendMessageEvent) {
         print("[ChatViewModel] Handling event: \(event)")
 
@@ -141,13 +157,13 @@ final class ChatViewModel {
         case .messageAdded(let message):
             print("[ChatViewModel] Message added: \(message.role) - \(message.content.prefix(30))")
             Task { @MainActor [weak self] in
-                await self?.reloadMessages()
+                await self?.updateLastMessage()
             }
         case .chunkReceived(let messageId, let content):
             let wordCount = content.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
             metricsViewModel.recordTokens(max(1, wordCount))
             Task { @MainActor [weak self] in
-                await self?.reloadMessages()
+                await self?.updateLastMessage()
             }
         case .completed(let messageId, let promptTokens, let completionTokens, let totalTokens):
             metricsViewModel.completeRequest(promptTokens: promptTokens, completionTokens: completionTokens)
