@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import AppKit
 
 /// Represents the display state for a message in the UI
 struct MessageDisplayItem: Identifiable, Equatable {
@@ -16,15 +17,24 @@ struct MessageDisplayItem: Identifiable, Equatable {
     let isStreaming: Bool
     let error: String?
     let rawContent: String
-    
+
     init(from message: Message) {
         self.id = message.id
         self.role = message.role
         self.rawContent = message.content
-        self.content = MarkdownAttributedString.parse(message.content)
         self.timestamp = message.timestamp
         self.isStreaming = message.isStreaming
         self.error = message.error
+        
+        // Parse Markdown only for non-streaming messages
+        if message.isStreaming {
+            self.content = NSAttributedString(
+                string: message.content,
+                attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor]
+            )
+        } else {
+            self.content = MarkdownAttributedString.parse(message.content)
+        }
     }
 }
 
@@ -39,16 +49,20 @@ enum ChatViewModelEvent {
 /// Manages chat state and coordinates message sending
 @MainActor
 final class ChatViewModel {
-    
+
     private(set) var messages: [MessageDisplayItem] = []
     private(set) var isProcessing: Bool = false
     
+    // Throttle UI updates during streaming
+    private var streamingUpdateTimer: Timer?
+    private var pendingStreamingUpdate: Bool = false
+
     private let sendMessageUseCase: SendMessageUseCaseProtocol
     private let chatSession: ChatSession
     private let settingsViewModel: SettingsViewModel
     private let metricsViewModel: MetricsViewModel
     private let chatStorage: ChatStorage
-    
+
     var onEvent: ((ChatViewModelEvent) -> Void)?
     
     init(
@@ -134,7 +148,7 @@ final class ChatViewModel {
         onEvent?(.messagesUpdated(messages))
     }
     
-    /// Updates only the last streaming message
+    /// Updates only the last streaming message with throttling
     private func updateLastMessage() async {
         guard let lastMessage = await chatSession.messages.last else { return }
         
@@ -147,7 +161,17 @@ final class ChatViewModel {
             messages.append(MessageDisplayItem(from: lastMessage))
         }
         
-        onEvent?(.messagesUpdated(messages))
+        // Throttle updates to 15 FPS during streaming
+        if streamingUpdateTimer == nil || !streamingUpdateTimer!.isValid {
+            streamingUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: false) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.streamingUpdateTimer = nil
+                    self?.onEvent?(.messagesUpdated(self?.messages ?? []))
+                }
+            }
+        } else {
+            pendingStreamingUpdate = true
+        }
     }
     
     /// Adds a new message to the display list

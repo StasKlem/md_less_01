@@ -148,7 +148,7 @@ final class ChatPanelViewController: NSViewController {
     }
     
     // MARK: - ViewModel Events
-    
+
     private func handleViewModelEvent(_ event: ChatViewModelEvent) {
         print("[ChatPanel] Received event: \(event)")
         switch event {
@@ -163,10 +163,10 @@ final class ChatPanelViewController: NSViewController {
             scrollToBottom()
         }
     }
-    
+
     private func updateMessagesDisplay(_ messages: [MessageDisplayItem]) {
         let fullText = NSMutableAttributedString()
-        
+
         for message in messages {
             let header = NSAttributedString(
                 string: "\(message.role.displayName):\n",
@@ -178,7 +178,7 @@ final class ChatPanelViewController: NSViewController {
             fullText.append(header)
             fullText.append(message.content)
             fullText.append(NSAttributedString(string: "\n\n"))
-            
+
             if let error = message.error {
                 let errorText = NSAttributedString(
                     string: "Error: \(error)\n",
@@ -190,7 +190,7 @@ final class ChatPanelViewController: NSViewController {
                 fullText.append(errorText)
             }
         }
-        
+
         messageTextView.textStorage?.setAttributedString(fullText)
         messageTextView.needsDisplay = true
         scrollToBottom()
