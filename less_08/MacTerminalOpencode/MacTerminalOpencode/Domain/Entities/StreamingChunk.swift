@@ -14,17 +14,30 @@ struct StreamingChunk {
     let created: Int
     let model: String
     let choices: [ChunkChoice]
-    
+    let usage: ChunkUsage?
+
     var deltaContent: String? {
         choices.first?.delta.content
     }
-    
+
     var isFinished: Bool {
         choices.first?.finishReason != nil
     }
-    
+
     var finishReason: String? {
         choices.first?.finishReason
+    }
+    
+    var promptTokens: Int? {
+        usage?.promptTokens
+    }
+    
+    var completionTokens: Int? {
+        usage?.completionTokens
+    }
+    
+    var totalTokens: Int? {
+        usage?.totalTokens
     }
 }
 
@@ -39,11 +52,23 @@ struct ChunkDelta {
     let content: String?
 }
 
+struct ChunkUsage {
+    let promptTokens: Int
+    let completionTokens: Int
+    let totalTokens: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+    }
+}
+
 extension StreamingChunk: Decodable {
     enum CodingKeys: String, CodingKey {
-        case id, object, created, model, choices
+        case id, object, created, model, choices, usage
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -51,6 +76,7 @@ extension StreamingChunk: Decodable {
         created = try container.decode(Int.self, forKey: .created)
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? ""
         choices = try container.decode([ChunkChoice].self, forKey: .choices)
+        usage = try container.decodeIfPresent(ChunkUsage.self, forKey: .usage)
     }
 }
 
@@ -62,3 +88,5 @@ extension ChunkChoice: Decodable {
 }
 
 extension ChunkDelta: Decodable {}
+
+extension ChunkUsage: Decodable {}

@@ -23,13 +23,21 @@ struct Message: Identifiable, Equatable, Codable {
     var isStreaming: Bool
     var error: String?
     
+    // Token counts
+    var promptTokens: Int?
+    var completionTokens: Int?
+    var totalTokens: Int?
+
     init(
         id: UUID = UUID(),
         role: MessageRole,
         content: String,
         timestamp: Date = Date(),
         isStreaming: Bool = false,
-        error: String? = nil
+        error: String? = nil,
+        promptTokens: Int? = nil,
+        completionTokens: Int? = nil,
+        totalTokens: Int? = nil
     ) {
         self.id = id
         self.role = role
@@ -37,8 +45,11 @@ struct Message: Identifiable, Equatable, Codable {
         self.timestamp = timestamp
         self.isStreaming = isStreaming
         self.error = error
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+        self.totalTokens = totalTokens
     }
-    
+
     static func == (lhs: Message, rhs: Message) -> Bool {
         lhs.id == rhs.id
     }
@@ -49,14 +60,25 @@ extension Message {
     static func user(_ content: String) -> Message {
         Message(role: .user, content: content)
     }
-    
+
     /// Creates an assistant message placeholder for streaming
     static func assistantStreaming() -> Message {
         Message(role: .assistant, content: "", isStreaming: true)
     }
-    
+
     /// Creates a system message with the given content
     static func system(_ content: String) -> Message {
         Message(role: .system, content: content)
+    }
+    
+    /// Creates an assistant message with token counts
+    static func assistant(_ content: String, promptTokens: Int?, completionTokens: Int?, totalTokens: Int?) -> Message {
+        Message(
+            role: .assistant,
+            content: content,
+            promptTokens: promptTokens,
+            completionTokens: completionTokens,
+            totalTokens: totalTokens
+        )
     }
 }

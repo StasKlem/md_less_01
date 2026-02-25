@@ -11,7 +11,7 @@ import Foundation
 enum SendMessageEvent {
     case messageAdded(Message)
     case chunkReceived(messageId: UUID, content: String)
-    case completed(messageId: UUID)
+    case completed(messageId: UUID, promptTokens: Int, completionTokens: Int, totalTokens: Int)
     case error(messageId: UUID, error: AppError)
 }
 
@@ -115,7 +115,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         messageId: UUID,
         onEvent: @escaping (SendMessageEvent) -> Void
     ) async throws {
-        try await apiClient.streamMessage(
+        let (promptTokens, completionTokens, totalTokens) = try await apiClient.streamMessage(
             messages: messages,
             settings: settings,
             apiKey: apiKey
@@ -126,11 +126,12 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                 onEvent(.chunkReceived(messageId: messageId, content: chunk))
             }
         }
-        
+
         await chatSession.completeStreaming(for: messageId)
-        onEvent(.completed(messageId: messageId))
+        await chatSession.updateMessageTokens(id: messageId, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens)
+        onEvent(.completed(messageId: messageId, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens))
     }
-    
+
     private func sendNonStreamingMessage(
         messages: [[String: String]],
         settings: LLMSettings,
@@ -138,14 +139,15 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         messageId: UUID,
         onEvent: @escaping (SendMessageEvent) -> Void
     ) async throws {
-        let response = try await apiClient.sendMessage(
+        let (response, promptTokens, completionTokens, totalTokens) = try await apiClient.sendMessage(
             messages: messages,
             settings: settings,
             apiKey: apiKey
         )
-        
+
         await chatSession.updateMessage(id: messageId, content: response, isStreaming: false)
+        await chatSession.updateMessageTokens(id: messageId, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens)
         onEvent(.chunkReceived(messageId: messageId, content: response))
-        onEvent(.completed(messageId: messageId))
+        onEvent(.completed(messageId: messageId, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens))
     }
 }

@@ -69,6 +69,14 @@ actor ChatSession {
         messages[index].isStreaming = false
     }
     
+    /// Updates token counts for a message
+    func updateMessageTokens(id: UUID, promptTokens: Int, completionTokens: Int, totalTokens: Int) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].promptTokens = promptTokens
+        messages[index].completionTokens = completionTokens
+        messages[index].totalTokens = totalTokens
+    }
+
     /// Sets processing state
     func setProcessing(_ processing: Bool) {
         isProcessing = processing

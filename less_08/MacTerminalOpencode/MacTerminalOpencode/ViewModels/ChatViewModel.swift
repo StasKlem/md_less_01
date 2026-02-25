@@ -136,7 +136,7 @@ final class ChatViewModel {
     
     private func handleSendEvent(_ event: SendMessageEvent) {
         print("[ChatViewModel] Handling event: \(event)")
-        
+
         switch event {
         case .messageAdded(let message):
             print("[ChatViewModel] Message added: \(message.role) - \(message.content.prefix(30))")
@@ -149,8 +149,8 @@ final class ChatViewModel {
             Task { @MainActor [weak self] in
                 await self?.reloadMessages()
             }
-        case .completed:
-            metricsViewModel.completeRequest()
+        case .completed(let messageId, let promptTokens, let completionTokens, let totalTokens):
+            metricsViewModel.completeRequest(promptTokens: promptTokens, completionTokens: completionTokens)
             onEvent?(.messageSent)
             if settingsViewModel.currentSettings.saveContext {
                 Task {
