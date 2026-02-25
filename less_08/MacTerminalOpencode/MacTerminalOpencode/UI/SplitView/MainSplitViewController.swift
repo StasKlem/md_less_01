@@ -36,6 +36,11 @@ final class MainSplitViewController: NSSplitViewController {
         self.settingsViewModel = settingsViewModel
         self.metricsViewModel = metricsViewModel
 
+        // Initialize panels first
+        chatPanel = ChatPanelViewController()
+        settingsPanel = SettingsPanelViewController()
+        metricsPanel = MetricsPanelViewController()
+
         chatPanel.configure(with: chatViewModel)
         settingsPanel.configure(with: settingsViewModel)
         metricsPanel.configure(with: metricsViewModel)
@@ -44,10 +49,9 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Split View Setup
 
     private func setupSplitView() {
-        // Initialize panels
-        chatPanel = ChatPanelViewController()
-        settingsPanel = SettingsPanelViewController()
-        metricsPanel = MetricsPanelViewController()
+        guard chatPanel != nil, settingsPanel != nil, metricsPanel != nil else {
+            return
+        }
 
         splitView.dividerStyle = NSSplitView.DividerStyle.thin
 
