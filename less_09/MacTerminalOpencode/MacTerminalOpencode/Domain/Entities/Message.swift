@@ -28,6 +28,10 @@ struct Message: Identifiable, Equatable, Codable {
     var completionTokens: Int?
     var totalTokens: Int?
 
+    // Token counts for summary generation
+    var promptTokensForSummary: Int?
+    var completionTokensForSummary: Int?
+
     init(
         id: UUID = UUID(),
         role: MessageRole,
@@ -37,7 +41,9 @@ struct Message: Identifiable, Equatable, Codable {
         error: String? = nil,
         promptTokens: Int? = nil,
         completionTokens: Int? = nil,
-        totalTokens: Int? = nil
+        totalTokens: Int? = nil,
+        promptTokensForSummary: Int? = nil,
+        completionTokensForSummary: Int? = nil
     ) {
         self.id = id
         self.role = role
@@ -48,6 +54,8 @@ struct Message: Identifiable, Equatable, Codable {
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
         self.totalTokens = totalTokens
+        self.promptTokensForSummary = promptTokensForSummary
+        self.completionTokensForSummary = completionTokensForSummary
     }
 
     static func == (lhs: Message, rhs: Message) -> Bool {
@@ -79,6 +87,19 @@ extension Message {
             promptTokens: promptTokens,
             completionTokens: completionTokens,
             totalTokens: totalTokens
+        )
+    }
+
+    /// Creates an assistant message with all token counts including summary
+    static func assistant(_ content: String, promptTokens: Int?, completionTokens: Int?, totalTokens: Int?, promptTokensForSummary: Int?, completionTokensForSummary: Int?) -> Message {
+        Message(
+            role: .assistant,
+            content: content,
+            promptTokens: promptTokens,
+            completionTokens: completionTokens,
+            totalTokens: totalTokens,
+            promptTokensForSummary: promptTokensForSummary,
+            completionTokensForSummary: completionTokensForSummary
         )
     }
 }

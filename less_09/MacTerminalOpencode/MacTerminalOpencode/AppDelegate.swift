@@ -19,6 +19,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsStorage: SettingsStorage!
     private var keychainService: KeychainService!
     private var chatStorage: ChatStorage!
+    private var conversationSummaryStorage: ConversationSummaryStorage!
+    private var summarizationService: SummarizationService!
 
     private var sendMessageUseCase: SendMessageUseCase!
     private var fetchModelsUseCase: FetchModelsUseCase!
@@ -46,6 +48,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsStorage = SettingsStorage()
         keychainService = KeychainService(service: Constants.Storage.keychainService)
         chatStorage = ChatStorage()
+        conversationSummaryStorage = ConversationSummaryStorage()
+        summarizationService = SummarizationService(apiClient: apiClient)
+
+        Task {
+            await chatSession.configureSummaryStorage(storage: conversationSummaryStorage)
+        }
 
         sendMessageUseCase = SendMessageUseCase(
             apiClient: apiClient,
@@ -71,8 +79,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             chatSession: chatSession,
             settingsViewModel: settingsViewModel,
             metricsViewModel: metricsViewModel,
-            chatStorage: chatStorage
+            chatStorage: chatStorage,
+            summarizationService: summarizationService
         )
+
+        chatViewModel.setKeychainService(keychainService)
     }
 
     private func setupMainWindow() {

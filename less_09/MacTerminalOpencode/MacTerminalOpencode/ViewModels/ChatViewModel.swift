@@ -52,7 +52,7 @@ final class ChatViewModel {
 
     private(set) var messages: [MessageDisplayItem] = []
     private(set) var isProcessing: Bool = false
-    
+
     // Throttle UI updates during streaming
     private var streamingUpdateTimer: Timer?
     private var pendingStreamingUpdate: Bool = false
@@ -62,32 +62,41 @@ final class ChatViewModel {
     private let settingsViewModel: SettingsViewModel
     private let metricsViewModel: MetricsViewModel
     private let chatStorage: ChatStorage
+    private let summarizationService: SummarizationServiceProtocol
+    private var keychainService: KeychainServiceProtocol?
 
     var onEvent: ((ChatViewModelEvent) -> Void)?
-    
+
     init(
         sendMessageUseCase: SendMessageUseCaseProtocol,
         chatSession: ChatSession,
         settingsViewModel: SettingsViewModel,
         metricsViewModel: MetricsViewModel,
-        chatStorage: ChatStorage
+        chatStorage: ChatStorage,
+        summarizationService: SummarizationServiceProtocol
     ) {
         self.sendMessageUseCase = sendMessageUseCase
         self.chatSession = chatSession
         self.settingsViewModel = settingsViewModel
         self.metricsViewModel = metricsViewModel
         self.chatStorage = chatStorage
-        
+        self.summarizationService = summarizationService
+
         Task {
             await configureAndLoad()
         }
     }
-    
+
+    func setKeychainService(_ keychainService: KeychainServiceProtocol) {
+        self.keychainService = keychainService
+    }
+
     private func configureAndLoad() async {
         await chatSession.configure(storage: chatStorage)
-        
+
         if settingsViewModel.currentSettings.saveContext {
             await chatSession.loadFromStorage()
+            await chatSession.loadSummaryFromStorage()
             await reloadMessages()
         }
     }
@@ -199,13 +208,53 @@ final class ChatViewModel {
         case .completed(let messageId, let promptTokens, let completionTokens, let totalTokens):
             metricsViewModel.completeRequest(promptTokens: promptTokens, completionTokens: completionTokens)
             onEvent?(.messageSent)
+
             if settingsViewModel.currentSettings.saveContext {
                 Task {
                     await chatSession.saveToStorage()
                 }
             }
+
+            Task {
+                await checkAndCreateSummary()
+            }
         case .error(_, let error):
             onEvent?(.errorOccurred(error.errorDescription ?? "Unknown error"))
+        }
+    }
+
+    private func checkAndCreateSummary() async {
+        let strategy = settingsViewModel.currentSettings.summarizationStrategy
+
+        guard await chatSession.needsSummarization(strategy: strategy) else {
+            return
+        }
+
+        print("[ChatViewModel] Creating summary...")
+
+        do {
+            let apiKey = try keychainService?.loadAPIKey()
+            let messagesToSummarize = await chatSession.messagesToSummarize(strategy: strategy)
+
+            let (summary, promptTokens, completionTokens) = try await summarizationService.createSummary(
+                messages: messagesToSummarize,
+                settings: settingsViewModel.currentSettings,
+                apiKey: apiKey
+            )
+
+            await chatSession.updateSummary(summary)
+
+            await chatSession.updateMessageSummaryTokens(
+                id: messagesToSummarize.last?.id ?? UUID(),
+                promptTokens: promptTokens,
+                completionTokens: completionTokens
+            )
+
+            metricsViewModel.recordSummaryTokens(promptTokens: promptTokens, completionTokens: completionTokens)
+
+            print("[ChatViewModel] Summary created successfully")
+        } catch {
+            print("[ChatViewModel] Failed to create summary: \(error)")
         }
     }
 }

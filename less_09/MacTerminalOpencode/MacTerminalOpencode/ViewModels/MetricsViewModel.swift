@@ -54,6 +54,10 @@ final class MetricsViewModel {
     private var conversationPromptTokens: Int = 0
     private var conversationCompletionTokens: Int = 0
 
+    // Summary token counts
+    private var summaryPromptTokens: Int = 0
+    private var summaryCompletionTokens: Int = 0
+
     private let settingsViewModel: SettingsViewModel
 
     var onEvent: ((MetricsViewModelEvent) -> Void)?
@@ -114,12 +118,22 @@ final class MetricsViewModel {
         onEvent?(.metricsUpdated(currentMetrics))
     }
 
+    /// Records summary token counts
+    func recordSummaryTokens(promptTokens: Int, completionTokens: Int) {
+        summaryPromptTokens += promptTokens
+        summaryCompletionTokens += completionTokens
+        print("[MetricsViewModel] Summary tokens recorded - prompt: \(promptTokens), completion: \(completionTokens)")
+        print("[MetricsViewModel] Total summary tokens - prompt: \(summaryPromptTokens), completion: \(summaryCompletionTokens)")
+    }
+
     /// Resets all metrics
     func reset() {
         tokenCount = 0
         startTime = nil
         conversationPromptTokens = 0
         conversationCompletionTokens = 0
+        summaryPromptTokens = 0
+        summaryCompletionTokens = 0
         currentMetrics = RequestMetrics(modelName: settingsViewModel.currentSettings.modelName)
         onEvent?(.reset)
     }

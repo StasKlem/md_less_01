@@ -16,7 +16,11 @@ struct LLMSettings: Equatable {
     var enableStreaming: Bool
     var systemPrompt: String
     var saveContext: Bool
-    
+    var summarizationStrategy: SummarizationStrategy
+    var summarizationPrompt: String
+
+    static let defaultSummarizationPrompt = "Создай краткое резюме следующего диалога. В резюме должны быть основные темы и выводы:"
+
     init(
         serverURL: String = "http://localhost:11434/v1",
         modelName: String = "llama3.2",
@@ -24,7 +28,9 @@ struct LLMSettings: Equatable {
         maxTokens: Int = 2048,
         enableStreaming: Bool = true,
         systemPrompt: String = "You are a helpful assistant.",
-        saveContext: Bool = false
+        saveContext: Bool = false,
+        summarizationStrategy: SummarizationStrategy = .none,
+        summarizationPrompt: String = LLMSettings.defaultSummarizationPrompt
     ) {
         self.serverURL = serverURL
         self.modelName = modelName
@@ -33,8 +39,10 @@ struct LLMSettings: Equatable {
         self.enableStreaming = enableStreaming
         self.systemPrompt = systemPrompt
         self.saveContext = saveContext
+        self.summarizationStrategy = summarizationStrategy
+        self.summarizationPrompt = summarizationPrompt
     }
-    
+
     static func == (lhs: LLMSettings, rhs: LLMSettings) -> Bool {
         lhs.serverURL == rhs.serverURL &&
         lhs.modelName == rhs.modelName &&
@@ -42,7 +50,9 @@ struct LLMSettings: Equatable {
         lhs.maxTokens == rhs.maxTokens &&
         lhs.enableStreaming == rhs.enableStreaming &&
         lhs.systemPrompt == rhs.systemPrompt &&
-        lhs.saveContext == rhs.saveContext
+        lhs.saveContext == rhs.saveContext &&
+        lhs.summarizationStrategy == rhs.summarizationStrategy &&
+        lhs.summarizationPrompt == rhs.summarizationPrompt
     }
 }
 

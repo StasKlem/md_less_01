@@ -62,11 +62,10 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             await chatSession.addMessage(assistantMessage)
             onEvent(.messageAdded(assistantMessage))
             
-            var messages = await chatSession.messagesForAPI()
-            
-            if !settings.systemPrompt.isEmpty {
-                messages.insert(["role": "system", "content": settings.systemPrompt], at: 0)
-            }
+            var messages = await chatSession.messagesForAPI(
+                systemPrompt: settings.systemPrompt,
+                summarizationStrategy: settings.summarizationStrategy
+            )
             
             print("[SendMessageUseCase] Sending \(messages.count) messages to API")
             

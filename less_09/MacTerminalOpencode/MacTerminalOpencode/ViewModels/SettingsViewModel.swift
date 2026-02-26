@@ -52,12 +52,14 @@ final class SettingsViewModel {
             maxTokens: currentSettings.maxTokens,
             enableStreaming: currentSettings.enableStreaming,
             systemPrompt: currentSettings.systemPrompt,
-            saveContext: currentSettings.saveContext
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
-    
+
     /// Updates the model name
     func updateModelName(_ name: String) {
         currentSettings = LLMSettings(
@@ -67,12 +69,14 @@ final class SettingsViewModel {
             maxTokens: currentSettings.maxTokens,
             enableStreaming: currentSettings.enableStreaming,
             systemPrompt: currentSettings.systemPrompt,
-            saveContext: currentSettings.saveContext
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
-    
+
     /// Updates the temperature value
     func updateTemperature(_ temperature: Double) {
         currentSettings = LLMSettings(
@@ -82,12 +86,14 @@ final class SettingsViewModel {
             maxTokens: currentSettings.maxTokens,
             enableStreaming: currentSettings.enableStreaming,
             systemPrompt: currentSettings.systemPrompt,
-            saveContext: currentSettings.saveContext
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
-    
+
     /// Updates the max tokens value
     func updateMaxTokens(_ maxTokens: Int) {
         currentSettings = LLMSettings(
@@ -97,12 +103,14 @@ final class SettingsViewModel {
             maxTokens: maxTokens,
             enableStreaming: currentSettings.enableStreaming,
             systemPrompt: currentSettings.systemPrompt,
-            saveContext: currentSettings.saveContext
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
-    
+
     /// Updates the streaming toggle
     func updateStreaming(_ enabled: Bool) {
         currentSettings = LLMSettings(
@@ -112,12 +120,14 @@ final class SettingsViewModel {
             maxTokens: currentSettings.maxTokens,
             enableStreaming: enabled,
             systemPrompt: currentSettings.systemPrompt,
-            saveContext: currentSettings.saveContext
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
-    
+
     /// Updates the system prompt
     func updateSystemPrompt(_ prompt: String) {
         currentSettings = LLMSettings(
@@ -127,12 +137,14 @@ final class SettingsViewModel {
             maxTokens: currentSettings.maxTokens,
             enableStreaming: currentSettings.enableStreaming,
             systemPrompt: prompt,
-            saveContext: currentSettings.saveContext
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
-    
+
     /// Updates the save context toggle
     func updateSaveContext(_ enabled: Bool) {
         currentSettings = LLMSettings(
@@ -142,7 +154,43 @@ final class SettingsViewModel {
             maxTokens: currentSettings.maxTokens,
             enableStreaming: currentSettings.enableStreaming,
             systemPrompt: currentSettings.systemPrompt,
-            saveContext: enabled
+            saveContext: enabled,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
+        )
+        onEvent?(.settingsChanged(currentSettings))
+        saveSettingsSilently()
+    }
+
+    /// Updates the summarization strategy
+    func updateSummarizationStrategy(_ strategy: SummarizationStrategy) {
+        currentSettings = LLMSettings(
+            serverURL: currentSettings.serverURL,
+            modelName: currentSettings.modelName,
+            temperature: currentSettings.temperature,
+            maxTokens: currentSettings.maxTokens,
+            enableStreaming: currentSettings.enableStreaming,
+            systemPrompt: currentSettings.systemPrompt,
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: strategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
+        )
+        onEvent?(.settingsChanged(currentSettings))
+        saveSettingsSilently()
+    }
+
+    /// Updates the summarization prompt
+    func updateSummarizationPrompt(_ prompt: String) {
+        currentSettings = LLMSettings(
+            serverURL: currentSettings.serverURL,
+            modelName: currentSettings.modelName,
+            temperature: currentSettings.temperature,
+            maxTokens: currentSettings.maxTokens,
+            enableStreaming: currentSettings.enableStreaming,
+            systemPrompt: currentSettings.systemPrompt,
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: prompt
         )
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()

@@ -17,12 +17,15 @@ final class SettingsPanelViewController: NSViewController {
     private let maxTokensField = NSTextField()
     private let streamingToggle = NSButton(checkboxWithTitle: "Enable Streaming", target: nil, action: nil)
     private let saveContextToggle = NSButton(checkboxWithTitle: "Сохранять контекст", target: nil, action: nil)
+    private let summarizationPopUpButton = NSPopUpButton()
+    private let summaryMessagesCountField = NSTextField()
+    private let summarizationPromptField = NSTextField()
     private let systemPromptField = NSTextField()
     private let apiKeyField = NSSecureTextField()
     private let autoSaveLabel = NSTextField(labelWithString: "Settings are saved automatically")
-    
+
     private var viewModel: SettingsViewModel?
-    
+
     private let stackView = NSStackView()
     
     // MARK: - Lifecycle
@@ -52,7 +55,7 @@ final class SettingsPanelViewController: NSViewController {
     
     private func populateFields() {
         guard let viewModel else { return }
-        
+
         serverURLField.stringValue = viewModel.currentSettings.serverURL
         selectModel(viewModel.currentSettings.modelName)
         temperatureSlider.doubleValue = viewModel.currentSettings.temperature
@@ -61,6 +64,26 @@ final class SettingsPanelViewController: NSViewController {
         streamingToggle.state = viewModel.currentSettings.enableStreaming ? .on : .off
         saveContextToggle.state = viewModel.currentSettings.saveContext ? .on : .off
         systemPromptField.stringValue = viewModel.currentSettings.systemPrompt
+
+        selectSummarizationStrategy(viewModel.currentSettings.summarizationStrategy)
+        updateSummarizationFieldsVisibility()
+
+        if case .keepLastMessages(let count) = viewModel.currentSettings.summarizationStrategy {
+            summaryMessagesCountField.stringValue = String(count)
+        } else {
+            summaryMessagesCountField.stringValue = String(SummarizationStrategy.defaultCount)
+        }
+
+        summarizationPromptField.stringValue = viewModel.currentSettings.summarizationPrompt
+    }
+
+    private func selectSummarizationStrategy(_ strategy: SummarizationStrategy) {
+        switch strategy {
+        case .none:
+            summarizationPopUpButton.selectItem(at: 0)
+        case .keepLastMessages:
+            summarizationPopUpButton.selectItem(at: 1)
+        }
     }
     
     private func selectModel(_ modelId: String) {
@@ -92,6 +115,7 @@ final class SettingsPanelViewController: NSViewController {
         addMaxTokensSection()
         addStreamingSection()
         addSaveContextSection()
+        addSummarizationSection()
         addSystemPromptSection()
         addButtons()
         
@@ -174,7 +198,73 @@ final class SettingsPanelViewController: NSViewController {
         saveContextToggle.action = #selector(saveContextChanged)
         stackView.addArrangedSubview(saveContextToggle)
     }
-    
+
+    private func addSummarizationSection() {
+        let label = NSTextField(labelWithString: "Summarization Strategy:")
+
+        summarizationPopUpButton.translatesAutoresizingMaskIntoConstraints = false
+        summarizationPopUpButton.target = self
+        summarizationPopUpButton.action = #selector(summarizationStrategyChanged)
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Без суммаризации", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Хранить последние N сообщений", action: nil, keyEquivalent: ""))
+        summarizationPopUpButton.menu = menu
+
+        stackView.addArrangedSubview(label)
+        stackView.addArrangedSubview(summarizationPopUpButton)
+
+        let countLabel = NSTextField(labelWithString: "Количество сообщений:")
+        summaryMessagesCountField.placeholderString = "10"
+        summaryMessagesCountField.delegate = self
+
+        let countRow = NSStackView()
+        countRow.orientation = .horizontal
+        countRow.spacing = 8
+        countRow.addArrangedSubview(countLabel)
+        countRow.addArrangedSubview(summaryMessagesCountField)
+        stackView.addArrangedSubview(countRow)
+
+        let promptLabel = NSTextField(labelWithString: "Промпт для суммаризации:")
+        summarizationPromptField.placeholderString = LLMSettings.defaultSummarizationPrompt
+        summarizationPromptField.delegate = self
+        stackView.addArrangedSubview(promptLabel)
+        stackView.addArrangedSubview(summarizationPromptField)
+
+        updateSummarizationFieldsVisibility()
+    }
+
+    private func updateSummarizationFieldsVisibility() {
+        let isKeepLastMessages = summarizationPopUpButton.indexOfSelectedItem == 1
+
+        for (index, view) in stackView.arrangedSubviews.enumerated() {
+            if let textField = view as? NSTextField,
+               textField.stringValue == "Количество сообщений:" || textField.stringValue == "Промпт для суммаризации:" {
+                textField.isHidden = !isKeepLastMessages
+            }
+        }
+
+        if let countRow = stackView.arrangedSubviews.first(where: { $0 is NSStackView }) as? NSStackView {
+            for view in countRow.arrangedSubviews {
+                if let textField = view as? NSTextField, textField != summaryMessagesCountField {
+                    textField.isHidden = !isKeepLastMessages
+                }
+            }
+            countRow.isHidden = !isKeepLastMessages
+        }
+
+        let promptIndex = stackView.arrangedSubviews.firstIndex { view in
+            if let textField = view as? NSTextField {
+                return textField.stringValue == "Промпт для суммаризации:"
+            }
+            return false
+        }
+
+        if let index = promptIndex, index + 1 < stackView.arrangedSubviews.count {
+            stackView.arrangedSubviews[index + 1].isHidden = !isKeepLastMessages
+        }
+    }
+
     private func addSystemPromptSection() {
         let label = NSTextField(labelWithString: "System Prompt:")
         systemPromptField.placeholderString = "You are a helpful assistant."
@@ -226,7 +316,22 @@ final class SettingsPanelViewController: NSViewController {
     @objc private func saveContextChanged() {
         viewModel?.updateSaveContext(saveContextToggle.state == .on)
     }
-    
+
+    @objc private func summarizationStrategyChanged() {
+        let selectedIndex = summarizationPopUpButton.indexOfSelectedItem
+
+        let strategy: SummarizationStrategy
+        if selectedIndex == 1 {
+            let count = Int(summaryMessagesCountField.stringValue) ?? SummarizationStrategy.defaultCount
+            strategy = .keepLastMessages(count)
+        } else {
+            strategy = .none
+        }
+
+        viewModel?.updateSummarizationStrategy(strategy)
+        updateSummarizationFieldsVisibility()
+    }
+
     // MARK: - ViewModel Events
     
     private func handleViewModelEvent(_ event: SettingsViewModelEvent) {
@@ -260,7 +365,7 @@ extension SettingsPanelViewController: NSTextFieldDelegate {
     
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let textField = obj.object as? NSTextField else { return }
-        
+
         if textField == serverURLField {
             viewModel?.updateServerURL(serverURLField.stringValue)
         } else if textField == apiKeyField {
@@ -271,6 +376,12 @@ extension SettingsPanelViewController: NSTextFieldDelegate {
             }
         } else if textField == systemPromptField {
             viewModel?.updateSystemPrompt(systemPromptField.stringValue)
+        } else if textField == summaryMessagesCountField {
+            if let count = Int(summaryMessagesCountField.stringValue), count > 0 {
+                viewModel?.updateSummarizationStrategy(.keepLastMessages(count))
+            }
+        } else if textField == summarizationPromptField {
+            viewModel?.updateSummarizationPrompt(summarizationPromptField.stringValue)
         }
     }
 }
