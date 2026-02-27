@@ -121,6 +121,18 @@ final class ChatViewModel {
         Task { [weak self] in
             guard let self else { return }
 
+            await self.behaviorStrategy.createSummaryIfNeeded(
+                session: self.chatSession,
+                metricsViewModel: self.metricsViewModel,
+                keychainService: self.keychainService
+            ) { [weak self] summary in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    let systemMessage = Message.system("Контекст разговора был сжат в резюме: \(summary)")
+                    self.addMessage(systemMessage)
+                }
+            }
+
             await self.sendMessageUseCase.execute(
                 content: trimmedContent,
                 settings: self.settingsViewModel.currentSettings,
@@ -217,21 +229,6 @@ final class ChatViewModel {
             if settingsViewModel.currentSettings.saveContext {
                 Task {
                     await chatSession.saveToStorage()
-                }
-            }
-
-            Task { [weak self] in
-                guard let self = self else { return }
-                await self.behaviorStrategy.createSummaryIfNeeded(
-                    session: self.chatSession,
-                    metricsViewModel: self.metricsViewModel,
-                    keychainService: self.keychainService
-                ) { [weak self] summary in
-                    Task { @MainActor [weak self] in
-                        guard let self = self else { return }
-                        let systemMessage = Message.system("Контекст разговора был сжат в резюме: \(summary)")
-                        self.addMessage(systemMessage)
-                    }
                 }
             }
         case .error(_, let error):
