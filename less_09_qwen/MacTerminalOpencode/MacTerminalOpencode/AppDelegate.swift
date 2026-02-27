@@ -19,9 +19,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsStorage: SettingsStorage!
     private var keychainService: KeychainService!
     private var chatStorage: ChatStorage!
+    private var summaryStorage: SummaryStorage!
 
     private var sendMessageUseCase: SendMessageUseCase!
     private var fetchModelsUseCase: FetchModelsUseCase!
+    private var summarizeMessagesUseCase: SummarizeMessagesUseCase!
 
     private var settingsViewModel: SettingsViewModel!
     private var metricsViewModel: MetricsViewModel!
@@ -46,11 +48,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsStorage = SettingsStorage()
         keychainService = KeychainService(service: Constants.Storage.keychainService)
         chatStorage = ChatStorage()
+        summaryStorage = SummaryStorage()
+
+        // Create summarize use case first (needed by SendMessageUseCase)
+        let settings = settingsStorage.loadSettings()
+        summarizeMessagesUseCase = SummarizeMessagesUseCase(
+            summaryStorage: summaryStorage,
+            apiClient: apiClient,
+            settings: settings
+        )
 
         sendMessageUseCase = SendMessageUseCase(
             apiClient: apiClient,
             keychainService: keychainService,
-            chatSession: chatSession
+            chatSession: chatSession,
+            summarizeMessagesUseCase: summarizeMessagesUseCase
         )
 
         fetchModelsUseCase = FetchModelsUseCase(

@@ -147,6 +147,40 @@ final class SettingsViewModel {
         onEvent?(.settingsChanged(currentSettings))
         saveSettingsSilently()
     }
+
+    /// Updates the summarization strategy
+    func updateSummarizationStrategy(_ strategy: SummarizationStrategy) {
+        currentSettings = LLMSettings(
+            serverURL: currentSettings.serverURL,
+            modelName: currentSettings.modelName,
+            temperature: currentSettings.temperature,
+            maxTokens: currentSettings.maxTokens,
+            enableStreaming: currentSettings.enableStreaming,
+            systemPrompt: currentSettings.systemPrompt,
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: strategy,
+            summarizationPrompt: currentSettings.summarizationPrompt
+        )
+        onEvent?(.settingsChanged(currentSettings))
+        saveSettingsSilently()
+    }
+
+    /// Updates the summarization prompt
+    func updateSummarizationPrompt(_ prompt: String) {
+        currentSettings = LLMSettings(
+            serverURL: currentSettings.serverURL,
+            modelName: currentSettings.modelName,
+            temperature: currentSettings.temperature,
+            maxTokens: currentSettings.maxTokens,
+            enableStreaming: currentSettings.enableStreaming,
+            systemPrompt: currentSettings.systemPrompt,
+            saveContext: currentSettings.saveContext,
+            summarizationStrategy: currentSettings.summarizationStrategy,
+            summarizationPrompt: prompt
+        )
+        onEvent?(.settingsChanged(currentSettings))
+        saveSettingsSilently()
+    }
     
     /// Saves the API key to secure storage
     func saveAPIKey(_ key: String) {

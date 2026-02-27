@@ -9,7 +9,7 @@ import AppKit
 
 /// Settings panel for configuring LLM connection and parameters
 final class SettingsPanelViewController: NSViewController {
-    
+
     private let serverURLField = NSTextField()
     private let modelPopUpButton = NSPopUpButton()
     private let temperatureSlider = NSSlider()
@@ -21,9 +21,13 @@ final class SettingsPanelViewController: NSViewController {
     private let apiKeyField = NSSecureTextField()
     private let autoSaveLabel = NSTextField(labelWithString: "Settings are saved automatically")
     
-    private var viewModel: SettingsViewModel?
-    
+    // Summarization UI components
+    private let summarizationStrategyPopUpButton = NSPopUpButton()
+    private let summarizationPromptField = NSTextField()
+
     private let stackView = NSStackView()
+
+    private var viewModel: SettingsViewModel?
     
     // MARK: - Lifecycle
     
@@ -52,7 +56,7 @@ final class SettingsPanelViewController: NSViewController {
     
     private func populateFields() {
         guard let viewModel else { return }
-        
+
         serverURLField.stringValue = viewModel.currentSettings.serverURL
         selectModel(viewModel.currentSettings.modelName)
         temperatureSlider.doubleValue = viewModel.currentSettings.temperature
@@ -61,8 +65,10 @@ final class SettingsPanelViewController: NSViewController {
         streamingToggle.state = viewModel.currentSettings.enableStreaming ? .on : .off
         saveContextToggle.state = viewModel.currentSettings.saveContext ? .on : .off
         systemPromptField.stringValue = viewModel.currentSettings.systemPrompt
+        summarizationPromptField.stringValue = viewModel.currentSettings.summarizationPrompt
+        selectSummarizationStrategy(viewModel.currentSettings.summarizationStrategy)
     }
-    
+
     private func selectModel(_ modelId: String) {
         let models = Constants.Models.predefined
         for (index, model) in models.enumerated() {
@@ -74,17 +80,32 @@ final class SettingsPanelViewController: NSViewController {
         modelPopUpButton.selectItem(at: 0)
     }
     
+    private func selectSummarizationStrategy(_ strategy: SummarizationStrategy) {
+        let strategies: [SummarizationStrategy] = [
+            .none,
+            .keepLastMessages(SummarizationStrategy.defaultCount)
+        ]
+        
+        for (index, strat) in strategies.enumerated() {
+            if strat == strategy {
+                summarizationStrategyPopUpButton.selectItem(at: index)
+                return
+            }
+        }
+        summarizationStrategyPopUpButton.selectItem(at: 0)
+    }
+    
     // MARK: - UI Setup
     
     private func setupUI() {
         view.wantsLayer = true
-        
+
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.orientation = .vertical
         stackView.spacing = 12
         stackView.alignment = .leading
         view.addSubview(stackView)
-        
+
         addServerURLSection()
         addAPIKeySection()
         addModelNameSection()
@@ -93,8 +114,10 @@ final class SettingsPanelViewController: NSViewController {
         addStreamingSection()
         addSaveContextSection()
         addSystemPromptSection()
+        addSummarizationStrategySection()
+        addSummarizationPromptSection()
         addButtons()
-        
+
         setupConstraints()
     }
     
@@ -179,9 +202,51 @@ final class SettingsPanelViewController: NSViewController {
         let label = NSTextField(labelWithString: "System Prompt:")
         systemPromptField.placeholderString = "You are a helpful assistant."
         systemPromptField.delegate = self
-        
+
         stackView.addArrangedSubview(label)
         stackView.addArrangedSubview(systemPromptField)
+    }
+    
+    private func addSummarizationStrategySection() {
+        let label = NSTextField(labelWithString: "Стратегия суммаризации:")
+        
+        summarizationStrategyPopUpButton.translatesAutoresizingMaskIntoConstraints = false
+        summarizationStrategyPopUpButton.target = self
+        summarizationStrategyPopUpButton.action = #selector(summarizationStrategyChanged)
+        
+        let menu = NSMenu()
+        
+        // Add "No summarization" option
+        let noneItem = NSMenuItem(
+            title: SummarizationStrategy.none.displayName,
+            action: nil,
+            keyEquivalent: ""
+        )
+        noneItem.representedObject = SummarizationStrategy.none
+        menu.addItem(noneItem)
+        
+        // Add "Keep last N messages" option
+        let keepLastItem = NSMenuItem(
+            title: SummarizationStrategy.keepLastMessages(SummarizationStrategy.defaultCount).displayName,
+            action: nil,
+            keyEquivalent: ""
+        )
+        keepLastItem.representedObject = SummarizationStrategy.keepLastMessages(SummarizationStrategy.defaultCount)
+        menu.addItem(keepLastItem)
+        
+        summarizationStrategyPopUpButton.menu = menu
+        
+        stackView.addArrangedSubview(label)
+        stackView.addArrangedSubview(summarizationStrategyPopUpButton)
+    }
+    
+    private func addSummarizationPromptSection() {
+        let label = NSTextField(labelWithString: "Prompt для суммаризации:")
+        summarizationPromptField.placeholderString = LLMSettings.defaultSummarizationPrompt
+        summarizationPromptField.delegate = self
+        
+        stackView.addArrangedSubview(label)
+        stackView.addArrangedSubview(summarizationPromptField)
     }
     
     private func addButtons() {
@@ -195,13 +260,15 @@ final class SettingsPanelViewController: NSViewController {
             stackView.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
             stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            
+
             serverURLField.widthAnchor.constraint(equalTo: stackView.widthAnchor),
             apiKeyField.widthAnchor.constraint(equalTo: stackView.widthAnchor),
             modelPopUpButton.widthAnchor.constraint(equalTo: stackView.widthAnchor),
             temperatureSlider.widthAnchor.constraint(equalToConstant: 180),
             maxTokensField.widthAnchor.constraint(equalToConstant: 100),
-            systemPromptField.widthAnchor.constraint(equalTo: stackView.widthAnchor)
+            systemPromptField.widthAnchor.constraint(equalTo: stackView.widthAnchor),
+            summarizationStrategyPopUpButton.widthAnchor.constraint(equalTo: stackView.widthAnchor),
+            summarizationPromptField.widthAnchor.constraint(equalTo: stackView.widthAnchor)
         ])
     }
     
@@ -225,6 +292,12 @@ final class SettingsPanelViewController: NSViewController {
     
     @objc private func saveContextChanged() {
         viewModel?.updateSaveContext(saveContextToggle.state == .on)
+    }
+    
+    @objc private func summarizationStrategyChanged() {
+        guard let selectedItem = summarizationStrategyPopUpButton.selectedItem,
+              let strategy = selectedItem.representedObject as? SummarizationStrategy else { return }
+        viewModel?.updateSummarizationStrategy(strategy)
     }
     
     // MARK: - ViewModel Events
@@ -257,10 +330,10 @@ final class SettingsPanelViewController: NSViewController {
 // MARK: - NSTextFieldDelegate
 
 extension SettingsPanelViewController: NSTextFieldDelegate {
-    
+
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let textField = obj.object as? NSTextField else { return }
-        
+
         if textField == serverURLField {
             viewModel?.updateServerURL(serverURLField.stringValue)
         } else if textField == apiKeyField {
@@ -271,6 +344,8 @@ extension SettingsPanelViewController: NSTextFieldDelegate {
             }
         } else if textField == systemPromptField {
             viewModel?.updateSystemPrompt(systemPromptField.stringValue)
+        } else if textField == summarizationPromptField {
+            viewModel?.updateSummarizationPrompt(summarizationPromptField.stringValue)
         }
     }
 }

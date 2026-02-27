@@ -97,4 +97,19 @@ actor ChatSession {
             ]
         }
     }
+
+    /// Returns messages formatted for API request with summarization applied
+    func messagesForAPI(with strategy: SummarizationStrategy, summaryPrompt: String, summarizeUseCase: SummarizeMessagesUseCaseProtocol) async -> [[String: String]] {
+        let result = await summarizeUseCase.execute(
+            messages: messages,
+            strategy: strategy,
+            summaryPrompt: summaryPrompt
+        )
+        return result.messagesForAPI
+    }
+
+    /// Clears the summary cache when chat is cleared
+    func clearSummary(summaryStorage: SummaryStorageProtocol) {
+        summaryStorage.clearSummary()
+    }
 }

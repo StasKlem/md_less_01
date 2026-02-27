@@ -26,19 +26,22 @@ protocol SendMessageUseCaseProtocol {
 
 /// Orchestrates the process of sending a message to the LLM and receiving a response
 final class SendMessageUseCase: SendMessageUseCaseProtocol {
-    
+
     private let apiClient: LLMAPIClientProtocol
     private let keychainService: KeychainServiceProtocol
     private let chatSession: ChatSession
-    
+    private let summarizeMessagesUseCase: SummarizeMessagesUseCaseProtocol
+
     init(
         apiClient: LLMAPIClientProtocol,
         keychainService: KeychainServiceProtocol,
-        chatSession: ChatSession
+        chatSession: ChatSession,
+        summarizeMessagesUseCase: SummarizeMessagesUseCaseProtocol
     ) {
         self.apiClient = apiClient
         self.keychainService = keychainService
         self.chatSession = chatSession
+        self.summarizeMessagesUseCase = summarizeMessagesUseCase
     }
     
     /// Executes the message sending flow
@@ -57,17 +60,29 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             onEvent(.messageAdded(userMessage))
             
             await chatSession.setProcessing(true)
-            
+
             let assistantMessage = Message.assistantStreaming()
             await chatSession.addMessage(assistantMessage)
             onEvent(.messageAdded(assistantMessage))
-            
-            var messages = await chatSession.messagesForAPI()
-            
-            if !settings.systemPrompt.isEmpty {
-                messages.insert(["role": "system", "content": settings.systemPrompt], at: 0)
+
+            // Apply summarization strategy if enabled
+            var messages: [[String: String]]
+            if settings.summarizationStrategy != .none {
+                print("[SendMessageUseCase] Applying summarization strategy: \(settings.summarizationStrategy)")
+                messages = await chatSession.messagesForAPI(
+                    with: settings.summarizationStrategy,
+                    summaryPrompt: settings.summarizationPrompt,
+                    summarizeUseCase: summarizeMessagesUseCase
+                )
+            } else {
+                // No summarization, use messages as-is
+                messages = await chatSession.messagesForAPI()
+                
+                if !settings.systemPrompt.isEmpty {
+                    messages.insert(["role": "system", "content": settings.systemPrompt], at: 0)
+                }
             }
-            
+
             print("[SendMessageUseCase] Sending \(messages.count) messages to API")
             
             if settings.enableStreaming {
