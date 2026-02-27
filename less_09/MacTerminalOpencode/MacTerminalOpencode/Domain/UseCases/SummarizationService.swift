@@ -8,7 +8,13 @@
 import Foundation
 
 protocol SummarizationServiceProtocol {
-    func createSummary(messages: [Message], settings: LLMSettings, apiKey: String?) async throws -> (summary: String, promptTokens: Int, completionTokens: Int)
+    func createSummary(
+        messagesToSummarize: [Message],
+        previousSummary: String?,
+        newMessage: String,
+        settings: LLMSettings,
+        apiKey: String?
+    ) async throws -> (summary: String, promptTokens: Int, completionTokens: Int)
 }
 
 final class SummarizationService: SummarizationServiceProtocol {
@@ -19,18 +25,57 @@ final class SummarizationService: SummarizationServiceProtocol {
         self.apiClient = apiClient
     }
 
-    func createSummary(messages: [Message], settings: LLMSettings, apiKey: String?) async throws -> (summary: String, promptTokens: Int, completionTokens: Int) {
-        let conversationText = buildConversationText(from: messages)
+    /// Создаёт summary:
+    /// - Если нет предыдущего summary: отправляем все сообщения из диалога (user + assistant)
+    /// - Если есть предыдущее summary: отправляем предыдущее summary + новое сообщение
+    func createSummary(
+        messagesToSummarize: [Message],
+        previousSummary: String?,
+        newMessage: String,
+        settings: LLMSettings,
+        apiKey: String?
+    ) async throws -> (summary: String, promptTokens: Int, completionTokens: Int) {
 
         var messagesForSummary: [[String: String]] = []
+
+        // 1. System prompt с инструкцией для суммаризации
         messagesForSummary.append([
             "role": "system",
             "content": settings.summarizationPrompt
         ])
-        messagesForSummary.append([
-            "role": "user",
-            "content": conversationText
-        ])
+
+        // 2. Если есть предыдущее summary - используем его + добавляем его
+        //    Если нет - отправляем ВСЕ сообщения из диалога
+        if let previousSummary = previousSummary, !previousSummary.isEmpty {
+            messagesForSummary.append([
+                "role": "system",
+                "content": previousSummary
+            ])
+            messagesForSummary.append([
+                "role": "user",
+                "content": newMessage
+            ])
+            print("[SummarizationService] Using previous summary + new message")
+        } else {
+            // Нет предыдущего summary - отправляем ВСЕ сообщения (user + assistant)
+            for message in messagesToSummarize {
+                messagesForSummary.append([
+                    "role": message.role.rawValue,
+                    "content": message.content
+                ])
+            }
+            // Добавляем новое сообщение
+            messagesForSummary.append([
+                "role": "user",
+                "content": newMessage
+            ])
+            print("[SummarizationService] No previous summary - using all \(messagesToSummarize.count) messages")
+        }
+
+        print("[SummarizationService] Creating summary with format:")
+        print("  - Previous summary: \(previousSummary != nil ? "yes" : "no")")
+        print("  - Messages to summarize: \(messagesToSummarize.count)")
+        print("  - New message: \(newMessage.prefix(50))...")
 
         var summarySettings = settings
         summarySettings.enableStreaming = false
@@ -42,25 +87,5 @@ final class SummarizationService: SummarizationServiceProtocol {
         )
 
         return (content, promptTokens, completionTokens)
-    }
-
-    private func buildConversationText(from messages: [Message]) -> String {
-        var text = "Диалог:\n"
-
-        for message in messages {
-            let roleName: String
-            switch message.role {
-            case .user:
-                roleName = "Пользователь"
-            case .assistant:
-                roleName = "Ассистент"
-            case .system:
-                roleName = "Система"
-            }
-
-            text += "\n\(roleName): \(message.content)\n"
-        }
-
-        return text
     }
 }

@@ -144,14 +144,25 @@ final class SummarizationChatStrategy: ChatBehaviorStrategy {
             // Шаг 2: Загружаем API ключ
             let apiKey = try keychainService.loadAPIKey()
 
-            // Шаг 3: Получаем сообщения для суммаризации
-            // Это все сообщения, кроме последних N (которые мы оставляем "как есть")
+            // Шаг 3: Получаем предыдущее summary из сессии
+            let previousSummary = await session.conversationSummary
+
+            // Получаем сообщения для суммаризации (все, кроме последних N)
             let messagesToSummarize = await session.messagesToSummarize(keepCount: messagesToKeep)
 
-            // Шаг 4: Отправляем в LLM для создания summary
-            // Используем тот же LLM, что выбран в настройках
+            // Получаем последнее сообщение пользователя
+            let allMessages = await session.messages
+            let userMessages = allMessages.filter { $0.role == .user }
+            guard let lastUserMessage = userMessages.last else {
+                print("[SummarizationChatStrategy] No user message found")
+                return
+            }
+
+            // Шаг 4: Отправляем в LLM для создания/обновления summary
             let (summary, promptTokens, completionTokens) = try await summarizationService.createSummary(
-                messages: messagesToSummarize,
+                messagesToSummarize: messagesToSummarize,
+                previousSummary: previousSummary,
+                newMessage: lastUserMessage.content,
                 settings: settings,
                 apiKey: apiKey
             )
