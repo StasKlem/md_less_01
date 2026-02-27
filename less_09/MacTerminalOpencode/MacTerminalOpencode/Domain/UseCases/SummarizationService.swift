@@ -44,33 +44,26 @@ final class SummarizationService: SummarizationServiceProtocol {
             "content": settings.summarizationPrompt
         ])
 
-        // 2. Если есть предыдущее summary - используем его + добавляем его
-        //    Если нет - отправляем ВСЕ сообщения из диалога
+        // 2. Формируем user message
+        var userContent = ""
+
         if let previousSummary = previousSummary, !previousSummary.isEmpty {
-            messagesForSummary.append([
-                "role": "system",
-                "content": previousSummary
-            ])
-            messagesForSummary.append([
-                "role": "user",
-                "content": newMessage
-            ])
+            // Есть предыдущая суммаризация - добавляем её + новое сообщение
+            userContent = "Предыдущее резюме: \(previousSummary)\n\nНовое сообщение для добавления в резюме: \(newMessage)"
             print("[SummarizationService] Using previous summary + new message")
         } else {
-            // Нет предыдущего summary - отправляем ВСЕ сообщения (user + assistant)
-            for message in messagesToSummarize {
-                messagesForSummary.append([
-                    "role": message.role.rawValue,
-                    "content": message.content
-                ])
+            // Нет предыдущей суммаризации - отправляем все сообщения
+            userContent = buildConversationText(from: messagesToSummarize)
+            if !newMessage.isEmpty {
+                userContent += "\n\nНовое сообщение для добавления в резюме: \(newMessage)"
             }
-            // Добавляем новое сообщение
-            messagesForSummary.append([
-                "role": "user",
-                "content": newMessage
-            ])
             print("[SummarizationService] No previous summary - using all \(messagesToSummarize.count) messages")
         }
+
+        messagesForSummary.append([
+            "role": "user",
+            "content": userContent
+        ])
 
         print("[SummarizationService] Creating summary with format:")
         print("  - Previous summary: \(previousSummary != nil ? "yes" : "no")")
@@ -87,5 +80,25 @@ final class SummarizationService: SummarizationServiceProtocol {
         )
 
         return (content, promptTokens, completionTokens)
+    }
+
+    private func buildConversationText(from messages: [Message]) -> String {
+        var text = "Диалог:\n"
+
+        for message in messages {
+            let roleName: String
+            switch message.role {
+            case .user:
+                roleName = "Пользователь"
+            case .assistant:
+                roleName = "Ассистент"
+            case .system:
+                roleName = "Система"
+            }
+
+            text += "\n\(roleName): \(message.content)\n"
+        }
+
+        return text
     }
 }
