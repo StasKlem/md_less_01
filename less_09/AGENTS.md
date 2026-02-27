@@ -7,9 +7,60 @@ Guidelines for agentic coding agents working in this repository.
 This is a native macOS application built with Swift and Cocoa (AppKit). The project uses Xcode as the primary build system.
 
 - **Language**: Swift 5.0
-- **Platform**: macOS 26.2+
-- **UI Framework**: Cocoa (AppKit) with Storyboards
+- **Platform**: macOS 13.0+
+- **UI Framework**: Cocoa (AppKit)
 - **Bundle ID**: StasKlem.MacTerminalOpencode
+- **Architecture**: Clean Architecture with SOLID principles
+
+## Project Structure (Clean Architecture)
+
+```
+MacTerminalOpencode/
+├── MacTerminalOpencode/
+│   ├── App/
+│   │   ├── AppDelegate.swift       # Application lifecycle
+│   │   ├── Constants.swift          # App constants
+│   │   └── main.swift              # Entry point
+│   ├── Domain/
+│   │   ├── Entities/                # Business models
+│   │   │   ├── Message.swift
+│   │   │   ├── ChatSession.swift
+│   │   │   ├── LLMSettings.swift
+│   │   │   ├── StreamingChunk.swift
+│   │   │   ├── AppError.swift
+│   │   │   ├── SummarizationStrategy.swift
+│   │   │   └── ConversationSummaryStorageProtocol.swift
+│   │   └── UseCases/               # Business logic
+│   │       ├── SendMessageUseCase.swift
+│   │       ├── FetchModelsUseCase.swift
+│   │       ├── ChatBehaviorStrategy.swift
+│   │       ├── BasicChatStrategy.swift
+│   │       ├── SummarizationChatStrategy.swift
+│   │       └── SummarizationService.swift
+│   ├── Data/
+│   │   ├── Network/
+│   │   │   ├── LLMAPIClient.swift
+│   │   │   ├── NetworkManager.swift
+│   │   │   └── SSEParser.swift
+│   │   └── Storage/
+│   │       ├── ChatStorage.swift
+│   │       ├── SettingsStorage.swift
+│   │       ├── KeychainService.swift
+│   │       └── ConversationSummaryStorage.swift
+│   ├── ViewModels/
+│   │   ├── ChatViewModel.swift
+│   │   ├── SettingsViewModel.swift
+│   │   └── MetricsViewModel.swift
+│   └── UI/
+│       ├── Views/
+│       │   ├── ChatPanelViewController.swift
+│       │   ├── SettingsPanelViewController.swift
+│       │   └── MetricsPanelViewController.swift
+│       ├── Components/
+│       │   └── MarkdownAttributedString.swift
+│       └── SplitView/
+│           └── MainSplitViewController.swift
+```
 
 ## Build/Lint/Test Commands
 
@@ -42,7 +93,7 @@ open MacTerminalOpencode/MacTerminalOpencode.xcodeproj
 # Run all tests
 xcodebuild -project MacTerminalOpencode/MacTerminalOpencode.xcodeproj -scheme MacTerminalOpencode test
 
-# Run a single test file (replace TestFileName with actual test class name)
+# Run a single test file
 xcodebuild -project MacTerminalOpencode/MacTerminalOpencode.xcodeproj -scheme MacTerminalOpencode test -only-testing:MacTerminalOpencodeTests/TestFileName
 
 # Run a single test method
@@ -60,9 +111,6 @@ swiftlint --path MacTerminalOpencode/MacTerminalOpencode
 
 # SwiftLint autocorrect
 swiftlint --path MacTerminalOpencode/MacTerminalOpencode --autocorrect
-
-# Swift compiler warnings as errors (in Debug)
-xcodebuild -project MacTerminalOpencode/MacTerminalOpencode.xcodeproj -scheme MacTerminalOpencode -configuration Debug build SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 ```
 
 ### Clean
@@ -71,49 +119,17 @@ xcodebuild -project MacTerminalOpencode/MacTerminalOpencode.xcodeproj -scheme Ma
 # Clean build folder
 xcodebuild -project MacTerminalOpencode/MacTerminalOpencode.xcodeproj -scheme MacTerminalOpencode clean
 
-# Clean build folder and derived data
-xcodebuild -project MacTerminalOpencode/MacTerminalOpencode.xcodeproj -scheme MacTerminalOpencode clean && rm -rf ~/Library/Developer/Xcode/DerivedData/MacTerminalOpencode-*
+# Clean derived data
+rm -rf ~/Library/Developer/Xcode/DerivedData/MacTerminalOpencode-*
 ```
 
 ## Code Style Guidelines
 
-### File Organization
-
-```
-MacTerminalOpencode/
-├── MacTerminalOpencode/
-│   ├── AppDelegate.swift          # Application lifecycle
-│   ├── ViewController.swift       # Main view controller
-│   ├── Models/                    # Data models
-│   ├── Views/                     # Custom views
-│   ├── Controllers/               # Additional view controllers
-│   ├── Services/                  # Business logic services
-│   ├── Extensions/                # Swift extensions
-│   ├── Utils/                     # Utility classes/functions
-│   ├── Resources/                 # Assets, xibs, storyboards
-│   └── Supporting Files/          # Info.plist, entitlements
-```
-
-### Imports
-
-```swift
-// Order: Foundation -> macOS frameworks -> third-party -> local
-import Cocoa
-import Foundation
-
-// Separate groups with blank lines
-import Cocoa
-
-import Alamofire  // Third-party
-
-import MyLocalModule  // Local
-```
-
 ### Naming Conventions
 
 - **Classes/Structs/Enums/Protocols**: PascalCase (`AppDelegate`, `ViewController`)
-- **Variables/Constants/Functions**: camelCase (`viewDidLoad`, `applicationDidFinishLaunching`)
-- **File names**: Match the primary type (`AppDelegate.swift`, `ViewController.swift`)
+- **Variables/Constants/Functions**: camelCase (`viewDidLoad`, `sendMessage`)
+- **File names**: Match the primary type (`AppDelegate.swift`, `ChatViewModel.swift`)
 - **File headers**: Include creation date and author
 
 ```swift
@@ -121,7 +137,7 @@ import MyLocalModule  // Local
 //  FileName.swift
 //  MacTerminalOpencode
 //
-//  Created by [Author] on [Date].
+//  Created by Stas Klem on 26.02.2026.
 //
 ```
 
@@ -132,70 +148,69 @@ import MyLocalModule  // Local
 - **Braces**: Opening brace on same line
 - **Blank lines**: Between method groups, before/after MARK comments
 
-```swift
-class ExampleClass {
-    
-    // MARK: - Properties
-    
-    private var exampleProperty: String?
-    
-    // MARK: - Lifecycle
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        setupUI()
-    }
-    
-    // MARK: - Private Methods
-    
-    private func setupUI() {
-        // Implementation
-    }
-}
-```
+### Imports
 
-### Types and Annotations
-
-- Use explicit type annotations for properties and public interfaces
-- Use type inference for local variables when clear
+Order: Foundation → macOS frameworks → third-party → local
 
 ```swift
-// Properties - explicit type
-private let titleLabel: NSTextField
-private var dataItems: [DataItem] = []
+import Foundation
+import Cocoa
 
-// Local variables - inference preferred
-let items = fetchDataItems()
-let count = items.count
+// Third-party
+import Alamofire
+
+// Local
+import MyLocalModule
 ```
 
 ### Error Handling
 
 - Use `throw` for recoverable errors
 - Use `Result` type for async/callback-based operations
-- Prefer guard statements for early exits
+- Prefer `guard` statements for early exits
+- Use `AppError` enum for application-specific errors
 
 ```swift
-// Throwing function
-func loadData() throws -> Data {
-    guard let url = URL(string: "path") else {
-        throw DataError.invalidURL
-    }
-    return try Data(contentsOf: url)
+enum AppError: Error {
+    case invalidURL
+    case networkError(String)
+    case invalidResponse
+}
+```
+
+### Protocols and Dependency Injection
+
+- Use protocols for abstraction (Dependency Inversion Principle)
+- Inject dependencies through initializers
+- Name protocols with `Protocol` suffix for implementations
+
+```swift
+protocol SummarizationServiceProtocol {
+    func createSummary(...) async throws -> (...)
 }
 
-// Guard for early exit
-func processData(_ data: Data?) {
-    guard let data = data else {
-        print("No data available")
-        return
+final class SummarizationService: SummarizationServiceProtocol {
+    private let apiClient: LLMAPIClientProtocol
+    
+    init(apiClient: LLMAPIClientProtocol) {
+        self.apiClient = apiClient
     }
-    // Process data
 }
+```
 
-// Result type
-func fetchItems(completion: @escaping (Result<[Item], Error>) -> Void) {
-    // Implementation
+### Strategy Pattern
+
+- Use protocols for behavior strategies
+- Concrete strategies implement the protocol
+- Configure strategies at runtime based on settings
+
+```swift
+protocol ChatBehaviorStrategy: AnyObject {
+    var summarizationService: SummarizationServiceProtocol? { get set }
+    var settings: LLMSettings { get set }
+    
+    func prepareMessages(session: ChatSession, systemPrompt: String) async -> [[String: String]]
+    func createSummaryIfNeeded(...) async
 }
 ```
 
@@ -205,7 +220,7 @@ Use `MARK:` comments to organize code sections:
 
 ```swift
 // MARK: - Properties
-// MARK: - Lifecycle
+// MARK: - Initialization
 // MARK: - Public Methods
 // MARK: - Private Methods
 // MARK: - Actions
@@ -217,80 +232,39 @@ Use `MARK:` comments to organize code sections:
 
 - Prefer `if let` or `guard let` over forced unwrap
 - Use `??` for default values
-- Avoid implicitly unwrapped optionals unless required (IBOutlets are acceptable)
-
-```swift
-// Preferred
-if let name = user.name {
-    print(name)
-}
-
-// With default
-let displayName = user.name ?? "Unknown"
-
-// Guard
-guard let data = response.data else {
-    return
-}
-```
 
 ### Closures
 
 - Use trailing closure syntax
-- Capture self explicitly when needed
-- Use weak/unowned to prevent retain cycles
+- Capture `self` explicitly using `[weak self]` to prevent retain cycles
 
 ```swift
-// Trailing closure
-fetchData { result in
-    self.handleResult(result)
-}
-
-// Capture list
-service.execute { [weak self] response in
+Task { [weak self] in
     guard let self = self else { return }
-    self.updateUI(with: response)
+    // Use self
 }
 ```
 
-### Project Structure Conventions
+## Architecture Principles
 
-- **AppDelegate**: Handle application lifecycle events only
-- **ViewController**: Manage single view/screen, delegate to services
-- **Models**: Plain data structures, Codable for persistence
-- **Services**: Singleton or injected dependencies for business logic
-- Use protocols for abstraction and testability
+### Clean Architecture Layers
 
-### macOS-Specific Guidelines
+1. **Domain Layer**: Entities, UseCases (business logic)
+2. **Data Layer**: Network, Storage (data access)
+3. **ViewModels Layer**: Presentation logic
+4. **UI Layer**: Views, Controllers
 
-- Use AppKit (not UIKit) - prefix classes with `NS`
-- Use Storyboards or programmatic UI (consistent within project)
-- Respect App Sandbox restrictions
-- Support dark mode with semantic colors
-- Use Auto Layout for responsive layouts
+### SOLID Principles
 
-## Testing Conventions
-
-- Test files in `MacTerminalOpencodeTests/` directory
-- Test class naming: `[ClassName]Tests`
-- Test method naming: `test_[method]_[scenario]_[expectedResult]`
-
-```swift
-func test_loadData_whenValidURL_returnsData() {
-    // Given
-    let sut = DataLoader()
-    
-    // When
-    let result = sut.loadData()
-    
-    // Then
-    XCTAssertNotNil(result)
-}
-```
+- **S**ingle Responsibility: Each class has one reason to change
+- **O**pen/Closed: Open for extension, closed for modification
+- **L**iskov Substitution: Subtypes must be substitutable
+- **I**nterface Segregation: Many small protocols vs one large
+- **D**ependency Inversion: Depend on abstractions, not concretions
 
 ## Additional Notes
 
 - This project uses App Sandbox with read-only user-selected files access
 - Hardened Runtime is enabled
-- Swift strict concurrency checking is enabled (`SWIFT_APPROACHABLE_CONCURRENCY = YES`)
-- Main actor isolation is the default (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`)
+- Swift strict concurrency checking is enabled
+- Main actor isolation is the default
