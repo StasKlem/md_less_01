@@ -62,7 +62,7 @@ final class ChatViewModel {
     private let settingsViewModel: SettingsViewModel
     private let metricsViewModel: MetricsViewModel
     private let chatStorage: ChatStorage
-    private let summarizationService: SummarizationServiceProtocol
+    private var behaviorStrategy: ChatBehaviorStrategy
     private var keychainService: KeychainServiceProtocol?
 
     var onEvent: ((ChatViewModelEvent) -> Void)?
@@ -73,22 +73,26 @@ final class ChatViewModel {
         settingsViewModel: SettingsViewModel,
         metricsViewModel: MetricsViewModel,
         chatStorage: ChatStorage,
-        summarizationService: SummarizationServiceProtocol
+        behaviorStrategy: ChatBehaviorStrategy
     ) {
         self.sendMessageUseCase = sendMessageUseCase
         self.chatSession = chatSession
         self.settingsViewModel = settingsViewModel
         self.metricsViewModel = metricsViewModel
         self.chatStorage = chatStorage
-        self.summarizationService = summarizationService
+        self.behaviorStrategy = behaviorStrategy
 
         Task {
             await configureAndLoad()
         }
     }
 
-    func setKeychainService(_ keychainService: KeychainServiceProtocol) {
-        self.keychainService = keychainService
+    func updateStrategy(_ strategy: ChatBehaviorStrategy) {
+        self.behaviorStrategy = strategy
+    }
+
+    func setKeychainService(_ service: KeychainServiceProtocol) {
+        self.keychainService = service
     }
 
     private func configureAndLoad() async {
@@ -104,22 +108,23 @@ final class ChatViewModel {
     /// Sends a new message
     func sendMessage(_ content: String) {
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         guard !trimmedContent.isEmpty, !isProcessing else { return }
-        
+
         print("[ChatViewModel] Sending message: \(trimmedContent.prefix(50))...")
-        
+
         metricsViewModel.startRequest()
-        
+
         isProcessing = true
         onEvent?(.processingStateChanged(true))
-        
+
         Task { [weak self] in
             guard let self else { return }
-            
+
             await self.sendMessageUseCase.execute(
                 content: trimmedContent,
-                settings: self.settingsViewModel.currentSettings
+                settings: self.settingsViewModel.currentSettings,
+                behaviorStrategy: self.behaviorStrategy
             ) { [weak self] (event: SendMessageEvent) in
                 guard let self else { return }
                 Task { @MainActor [weak self] in
@@ -128,7 +133,7 @@ final class ChatViewModel {
                     self.handleSendEvent(event)
                 }
             }
-            
+
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isProcessing = false
@@ -215,46 +220,22 @@ final class ChatViewModel {
                 }
             }
 
-            Task {
-                await checkAndCreateSummary()
+            Task { [weak self] in
+                guard let self = self else { return }
+                await self.behaviorStrategy.createSummaryIfNeeded(
+                    session: self.chatSession,
+                    metricsViewModel: self.metricsViewModel,
+                    keychainService: self.keychainService
+                ) { [weak self] summary in
+                    Task { @MainActor [weak self] in
+                        guard let self = self else { return }
+                        let systemMessage = Message.system("Контекст разговора был сжат в резюме: \(summary)")
+                        self.addMessage(systemMessage)
+                    }
+                }
             }
         case .error(_, let error):
             onEvent?(.errorOccurred(error.errorDescription ?? "Unknown error"))
-        }
-    }
-
-    private func checkAndCreateSummary() async {
-        let strategy = settingsViewModel.currentSettings.summarizationStrategy
-
-        guard await chatSession.needsSummarization(strategy: strategy) else {
-            return
-        }
-
-        print("[ChatViewModel] Creating summary...")
-
-        do {
-            let apiKey = try keychainService?.loadAPIKey()
-            let messagesToSummarize = await chatSession.messagesToSummarize(strategy: strategy)
-
-            let (summary, promptTokens, completionTokens) = try await summarizationService.createSummary(
-                messages: messagesToSummarize,
-                settings: settingsViewModel.currentSettings,
-                apiKey: apiKey
-            )
-
-            await chatSession.updateSummary(summary)
-
-            await chatSession.updateMessageSummaryTokens(
-                id: messagesToSummarize.last?.id ?? UUID(),
-                promptTokens: promptTokens,
-                completionTokens: completionTokens
-            )
-
-            metricsViewModel.recordSummaryTokens(promptTokens: promptTokens, completionTokens: completionTokens)
-
-            print("[ChatViewModel] Summary created successfully")
-        } catch {
-            print("[ChatViewModel] Failed to create summary: \(error)")
         }
     }
 }

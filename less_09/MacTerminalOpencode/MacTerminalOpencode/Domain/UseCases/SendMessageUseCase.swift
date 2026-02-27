@@ -20,17 +20,18 @@ protocol SendMessageUseCaseProtocol {
     func execute(
         content: String,
         settings: LLMSettings,
+        behaviorStrategy: ChatBehaviorStrategy,
         onEvent: @escaping (SendMessageEvent) -> Void
     ) async
 }
 
 /// Orchestrates the process of sending a message to the LLM and receiving a response
 final class SendMessageUseCase: SendMessageUseCaseProtocol {
-    
+
     private let apiClient: LLMAPIClientProtocol
     private let keychainService: KeychainServiceProtocol
     private let chatSession: ChatSession
-    
+
     init(
         apiClient: LLMAPIClientProtocol,
         keychainService: KeychainServiceProtocol,
@@ -40,35 +41,36 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         self.keychainService = keychainService
         self.chatSession = chatSession
     }
-    
+
     /// Executes the message sending flow
     func execute(
         content: String,
         settings: LLMSettings,
+        behaviorStrategy: ChatBehaviorStrategy,
         onEvent: @escaping (SendMessageEvent) -> Void
     ) async {
         do {
             let apiKey = try keychainService.loadAPIKey()
             print("[SendMessageUseCase] API Key loaded: \(apiKey != nil ? "yes" : "no")")
             print("[SendMessageUseCase] Settings - URL: \(settings.serverURL), Model: \(settings.modelName), Streaming: \(settings.enableStreaming)")
-            
+
             let userMessage = Message.user(content)
             await chatSession.addMessage(userMessage)
             onEvent(.messageAdded(userMessage))
-            
+
             await chatSession.setProcessing(true)
-            
+
             let assistantMessage = Message.assistantStreaming()
             await chatSession.addMessage(assistantMessage)
             onEvent(.messageAdded(assistantMessage))
-            
-            var messages = await chatSession.messagesForAPI(
-                systemPrompt: settings.systemPrompt,
-                summarizationStrategy: settings.summarizationStrategy
+
+            let messages = await behaviorStrategy.prepareMessages(
+                session: chatSession,
+                systemPrompt: settings.systemPrompt
             )
-            
+
             print("[SendMessageUseCase] Sending \(messages.count) messages to API")
-            
+
             if settings.enableStreaming {
                 print("[SendMessageUseCase] Using streaming mode")
                 try await sendStreamingMessage(
@@ -88,7 +90,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                     onEvent: onEvent
                 )
             }
-            
+
         } catch let error as AppError {
             print("[SendMessageUseCase] AppError: \(error.errorDescription ?? "unknown")")
             if let lastMessage = await chatSession.messages.last {
@@ -103,7 +105,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                 onEvent(.error(messageId: lastMessage.id, error: appError))
             }
         }
-        
+
         await chatSession.setProcessing(false)
     }
     

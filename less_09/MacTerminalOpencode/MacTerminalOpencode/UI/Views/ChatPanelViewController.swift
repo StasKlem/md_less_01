@@ -168,16 +168,40 @@ final class ChatPanelViewController: NSViewController {
         let fullText = NSMutableAttributedString()
 
         for message in messages {
-            let header = NSAttributedString(
-                string: "\(message.role.displayName):\n",
-                attributes: [
-                    .font: NSFont.boldSystemFont(ofSize: 13),
-                    .foregroundColor: message.role.color
-                ]
-            )
-            fullText.append(header)
-            fullText.append(message.content)
-            fullText.append(NSAttributedString(string: "\n\n"))
+            // Проверяем, является ли это сообщением о суммаризации
+            let isSummaryMessage = message.role == .system && message.rawContent.contains("резюме")
+
+            if isSummaryMessage {
+                // Особое оформление для сообщений о суммаризации
+                let header = NSAttributedString(
+                    string: "\(message.role.displayName):\n",
+                    attributes: [
+                        .font: NSFont.boldSystemFont(ofSize: 13),
+                        .foregroundColor: NSColor.systemPurple
+                    ]
+                )
+                fullText.append(header)
+
+                // Добавляем контент с фиолетовым цветом
+                let contentWithColor = NSMutableAttributedString(attributedString: message.content)
+                let range = NSRange(location: 0, length: contentWithColor.length)
+                contentWithColor.addAttribute(.foregroundColor, value: NSColor.systemPurple, range: range)
+                contentWithColor.addAttribute(.font, value: NSFont.systemFont(ofSize: 13), range: range)
+                fullText.append(contentWithColor)
+                fullText.append(NSAttributedString(string: "\n\n"))
+            } else {
+                // Обычное оформление для остальных сообщений
+                let header = NSAttributedString(
+                    string: "\(message.role.displayName):\n",
+                    attributes: [
+                        .font: NSFont.boldSystemFont(ofSize: 13),
+                        .foregroundColor: message.role.color
+                    ]
+                )
+                fullText.append(header)
+                fullText.append(message.content)
+                fullText.append(NSAttributedString(string: "\n\n"))
+            }
 
             if let error = message.error {
                 let errorText = NSAttributedString(

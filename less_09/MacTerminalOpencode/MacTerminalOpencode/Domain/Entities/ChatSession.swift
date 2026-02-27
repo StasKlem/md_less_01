@@ -133,7 +133,7 @@ actor ChatSession {
 
                     let messagesToKeep = Array(userAndAssistantMessages.suffix(keepCount))
                     for message in messagesToKeep {
-                        if message.error == nil {
+                        if message.error == nil, !message.content.isEmpty {
                             result.append([
                                 "role": message.role.rawValue,
                                 "content": message.content
@@ -148,6 +148,7 @@ actor ChatSession {
 
         for message in messages {
             guard message.error == nil else { continue }
+            guard !message.content.isEmpty else { continue }
             result.append([
                 "role": message.role.rawValue,
                 "content": message.content
@@ -172,12 +173,16 @@ actor ChatSession {
         case .none:
             return []
         case .keepLastMessages(let keepCount):
-            let userAndAssistantMessages = messages.filter { $0.role == .user || $0.role == .assistant }
-            if userAndAssistantMessages.count > keepCount {
-                let countToSummarize = userAndAssistantMessages.count - keepCount
-                return Array(userAndAssistantMessages.prefix(countToSummarize))
-            }
-            return []
+            return messagesToSummarize(keepCount: keepCount)
         }
+    }
+
+    func messagesToSummarize(keepCount: Int) -> [Message] {
+        let userAndAssistantMessages = messages.filter { $0.role == .user || $0.role == .assistant }
+        if userAndAssistantMessages.count > keepCount {
+            let countToSummarize = userAndAssistantMessages.count - keepCount
+            return Array(userAndAssistantMessages.prefix(countToSummarize))
+        }
+        return []
     }
 }

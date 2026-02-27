@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsViewModel: SettingsViewModel!
     private var metricsViewModel: MetricsViewModel!
     private var chatViewModel: ChatViewModel!
+    private var behaviorStrategy: ChatBehaviorStrategy!
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         setupDependencies()
@@ -74,16 +75,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         metricsViewModel = MetricsViewModel(settingsViewModel: settingsViewModel)
 
+        behaviorStrategy = createBehaviorStrategy(settings: settingsViewModel.currentSettings)
+        behaviorStrategy.summarizationService = summarizationService
+        behaviorStrategy.summaryStorage = conversationSummaryStorage
+
         chatViewModel = ChatViewModel(
             sendMessageUseCase: sendMessageUseCase,
             chatSession: chatSession,
             settingsViewModel: settingsViewModel,
             metricsViewModel: metricsViewModel,
             chatStorage: chatStorage,
-            summarizationService: summarizationService
+            behaviorStrategy: behaviorStrategy
         )
 
         chatViewModel.setKeychainService(keychainService)
+    }
+
+    private func createBehaviorStrategy(settings: LLMSettings) -> ChatBehaviorStrategy {
+        switch settings.summarizationStrategy {
+        case .none:
+            return BasicChatStrategy(settings: settings)
+        case .keepLastMessages(let count):
+            let strategy = SummarizationChatStrategy(settings: settings, messagesToKeep: count)
+            return strategy
+        }
     }
 
     private func setupMainWindow() {
