@@ -46,7 +46,9 @@ class ViewController: NSViewController {
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24)
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: view.topAnchor, constant: 240),
+            stack.bottomAnchor.constraint(greaterThanOrEqualTo: view.bottomAnchor, constant: -240),
         ])
     }
 }
