@@ -12,3 +12,20 @@ protocol ConversationSummaryStorageProtocol {
     func loadSummary() -> String?
     func clearSummary() throws
 }
+
+struct ConversationBranchState: Codable, Equatable {
+    let branch: ConversationBranch
+    let messages: [Message]
+}
+
+struct ConversationState: Codable, Equatable {
+    let activeBranchId: UUID
+    let branches: [ConversationBranchState]
+    let conversationSummary: String?
+}
+
+protocol ConversationRepositoryProtocol: AnyObject {
+    func saveConversationState(_ state: ConversationState)
+    func loadConversationState() -> ConversationState?
+    func clearConversationState()
+}

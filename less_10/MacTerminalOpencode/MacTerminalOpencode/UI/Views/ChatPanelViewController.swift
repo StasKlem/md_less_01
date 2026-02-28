@@ -175,6 +175,8 @@ final class ChatPanelViewController: NSViewController {
             showError(error)
         case .messageSent:
             scrollToBottom()
+        case .branchesUpdated:
+            break
         }
     }
 

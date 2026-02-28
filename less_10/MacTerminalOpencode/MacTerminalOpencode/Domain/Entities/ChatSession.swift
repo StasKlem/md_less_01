@@ -7,21 +7,88 @@
 
 import Foundation
 
-/// Represents a chat session containing messages and metadata
-actor ChatSession {
+struct ConversationBranch: Identifiable, Equatable, Codable {
+    let id: UUID
+    let parentBranchId: UUID?
+    let forkedFromMessageId: UUID?
+    let createdAt: Date
+}
 
-    private(set) var messages: [Message] = []
+protocol ChatSessionProtocol: Actor {
+    var messages: [Message] { get }
+    var isProcessing: Bool { get }
+    var conversationSummary: String? { get }
+    var sessionId: UUID { get }
+    var createdDate: Date { get }
+    var messageCount: Int { get }
+    var activeBranchId: UUID { get }
+    var availableBranches: [ConversationBranch] { get }
+
+    func configure(storage: ChatStorageProtocol)
+    func configureSummaryStorage(storage: ConversationSummaryStorageProtocol)
+    func configureConversationRepository(repository: ConversationRepositoryProtocol)
+    func loadFromStorage() async
+    func loadSummaryFromStorage() async
+    func saveToStorage() async
+    func saveSummaryToStorage() async
+    func clearStorage() async
+    func clearSummaryStorage() async
+    func loadConversationState() async
+    func saveConversationState() async
+    func clearConversationState() async
+    func addMessage(_ message: Message)
+    func updateMessage(id: UUID, content: String, isStreaming: Bool, error: String?)
+    func appendToMessage(id: UUID, content: String)
+    func completeStreaming(for messageId: UUID)
+    func updateMessageTokens(id: UUID, promptTokens: Int, completionTokens: Int, totalTokens: Int)
+    func updateMessageSummaryTokens(id: UUID, promptTokens: Int, completionTokens: Int)
+    func setProcessing(_ processing: Bool)
+    func updateSummary(_ summary: String)
+    func clearMessages()
+    func createBranch(fromMessageId messageId: UUID?) -> ConversationBranch
+    func switchBranch(to branchId: UUID) -> Bool
+    func messagesForAPI(systemPrompt: String, summarizationStrategy: SummarizationStrategy) -> [[String: String]]
+    func needsSummarization(strategy: SummarizationStrategy) -> Bool
+    func messagesToSummarize(strategy: SummarizationStrategy) -> [Message]
+    func messagesToSummarize(keepCount: Int) -> [Message]
+}
+
+/// Represents a chat session containing messages and metadata
+actor ChatSession: ChatSessionProtocol {
+
     private(set) var isProcessing: Bool = false
     private(set) var conversationSummary: String?
+    private(set) var activeBranchId: UUID
 
     private let id: UUID
     private let createdAt: Date
     private weak var chatStorage: ChatStorageProtocol?
     private var summaryStorage: ConversationSummaryStorageProtocol?
+    private weak var conversationRepository: ConversationRepositoryProtocol?
+    private var branchMessages: [UUID: [Message]]
+    private var branches: [ConversationBranch]
 
     init(id: UUID = UUID(), createdAt: Date = Date()) {
+        let rootBranch = ConversationBranch(
+            id: UUID(),
+            parentBranchId: nil,
+            forkedFromMessageId: nil,
+            createdAt: createdAt
+        )
+
+        self.activeBranchId = rootBranch.id
+        self.branchMessages = [rootBranch.id: []]
+        self.branches = [rootBranch]
         self.id = id
         self.createdAt = createdAt
+    }
+
+    var messages: [Message] {
+        branchMessages[activeBranchId] ?? []
+    }
+
+    var availableBranches: [ConversationBranch] {
+        branches
     }
 
     func configure(storage: ChatStorageProtocol) {
@@ -32,31 +99,78 @@ actor ChatSession {
         self.summaryStorage = storage
     }
 
-    func loadFromStorage() {
+    func configureConversationRepository(repository: ConversationRepositoryProtocol) {
+        self.conversationRepository = repository
+    }
+
+    func loadFromStorage() async {
         guard let storage = chatStorage else { return }
-        messages = storage.loadMessages()
+        branchMessages[activeBranchId] = await storage.loadMessages()
     }
 
-    func loadSummaryFromStorage() {
-        conversationSummary = summaryStorage?.loadSummary()
+    func loadSummaryFromStorage() async {
+        conversationSummary = await summaryStorage?.loadSummary()
     }
 
-    func saveToStorage() {
+    func saveToStorage() async {
         guard let storage = chatStorage else { return }
-        storage.saveMessages(messages)
+        await storage.saveMessages(messages)
     }
 
-    func saveSummaryToStorage() {
+    func saveSummaryToStorage() async {
         guard let summary = conversationSummary else { return }
-        try? summaryStorage?.saveSummary(summary)
+        try? await summaryStorage?.saveSummary(summary)
     }
 
-    func clearStorage() {
-        chatStorage?.clearMessages()
+    func clearStorage() async {
+        await chatStorage?.clearMessages()
     }
 
-    func clearSummaryStorage() {
-        try? summaryStorage?.clearSummary()
+    func clearSummaryStorage() async {
+        try? await summaryStorage?.clearSummary()
+    }
+
+    func loadConversationState() async {
+        if let state = await conversationRepository?.loadConversationState() {
+            let validStates = state.branches
+            guard !validStates.isEmpty else { return }
+
+            let messagesByBranch = Dictionary(uniqueKeysWithValues: validStates.map { ($0.branch.id, $0.messages) })
+            let branchDefinitions = validStates.map(\.branch)
+
+            guard messagesByBranch[state.activeBranchId] != nil else { return }
+
+            branchMessages = messagesByBranch
+            branches = branchDefinitions
+            activeBranchId = state.activeBranchId
+            conversationSummary = state.conversationSummary
+            return
+        }
+
+        await loadFromStorage()
+        await loadSummaryFromStorage()
+    }
+
+    func saveConversationState() async {
+        guard let conversationRepository else {
+            await saveToStorage()
+            await saveSummaryToStorage()
+            return
+        }
+
+        let state = ConversationState(
+            activeBranchId: activeBranchId,
+            branches: branches.map { branch in
+                ConversationBranchState(branch: branch, messages: branchMessages[branch.id] ?? [])
+            },
+            conversationSummary: conversationSummary
+        )
+
+        await conversationRepository.saveConversationState(state)
+    }
+
+    func clearConversationState() async {
+        await conversationRepository?.clearConversationState()
     }
 
     var sessionId: UUID { id }
@@ -64,37 +178,47 @@ actor ChatSession {
     var messageCount: Int { messages.count }
 
     func addMessage(_ message: Message) {
-        messages.append(message)
+        updateCurrentBranch { $0.append(message) }
     }
 
     func updateMessage(id: UUID, content: String, isStreaming: Bool = false, error: String? = nil) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].content = content
-        messages[index].isStreaming = isStreaming
-        messages[index].error = error
+        updateCurrentBranch { messages in
+            guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+            messages[index].content = content
+            messages[index].isStreaming = isStreaming
+            messages[index].error = error
+        }
     }
 
     func appendToMessage(id: UUID, content: String) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].content += content
+        updateCurrentBranch { messages in
+            guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+            messages[index].content += content
+        }
     }
 
     func completeStreaming(for messageId: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
-        messages[index].isStreaming = false
+        updateCurrentBranch { messages in
+            guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
+            messages[index].isStreaming = false
+        }
     }
 
     func updateMessageTokens(id: UUID, promptTokens: Int, completionTokens: Int, totalTokens: Int) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].promptTokens = promptTokens
-        messages[index].completionTokens = completionTokens
-        messages[index].totalTokens = totalTokens
+        updateCurrentBranch { messages in
+            guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+            messages[index].promptTokens = promptTokens
+            messages[index].completionTokens = completionTokens
+            messages[index].totalTokens = totalTokens
+        }
     }
 
     func updateMessageSummaryTokens(id: UUID, promptTokens: Int, completionTokens: Int) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].promptTokensForSummary = promptTokens
-        messages[index].completionTokensForSummary = completionTokens
+        updateCurrentBranch { messages in
+            guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+            messages[index].promptTokensForSummary = promptTokens
+            messages[index].completionTokensForSummary = completionTokens
+        }
     }
 
     func setProcessing(_ processing: Bool) {
@@ -103,13 +227,43 @@ actor ChatSession {
 
     func updateSummary(_ summary: String) {
         conversationSummary = summary
-        saveSummaryToStorage()
+        Task { await saveSummaryToStorage() }
     }
 
     func clearMessages() {
-        messages.removeAll()
+        branchMessages = [activeBranchId: []]
+        branches = [ConversationBranch(id: activeBranchId, parentBranchId: nil, forkedFromMessageId: nil, createdAt: Date())]
         conversationSummary = nil
-        clearSummaryStorage()
+        Task { await clearSummaryStorage() }
+    }
+
+    func createBranch(fromMessageId messageId: UUID? = nil) -> ConversationBranch {
+        let baseMessages = messages
+        let forkMessages: [Message]
+
+        if let messageId, let index = baseMessages.firstIndex(where: { $0.id == messageId }) {
+            forkMessages = Array(baseMessages.prefix(through: index))
+        } else {
+            forkMessages = baseMessages
+        }
+
+        let branch = ConversationBranch(
+            id: UUID(),
+            parentBranchId: activeBranchId,
+            forkedFromMessageId: messageId,
+            createdAt: Date()
+        )
+
+        branchMessages[branch.id] = forkMessages
+        branches.append(branch)
+
+        return branch
+    }
+
+    func switchBranch(to branchId: UUID) -> Bool {
+        guard branchMessages[branchId] != nil else { return false }
+        activeBranchId = branchId
+        return true
     }
 
     func messagesForAPI(systemPrompt: String = "", summarizationStrategy: SummarizationStrategy = .none) -> [[String: String]] {
@@ -143,6 +297,18 @@ actor ChatSession {
 
                     return result
                 }
+            case .windowLastMessages(let keepCount):
+                let userAndAssistantMessages = messages.filter { $0.role == .user || $0.role == .assistant }
+                let messagesToKeep = Array(userAndAssistantMessages.suffix(keepCount))
+                for message in messagesToKeep {
+                    if message.error == nil, !message.content.isEmpty {
+                        result.append([
+                            "role": message.role.rawValue,
+                            "content": message.content
+                        ])
+                    }
+                }
+                return result
             }
         }
 
@@ -165,6 +331,8 @@ actor ChatSession {
         case .keepLastMessages(let keepCount):
             let userAndAssistantMessages = messages.filter { $0.role == .user || $0.role == .assistant }
             return userAndAssistantMessages.count > keepCount
+        case .windowLastMessages:
+            return false
         }
     }
 
@@ -174,6 +342,8 @@ actor ChatSession {
             return []
         case .keepLastMessages(let keepCount):
             return messagesToSummarize(keepCount: keepCount)
+        case .windowLastMessages:
+            return []
         }
     }
 
@@ -184,5 +354,11 @@ actor ChatSession {
             return Array(userAndAssistantMessages.prefix(countToSummarize))
         }
         return []
+    }
+
+    private func updateCurrentBranch(_ updater: (inout [Message]) -> Void) {
+        var currentMessages = branchMessages[activeBranchId] ?? []
+        updater(&currentMessages)
+        branchMessages[activeBranchId] = currentMessages
     }
 }

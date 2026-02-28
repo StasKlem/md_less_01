@@ -44,6 +44,7 @@ enum ChatViewModelEvent {
     case processingStateChanged(Bool)
     case errorOccurred(String)
     case messageSent
+    case branchesUpdated([ConversationBranch], activeBranchId: UUID)
 }
 
 /// Manages chat state and coordinates message sending
@@ -58,10 +59,11 @@ final class ChatViewModel {
     private var pendingStreamingUpdate: Bool = false
 
     private let sendMessageUseCase: SendMessageUseCaseProtocol
-    private let chatSession: ChatSession
+    private let chatSession: any ChatSessionProtocol
     private let settingsViewModel: SettingsViewModel
     private let metricsViewModel: MetricsViewModel
-    private let chatStorage: ChatStorage
+    private let chatStorage: ChatStorageProtocol
+    private let conversationRepository: ConversationRepositoryProtocol
     private var behaviorStrategy: ChatBehaviorStrategy
     private var keychainService: KeychainServiceProtocol?
 
@@ -69,10 +71,11 @@ final class ChatViewModel {
 
     init(
         sendMessageUseCase: SendMessageUseCaseProtocol,
-        chatSession: ChatSession,
+        chatSession: any ChatSessionProtocol,
         settingsViewModel: SettingsViewModel,
         metricsViewModel: MetricsViewModel,
-        chatStorage: ChatStorage,
+        chatStorage: ChatStorageProtocol,
+        conversationRepository: ConversationRepositoryProtocol,
         behaviorStrategy: ChatBehaviorStrategy
     ) {
         self.sendMessageUseCase = sendMessageUseCase
@@ -80,6 +83,7 @@ final class ChatViewModel {
         self.settingsViewModel = settingsViewModel
         self.metricsViewModel = metricsViewModel
         self.chatStorage = chatStorage
+        self.conversationRepository = conversationRepository
         self.behaviorStrategy = behaviorStrategy
 
         Task {
@@ -97,12 +101,14 @@ final class ChatViewModel {
 
     private func configureAndLoad() async {
         await chatSession.configure(storage: chatStorage)
+        await chatSession.configureConversationRepository(repository: conversationRepository)
 
         if settingsViewModel.currentSettings.saveContext {
-            await chatSession.loadFromStorage()
-            await chatSession.loadSummaryFromStorage()
+            await chatSession.loadConversationState()
             await reloadMessages()
         }
+
+        await publishBranches()
     }
     
     /// Sends a new message
@@ -161,9 +167,42 @@ final class ChatViewModel {
             await self.chatSession.clearMessages()
             if self.settingsViewModel.currentSettings.saveContext {
                 await self.chatSession.clearStorage()
+                await self.chatSession.clearConversationState()
             }
             self.messages = []
             self.onEvent?(.messagesUpdated([]))
+            await self.publishBranches()
+        }
+    }
+
+    func createBranch(from messageId: UUID? = nil) {
+        Task { [weak self] in
+            guard let self else { return }
+
+            let branch = await self.chatSession.createBranch(fromMessageId: messageId)
+            _ = await self.chatSession.switchBranch(to: branch.id)
+            await self.reloadMessages()
+
+            if self.settingsViewModel.currentSettings.saveContext {
+                await self.chatSession.saveConversationState()
+            }
+
+            await self.publishBranches()
+        }
+    }
+
+    func switchBranch(to branchId: UUID) {
+        Task { [weak self] in
+            guard let self else { return }
+
+            guard await self.chatSession.switchBranch(to: branchId) else { return }
+            await self.reloadMessages()
+
+            if self.settingsViewModel.currentSettings.saveContext {
+                await self.chatSession.saveConversationState()
+            }
+
+            await self.publishBranches()
         }
     }
     
@@ -228,11 +267,17 @@ final class ChatViewModel {
 
             if settingsViewModel.currentSettings.saveContext {
                 Task {
-                    await chatSession.saveToStorage()
+                    await chatSession.saveConversationState()
                 }
             }
         case .error(_, let error):
             onEvent?(.errorOccurred(error.errorDescription ?? "Unknown error"))
         }
+    }
+
+    private func publishBranches() async {
+        let branches = await chatSession.availableBranches
+        let activeBranchId = await chatSession.activeBranchId
+        onEvent?(.branchesUpdated(branches, activeBranchId: activeBranchId))
     }
 }

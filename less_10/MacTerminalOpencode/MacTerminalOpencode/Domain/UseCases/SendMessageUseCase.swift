@@ -30,12 +30,12 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 
     private let apiClient: LLMAPIClientProtocol
     private let keychainService: KeychainServiceProtocol
-    private let chatSession: ChatSession
+    private let chatSession: any ChatSessionProtocol
 
     init(
         apiClient: LLMAPIClientProtocol,
         keychainService: KeychainServiceProtocol,
-        chatSession: ChatSession
+        chatSession: any ChatSessionProtocol
     ) {
         self.apiClient = apiClient
         self.keychainService = keychainService
@@ -146,7 +146,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             apiKey: apiKey
         )
 
-        await chatSession.updateMessage(id: messageId, content: response, isStreaming: false)
+        await chatSession.updateMessage(id: messageId, content: response, isStreaming: false, error: nil)
         await chatSession.updateMessageTokens(id: messageId, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens)
         onEvent(.chunkReceived(messageId: messageId, content: response))
         onEvent(.completed(messageId: messageId, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens))

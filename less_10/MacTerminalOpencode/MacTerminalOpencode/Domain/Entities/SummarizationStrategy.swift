@@ -10,6 +10,7 @@ import Foundation
 enum SummarizationStrategy: Codable, Equatable {
     case none
     case keepLastMessages(Int)
+    case windowLastMessages(Int)
 
     var displayName: String {
         switch self {
@@ -17,6 +18,8 @@ enum SummarizationStrategy: Codable, Equatable {
             return "Без суммаризации"
         case .keepLastMessages(let count):
             return "Хранить \(count) последних сообщений"
+        case .windowLastMessages(let count):
+            return "Окно последних \(count) сообщений"
         }
     }
 

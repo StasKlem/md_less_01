@@ -13,14 +13,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     private var mainSplitViewController: MainSplitViewController?
 
-    private var chatSession: ChatSession!
+    private var chatSession: (any ChatSessionProtocol)!
     private var networkManager: NetworkManager!
     private var apiClient: LLMAPIClient!
     private var settingsStorage: SettingsStorage!
     private var keychainService: KeychainService!
-    private var chatStorage: ChatStorage!
-    private var conversationSummaryStorage: ConversationSummaryStorage!
-    private var summarizationService: SummarizationService!
+    private var chatStorage: ChatStorageProtocol!
+    private var conversationRepository: ConversationRepositoryProtocol!
+    private var conversationSummaryStorage: ConversationSummaryStorageProtocol!
+    private var summarizationService: SummarizationServiceProtocol!
+    private var behaviorStrategyFactory: ChatBehaviorStrategyFactoryProtocol!
 
     private var sendMessageUseCase: SendMessageUseCase!
     private var fetchModelsUseCase: FetchModelsUseCase!
@@ -49,8 +51,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsStorage = SettingsStorage()
         keychainService = KeychainService(service: Constants.Storage.keychainService)
         chatStorage = ChatStorage()
+        conversationRepository = ConversationRepository()
         conversationSummaryStorage = ConversationSummaryStorage()
         summarizationService = SummarizationService(apiClient: apiClient)
+        behaviorStrategyFactory = ChatBehaviorStrategyFactory()
 
         Task {
             await chatSession.configureSummaryStorage(storage: conversationSummaryStorage)
@@ -75,9 +79,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         metricsViewModel = MetricsViewModel(settingsViewModel: settingsViewModel)
 
-        behaviorStrategy = createBehaviorStrategy(settings: settingsViewModel.currentSettings)
-        behaviorStrategy.summarizationService = summarizationService
-        behaviorStrategy.summaryStorage = conversationSummaryStorage
+        behaviorStrategy = behaviorStrategyFactory.makeStrategy(
+            for: settingsViewModel.currentSettings,
+            summarizationService: summarizationService,
+            summaryStorage: conversationSummaryStorage
+        )
 
         chatViewModel = ChatViewModel(
             sendMessageUseCase: sendMessageUseCase,
@@ -85,20 +91,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             settingsViewModel: settingsViewModel,
             metricsViewModel: metricsViewModel,
             chatStorage: chatStorage,
+            conversationRepository: conversationRepository,
             behaviorStrategy: behaviorStrategy
         )
 
         chatViewModel.setKeychainService(keychainService)
-    }
-
-    private func createBehaviorStrategy(settings: LLMSettings) -> ChatBehaviorStrategy {
-        switch settings.summarizationStrategy {
-        case .none:
-            return BasicChatStrategy(settings: settings)
-        case .keepLastMessages(let count):
-            let strategy = SummarizationChatStrategy(settings: settings, messagesToKeep: count)
-            return strategy
-        }
     }
 
     private func setupMainWindow() {

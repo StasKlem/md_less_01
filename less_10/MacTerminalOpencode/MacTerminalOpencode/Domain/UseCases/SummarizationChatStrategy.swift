@@ -48,7 +48,7 @@ final class SummarizationChatStrategy: ChatBehaviorStrategy {
     /// 2. Иначе:
     ///    - Возвращаем все сообщения как есть
     func prepareMessages(
-        session: ChatSession,
+        session: any ChatSessionProtocol,
         systemPrompt: String
     ) async -> [[String: String]] {
         var result: [[String: String]] = []
@@ -88,7 +88,7 @@ final class SummarizationChatStrategy: ChatBehaviorStrategy {
         }
 
         // Если summary нет или сообщений мало - возвращаем всё как есть
-        let messages = await session.messagesForAPI()
+        let messages = await session.messagesForAPI(systemPrompt: "", summarizationStrategy: .none)
         result.append(contentsOf: messages)
 
         return result
@@ -98,7 +98,7 @@ final class SummarizationChatStrategy: ChatBehaviorStrategy {
     ///
     /// Returns: true, если количество непустых сообщений пользователя и ассистента
     ///          превышает порог messagesToKeep
-    func shouldCreateSummary(session: ChatSession) async -> Bool {
+    func shouldCreateSummary(session: any ChatSessionProtocol) async -> Bool {
         let userAndAssistantMessages = await session.messages.filter { $0.role == .user || $0.role == .assistant }
         // Фильтруем только непустые сообщения
         let nonEmptyMessages = userAndAssistantMessages.filter { !$0.content.isEmpty }
@@ -116,7 +116,7 @@ final class SummarizationChatStrategy: ChatBehaviorStrategy {
     /// 6. Записываем токены summary в метрики
     /// 7. Вызываем callback для уведомления UI
     func createSummaryIfNeeded(
-        session: ChatSession,
+        session: any ChatSessionProtocol,
         metricsViewModel: MetricsViewModel?,
         keychainService: KeychainServiceProtocol?,
         onSummaryCreated: ((String) -> Void)?
@@ -193,7 +193,7 @@ final class SummarizationChatStrategy: ChatBehaviorStrategy {
     }
 
     /// Очищает данные сессии (summary и т.д.)
-    func clearSession(session: ChatSession) async {
+    func clearSession(session: any ChatSessionProtocol) async {
         // При очистке чата также очищаем summary
     }
 }

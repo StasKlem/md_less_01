@@ -68,9 +68,10 @@ final class SettingsPanelViewController: NSViewController {
         selectSummarizationStrategy(viewModel.currentSettings.summarizationStrategy)
         updateSummarizationFieldsVisibility()
 
-        if case .keepLastMessages(let count) = viewModel.currentSettings.summarizationStrategy {
+        switch viewModel.currentSettings.summarizationStrategy {
+        case .keepLastMessages(let count), .windowLastMessages(let count):
             summaryMessagesCountField.stringValue = String(count)
-        } else {
+        case .none:
             summaryMessagesCountField.stringValue = String(SummarizationStrategy.defaultCount)
         }
 
@@ -83,6 +84,8 @@ final class SettingsPanelViewController: NSViewController {
             summarizationPopUpButton.selectItem(at: 0)
         case .keepLastMessages:
             summarizationPopUpButton.selectItem(at: 1)
+        case .windowLastMessages:
+            summarizationPopUpButton.selectItem(at: 2)
         }
     }
     
@@ -208,7 +211,8 @@ final class SettingsPanelViewController: NSViewController {
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Без суммаризации", action: nil, keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Хранить последние N сообщений", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Суммаризация + последние N", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Окно последних N", action: nil, keyEquivalent: ""))
         summarizationPopUpButton.menu = menu
 
         stackView.addArrangedSubview(label)
@@ -235,22 +239,28 @@ final class SettingsPanelViewController: NSViewController {
     }
 
     private func updateSummarizationFieldsVisibility() {
-        let isKeepLastMessages = summarizationPopUpButton.indexOfSelectedItem == 1
+        let selected = summarizationPopUpButton.indexOfSelectedItem
+        let needsCount = selected == 1 || selected == 2
+        let needsPrompt = selected == 1
 
         for (index, view) in stackView.arrangedSubviews.enumerated() {
             if let textField = view as? NSTextField,
                textField.stringValue == "Количество сообщений:" || textField.stringValue == "Промпт для суммаризации:" {
-                textField.isHidden = !isKeepLastMessages
+                if textField.stringValue == "Количество сообщений:" {
+                    textField.isHidden = !needsCount
+                } else {
+                    textField.isHidden = !needsPrompt
+                }
             }
         }
 
         if let countRow = stackView.arrangedSubviews.first(where: { $0 is NSStackView }) as? NSStackView {
             for view in countRow.arrangedSubviews {
                 if let textField = view as? NSTextField, textField != summaryMessagesCountField {
-                    textField.isHidden = !isKeepLastMessages
+                    textField.isHidden = !needsCount
                 }
             }
-            countRow.isHidden = !isKeepLastMessages
+            countRow.isHidden = !needsCount
         }
 
         let promptIndex = stackView.arrangedSubviews.firstIndex { view in
@@ -261,7 +271,7 @@ final class SettingsPanelViewController: NSViewController {
         }
 
         if let index = promptIndex, index + 1 < stackView.arrangedSubviews.count {
-            stackView.arrangedSubviews[index + 1].isHidden = !isKeepLastMessages
+            stackView.arrangedSubviews[index + 1].isHidden = !needsPrompt
         }
     }
 
@@ -324,6 +334,9 @@ final class SettingsPanelViewController: NSViewController {
         if selectedIndex == 1 {
             let count = Int(summaryMessagesCountField.stringValue) ?? SummarizationStrategy.defaultCount
             strategy = .keepLastMessages(count)
+        } else if selectedIndex == 2 {
+            let count = Int(summaryMessagesCountField.stringValue) ?? SummarizationStrategy.defaultCount
+            strategy = .windowLastMessages(count)
         } else {
             strategy = .none
         }
@@ -378,7 +391,12 @@ extension SettingsPanelViewController: NSTextFieldDelegate {
             viewModel?.updateSystemPrompt(systemPromptField.stringValue)
         } else if textField == summaryMessagesCountField {
             if let count = Int(summaryMessagesCountField.stringValue), count > 0 {
-                viewModel?.updateSummarizationStrategy(.keepLastMessages(count))
+                let selectedIndex = summarizationPopUpButton.indexOfSelectedItem
+                if selectedIndex == 1 {
+                    viewModel?.updateSummarizationStrategy(.keepLastMessages(count))
+                } else if selectedIndex == 2 {
+                    viewModel?.updateSummarizationStrategy(.windowLastMessages(count))
+                }
             }
         } else if textField == summarizationPromptField {
             viewModel?.updateSummarizationPrompt(summarizationPromptField.stringValue)
