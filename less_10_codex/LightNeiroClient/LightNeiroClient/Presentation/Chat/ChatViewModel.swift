@@ -18,6 +18,7 @@ final class ChatViewModel {
     }
 
     var onDidSendMessage: (() -> Void)?
+    var onActiveBranchChanged: ((UUID) -> Void)?
 
     private let sessionID: UUID
     private var activeBranchID: UUID
@@ -155,6 +156,7 @@ final class ChatViewModel {
                     targetBranchID: selected.id
                 )
                 self.activeBranchID = selected.id
+                self.onActiveBranchChanged?(selected.id)
                 try await self.refreshHistoryItems()
                 try await self.loadDialog(for: selected.id)
             } catch {
@@ -186,6 +188,7 @@ final class ChatViewModel {
                     targetBranchID: branch.id
                 )
                 self.activeBranchID = branch.id
+                self.onActiveBranchChanged?(branch.id)
                 self.dialogItems = []
                 try await self.refreshHistoryItems()
             } catch {

@@ -52,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             let settingsViewModel = SettingsViewModel(
                 sessionID: environment.sessionID,
+                activeBranchID: environment.branchID,
                 applySettingsUseCase: environment.applySettingsUseCase,
                 loadAPIKeyUseCase: environment.loadAPIKeyUseCase,
                 saveAPIKeyUseCase: environment.saveAPIKeyUseCase

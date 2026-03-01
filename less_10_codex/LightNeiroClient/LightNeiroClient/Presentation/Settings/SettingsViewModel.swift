@@ -9,17 +9,20 @@ final class SettingsViewModel {
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
     private let sessionID: UUID
+    private var activeBranchID: UUID
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     private let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
 
     init(
         sessionID: UUID,
+        activeBranchID: UUID,
         applySettingsUseCase: ApplySettingsUseCaseProtocol,
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
         self.sessionID = sessionID
+        self.activeBranchID = activeBranchID
         self.applySettingsUseCase = applySettingsUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
         self.saveAPIKeyUseCase = saveAPIKeyUseCase
@@ -29,6 +32,11 @@ final class SettingsViewModel {
 
     func updateModel(_ model: LLMModel) {
         settings.model = model
+        persist()
+    }
+
+    func updateContextStrategy(_ strategy: ContextStrategy) {
+        settings.setContextStrategy(strategy, for: activeBranchID)
         persist()
     }
 
@@ -57,6 +65,12 @@ final class SettingsViewModel {
         } catch {
             apiKeyStatus = "Failed to save API key: \(error.localizedDescription)"
         }
+    }
+
+    func switchActiveBranch(to branchID: UUID) {
+        activeBranchID = branchID
+        settings.contextStrategy = settings.contextStrategy(for: branchID)
+        persist()
     }
 
     private func persist() {

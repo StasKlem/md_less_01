@@ -14,9 +14,17 @@ final class BuildContextUseCase: BuildContextUseCaseProtocol {
         branchID: UUID,
         settings: LLMSettings
     ) async throws -> (facts: [StickyFact], messages: [ChatMessage]) {
-        let facts = try await factsRepository.fetchFacts(sessionID: sessionID)
         let messages = try await messageRepository.fetchMessages(branchID: branchID)
-        return (facts, Array(messages.suffix(settings.windowSize)))
+
+        switch settings.contextStrategy {
+        case .normal:
+            return ([], messages)
+        case .slidingWindow:
+            return ([], Array(messages.suffix(settings.windowSize)))
+        case .stickyFacts:
+            let facts = try await factsRepository.fetchFacts(sessionID: sessionID)
+            return (facts, Array(messages.suffix(settings.windowSize)))
+        }
     }
 }
 
@@ -80,21 +88,140 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
     }
 
     func execute(sessionID: UUID, latestUserMessage: String) async throws {
-        guard !latestUserMessage.isEmpty else { return }
+        let trimmed = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
 
         let existing = try await factsRepository.fetchFacts(sessionID: sessionID)
-        let fact = StickyFact(
-            id: UUID(),
-            sessionID: sessionID,
-            key: "last-user-message",
-            value: latestUserMessage,
-            confidence: 0.5,
-            updatedAt: Date()
-        )
+        let extracted = extractFacts(from: trimmed)
+        let alwaysSaved = StickyFactCandidate(key: "last-user-message", value: trimmed, confidence: 0.5)
 
-        let next = existing.filter { $0.key != fact.key } + [fact]
-        try await factsRepository.upsertFacts(sessionID: sessionID, facts: next)
+        let merged = mergeFacts(
+            existing: existing,
+            with: extracted + [alwaysSaved],
+            sessionID: sessionID
+        )
+        try await factsRepository.upsertFacts(sessionID: sessionID, facts: merged)
     }
+
+    private func extractFacts(from text: String) -> [StickyFactCandidate] {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var candidates: [StickyFactCandidate] = []
+
+        for line in lines {
+            if let candidate = candidateFromExplicitKV(line: line) {
+                candidates.append(candidate)
+                continue
+            }
+            if let candidate = candidateFromSemanticLine(line: line) {
+                candidates.append(candidate)
+            }
+        }
+
+        return deduplicated(candidates)
+    }
+
+    private func candidateFromExplicitKV(line: String) -> StickyFactCandidate? {
+        let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+
+        let keyPart = normalize(parts[0])
+        let valuePart = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !valuePart.isEmpty else { return nil }
+        guard let key = mapToFactKey(from: keyPart) else { return nil }
+
+        return StickyFactCandidate(key: key, value: valuePart, confidence: 0.85)
+    }
+
+    private func candidateFromSemanticLine(line: String) -> StickyFactCandidate? {
+        let normalized = normalize(line)
+
+        if containsAny(normalized, ["мы решили", "решили ", "decision", "выбрали", "selected"]) {
+            return StickyFactCandidate(key: "decisions", value: line, confidence: 0.65)
+        }
+        if containsAny(normalized, ["договор", "agreement", "согласовали", "agreed"]) {
+            return StickyFactCandidate(key: "agreements", value: line, confidence: 0.65)
+        }
+        if containsAny(normalized, ["предпоч", "preference", "format", "style", "тон"]) {
+            return StickyFactCandidate(key: "preferences", value: line, confidence: 0.6)
+        }
+        if containsAny(normalized, ["огранич", "constraint", "limit", "запрет", "требован"]) {
+            return StickyFactCandidate(key: "constraints", value: line, confidence: 0.6)
+        }
+        if containsAny(normalized, ["цель", "goal", "objective", "задача"]) {
+            return StickyFactCandidate(key: "goal", value: line, confidence: 0.6)
+        }
+
+        return nil
+    }
+
+    private func mapToFactKey(from normalizedKey: String) -> String? {
+        if containsAny(normalizedKey, ["цель", "goal", "objective", "задача"]) {
+            return "goal"
+        }
+        if containsAny(normalizedKey, ["огранич", "constraint", "limit", "запрет", "требован"]) {
+            return "constraints"
+        }
+        if containsAny(normalizedKey, ["предпоч", "preference", "style", "format", "тон"]) {
+            return "preferences"
+        }
+        if containsAny(normalizedKey, ["решени", "decision", "выбор", "выбрали"]) {
+            return "decisions"
+        }
+        if containsAny(normalizedKey, ["договор", "agreement", "соглас"]) {
+            return "agreements"
+        }
+        return nil
+    }
+
+    private func mergeFacts(existing: [StickyFact], with extracted: [StickyFactCandidate], sessionID: UUID) -> [StickyFact] {
+        var map = Dictionary(uniqueKeysWithValues: existing.map { ($0.key, $0) })
+        let now = Date()
+
+        for candidate in extracted {
+            let value = candidate.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+
+            let current = map[candidate.key]
+            map[candidate.key] = StickyFact(
+                id: current?.id ?? UUID(),
+                sessionID: sessionID,
+                key: candidate.key,
+                value: value,
+                confidence: candidate.confidence,
+                updatedAt: now
+            )
+        }
+
+        return map.values.sorted { $0.key < $1.key }
+    }
+
+    private func deduplicated(_ candidates: [StickyFactCandidate]) -> [StickyFactCandidate] {
+        var map: [String: StickyFactCandidate] = [:]
+        for candidate in candidates {
+            map[candidate.key] = candidate
+        }
+        return Array(map.values)
+    }
+
+    private func normalize(_ text: String) -> String {
+        text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func containsAny(_ text: String, _ tokens: [String]) -> Bool {
+        tokens.contains { text.contains($0) }
+    }
+}
+
+private struct StickyFactCandidate {
+    let key: String
+    let value: String
+    let confidence: Double
 }
 
 final class SendMessageUseCase: SendMessageUseCaseProtocol {
@@ -124,6 +251,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
         let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
+        try await updateFactsUseCase.execute(sessionID: sessionID, latestUserMessage: userText)
 
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
         let context = try await buildContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
@@ -145,7 +273,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             latencyMs: response.latencyMs
         )
         try await messageRepository.saveMessage(assistantMessage)
-        try await updateFactsUseCase.execute(sessionID: sessionID, latestUserMessage: userText)
 
         let metric = RequestMetric(
             id: UUID(),

@@ -21,6 +21,10 @@ final class MainViewModel {
             self?.sessionInfoViewModel.refresh()
         }
 
+        chatViewModel.onActiveBranchChanged = { [weak self] branchID in
+            self?.settingsViewModel.switchActiveBranch(to: branchID)
+        }
+
         settingsViewModel.onSettingsChanged = { [weak self] settings in
             self?.chatViewModel.apply(settings: settings)
             self?.sessionInfoViewModel.refresh()
