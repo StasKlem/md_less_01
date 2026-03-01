@@ -8,6 +8,18 @@ protocol BuildContextUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID, settings: LLMSettings) async throws -> (facts: [StickyFact], messages: [ChatMessage])
 }
 
+protocol FetchBranchesUseCaseProtocol {
+    func execute(sessionID: UUID) async throws -> [ChatBranch]
+}
+
+protocol FetchMessagesUseCaseProtocol {
+    func execute(branchID: UUID) async throws -> [ChatMessage]
+}
+
+protocol CloneDialogToBranchUseCaseProtocol {
+    func execute(sourceBranchID: UUID, targetBranchID: UUID) async throws
+}
+
 protocol UpdateFactsUseCaseProtocol {
     func execute(sessionID: UUID, latestUserMessage: String) async throws
 }

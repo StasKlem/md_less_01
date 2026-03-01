@@ -20,6 +20,58 @@ final class BuildContextUseCase: BuildContextUseCaseProtocol {
     }
 }
 
+final class FetchBranchesUseCase: FetchBranchesUseCaseProtocol {
+    private let branchRepository: BranchRepositoryProtocol
+
+    init(branchRepository: BranchRepositoryProtocol) {
+        self.branchRepository = branchRepository
+    }
+
+    func execute(sessionID: UUID) async throws -> [ChatBranch] {
+        let branches = try await branchRepository.fetchBranches(sessionID: sessionID)
+        return branches.sorted { $0.createdAt < $1.createdAt }
+    }
+}
+
+final class FetchMessagesUseCase: FetchMessagesUseCaseProtocol {
+    private let messageRepository: MessageRepositoryProtocol
+
+    init(messageRepository: MessageRepositoryProtocol) {
+        self.messageRepository = messageRepository
+    }
+
+    func execute(branchID: UUID) async throws -> [ChatMessage] {
+        try await messageRepository.fetchMessages(branchID: branchID)
+    }
+}
+
+final class CloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol {
+    private let messageRepository: MessageRepositoryProtocol
+
+    init(messageRepository: MessageRepositoryProtocol) {
+        self.messageRepository = messageRepository
+    }
+
+    func execute(sourceBranchID: UUID, targetBranchID: UUID) async throws {
+        let targetMessages = try await messageRepository.fetchMessages(branchID: targetBranchID)
+        guard targetMessages.isEmpty else { return }
+
+        let sourceMessages = try await messageRepository.fetchMessages(branchID: sourceBranchID)
+        for message in sourceMessages {
+            let clone = ChatMessage(
+                branchID: targetBranchID,
+                role: message.role,
+                content: message.content,
+                createdAt: message.createdAt,
+                inputTokens: message.inputTokens,
+                outputTokens: message.outputTokens,
+                latencyMs: message.latencyMs
+            )
+            try await messageRepository.saveMessage(clone)
+        }
+    }
+}
+
 final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
     private let factsRepository: FactsRepositoryProtocol
 

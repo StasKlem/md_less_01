@@ -6,6 +6,7 @@ final class ChatSidebarViewController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
 
     private let historyTableView = NSTableView()
+    private let newBranchButton = NSButton(title: "New Branch", target: nil, action: nil)
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
     private let inputField = NSTextField()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
@@ -46,6 +47,8 @@ final class ChatSidebarViewController: NSViewController {
         historyTableView.delegate = self
         historyTableView.dataSource = self
 
+        newBranchButton.target = self
+        newBranchButton.action = #selector(createBranchTapped)
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
 
@@ -57,7 +60,11 @@ final class ChatSidebarViewController: NSViewController {
         inputRow.orientation = .horizontal
         inputRow.spacing = 8
 
-        let root = NSStackView(views: [historyScroll, dialogView, inputRow])
+        let historyHeaderRow = NSStackView(views: [newBranchButton])
+        historyHeaderRow.orientation = .horizontal
+        historyHeaderRow.alignment = .centerY
+
+        let root = NSStackView(views: [historyHeaderRow, historyScroll, dialogView, inputRow])
         root.orientation = .vertical
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
@@ -77,7 +84,13 @@ final class ChatSidebarViewController: NSViewController {
     private func bind() {
         viewModel.$historyItems
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.historyTableView.reloadData() }
+            .sink { [weak self] items in
+                guard let self else { return }
+                self.historyTableView.reloadData()
+                if let activeIndex = items.firstIndex(where: \.isActive) {
+                    self.historyTableView.selectRowIndexes(IndexSet(integer: activeIndex), byExtendingSelection: false)
+                }
+            }
             .store(in: &cancellables)
 
         viewModel.$dialogItems
@@ -108,6 +121,11 @@ final class ChatSidebarViewController: NSViewController {
         inputField.stringValue = ""
         viewModel.send(text: text)
     }
+
+    @objc
+    private func createBranchTapped() {
+        viewModel.createBranch()
+    }
 }
 
 extension ChatSidebarViewController: NSTableViewDataSource, NSTableViewDelegate {
@@ -122,5 +140,9 @@ extension ChatSidebarViewController: NSTableViewDataSource, NSTableViewDelegate 
         let item = viewModel.historyItems[row]
         cell.stringValue = item.isActive ? "• \(item.title)" : item.title
         return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        viewModel.selectHistoryItem(at: historyTableView.selectedRow)
     }
 }

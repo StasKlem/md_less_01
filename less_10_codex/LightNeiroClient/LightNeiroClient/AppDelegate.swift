@@ -43,7 +43,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let chatViewModel = ChatViewModel(
                 sessionID: environment.sessionID,
                 branchID: environment.branchID,
-                sendMessageUseCase: environment.sendMessageUseCase
+                sendMessageUseCase: environment.sendMessageUseCase,
+                fetchBranchesUseCase: environment.fetchBranchesUseCase,
+                fetchMessagesUseCase: environment.fetchMessagesUseCase,
+                cloneDialogToBranchUseCase: environment.cloneDialogToBranchUseCase,
+                switchBranchUseCase: environment.switchBranchUseCase,
+                createBranchUseCase: environment.createBranchUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 sessionID: environment.sessionID,

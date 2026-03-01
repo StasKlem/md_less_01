@@ -20,20 +20,39 @@ final class ChatViewModel {
     var onDidSendMessage: (() -> Void)?
 
     private let sessionID: UUID
-    private let branchID: UUID
+    private var activeBranchID: UUID
     private let sendMessageUseCase: SendMessageUseCaseProtocol
+    private let fetchBranchesUseCase: FetchBranchesUseCaseProtocol
+    private let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
+    private let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
+    private let switchBranchUseCase: SwitchBranchUseCaseProtocol
+    private let createBranchUseCase: CreateBranchUseCaseProtocol
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
 
-    init(sessionID: UUID, branchID: UUID, sendMessageUseCase: SendMessageUseCaseProtocol) {
+    init(
+        sessionID: UUID,
+        branchID: UUID,
+        sendMessageUseCase: SendMessageUseCaseProtocol,
+        fetchBranchesUseCase: FetchBranchesUseCaseProtocol,
+        fetchMessagesUseCase: FetchMessagesUseCaseProtocol,
+        cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol,
+        switchBranchUseCase: SwitchBranchUseCaseProtocol,
+        createBranchUseCase: CreateBranchUseCaseProtocol
+    ) {
         self.sessionID = sessionID
-        self.branchID = branchID
+        self.activeBranchID = branchID
         self.sendMessageUseCase = sendMessageUseCase
+        self.fetchBranchesUseCase = fetchBranchesUseCase
+        self.fetchMessagesUseCase = fetchMessagesUseCase
+        self.cloneDialogToBranchUseCase = cloneDialogToBranchUseCase
+        self.switchBranchUseCase = switchBranchUseCase
+        self.createBranchUseCase = createBranchUseCase
 
-        historyItems = [
-            ChatHistoryItem(id: branchID, title: "main", isActive: true)
-        ]
+        Task { [weak self] in
+            await self?.loadInitialState()
+        }
     }
 
     func apply(settings: LLMSettings) {
@@ -43,6 +62,7 @@ final class ChatViewModel {
     func send(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return }
+        let targetBranchID = activeBranchID
 
         let userState = DialogHistoryItemViewState(
             kind: .user,
@@ -68,7 +88,7 @@ final class ChatViewModel {
             do {
                 let response = try await self.sendMessageUseCase.execute(
                     sessionID: self.sessionID,
-                    branchID: self.branchID,
+                    branchID: targetBranchID,
                     userText: trimmed
                 )
                 let chunks = self.chunked(response.content, size: 10)
@@ -117,9 +137,127 @@ final class ChatViewModel {
         }
     }
 
+    func selectHistoryItem(at index: Int) {
+        guard !isSending else { return }
+        guard historyItems.indices.contains(index) else { return }
+        let selected = historyItems[index]
+        guard selected.id != activeBranchID else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.cloneDialogToBranchUseCase.execute(
+                    sourceBranchID: self.activeBranchID,
+                    targetBranchID: selected.id
+                )
+                _ = try await self.switchBranchUseCase.execute(
+                    sessionID: self.sessionID,
+                    targetBranchID: selected.id
+                )
+                self.activeBranchID = selected.id
+                try await self.refreshHistoryItems()
+                try await self.loadDialog(for: selected.id)
+            } catch {
+                self.dialogItems.append(
+                    DialogHistoryItemViewState(
+                        kind: .system,
+                        text: "Failed to switch branch: \(error.localizedDescription)",
+                        status: .failed
+                    )
+                )
+            }
+        }
+    }
+
+    func createBranch() {
+        guard !isSending else { return }
+        let nextName = nextBranchName()
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let branch = try await self.createBranchUseCase.execute(
+                    sessionID: self.sessionID,
+                    parentCheckpointID: nil,
+                    name: nextName
+                )
+                _ = try await self.switchBranchUseCase.execute(
+                    sessionID: self.sessionID,
+                    targetBranchID: branch.id
+                )
+                self.activeBranchID = branch.id
+                self.dialogItems = []
+                try await self.refreshHistoryItems()
+            } catch {
+                self.dialogItems.append(
+                    DialogHistoryItemViewState(
+                        kind: .system,
+                        text: "Failed to create branch: \(error.localizedDescription)",
+                        status: .failed
+                    )
+                )
+            }
+        }
+    }
+
     private func replaceDialogItem(_ state: DialogHistoryItemViewState) {
         guard let index = dialogItems.firstIndex(where: { $0.id == state.id }) else { return }
         dialogItems[index] = state
+    }
+
+    private func loadInitialState() async {
+        do {
+            try await refreshHistoryItems()
+            try await loadDialog(for: activeBranchID)
+        } catch {
+            dialogItems = [
+                DialogHistoryItemViewState(
+                    kind: .system,
+                    text: "Failed to load history: \(error.localizedDescription)",
+                    status: .failed
+                )
+            ]
+        }
+    }
+
+    private func refreshHistoryItems() async throws {
+        let branches = try await fetchBranchesUseCase.execute(sessionID: sessionID)
+        historyItems = branches.map {
+            ChatHistoryItem(id: $0.id, title: $0.name, isActive: $0.id == activeBranchID)
+        }
+    }
+
+    private func loadDialog(for branchID: UUID) async throws {
+        let messages = try await fetchMessagesUseCase.execute(branchID: branchID)
+        dialogItems = messages.map { message in
+            DialogHistoryItemViewState(
+                id: message.id,
+                kind: kind(for: message.role),
+                text: message.content,
+                status: .sent,
+                createdAt: message.createdAt
+            )
+        }
+    }
+
+    private func nextBranchName() -> String {
+        let prefix = "branch-"
+        let indices = historyItems.compactMap { item -> Int? in
+            guard item.title.hasPrefix(prefix) else { return nil }
+            return Int(item.title.dropFirst(prefix.count))
+        }
+        return "\(prefix)\((indices.max() ?? 0) + 1)"
+    }
+
+    private func kind(for role: MessageRole) -> DialogMessageKind {
+        switch role {
+        case .system:
+            return .system
+        case .user:
+            return .user
+        case .assistant:
+            return .assistant
+        }
     }
 
     private func chunked(_ text: String, size: Int) -> [String] {

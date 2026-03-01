@@ -5,6 +5,10 @@ struct AppEnvironment {
     let branchID: UUID
 
     let sendMessageUseCase: SendMessageUseCaseProtocol
+    let fetchBranchesUseCase: FetchBranchesUseCaseProtocol
+    let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
+    let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
+    let createBranchUseCase: CreateBranchUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let switchBranchUseCase: SwitchBranchUseCaseProtocol
@@ -36,6 +40,9 @@ struct AppEnvironment {
             messageRepository: messageRepository
         )
         let updateFacts = UpdateFactsUseCase(factsRepository: factsRepository)
+        let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
+        let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
+        let cloneDialogToBranch = CloneDialogToBranchUseCase(messageRepository: messageRepository)
         let sendMessage = SendMessageUseCase(
             settingsRepository: settingsRepository,
             messageRepository: messageRepository,
@@ -44,6 +51,7 @@ struct AppEnvironment {
             updateFactsUseCase: updateFacts,
             metricsRepository: metricsRepository
         )
+        let createBranch = CreateBranchUseCase(branchRepository: branchRepository)
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
         let switchBranch = SwitchBranchUseCase(sessionRepository: sessionRepository)
@@ -73,6 +81,10 @@ struct AppEnvironment {
             sessionID: sessionID,
             branchID: branchID,
             sendMessageUseCase: sendMessage,
+            fetchBranchesUseCase: fetchBranches,
+            fetchMessagesUseCase: fetchMessages,
+            cloneDialogToBranchUseCase: cloneDialogToBranch,
+            createBranchUseCase: createBranch,
             applySettingsUseCase: applySettings,
             collectSessionMetricsUseCase: collectMetrics,
             switchBranchUseCase: switchBranch,
