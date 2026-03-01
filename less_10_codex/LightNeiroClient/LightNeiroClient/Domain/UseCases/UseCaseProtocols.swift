@@ -31,3 +31,12 @@ protocol ApplySettingsUseCaseProtocol {
 protocol CollectSessionMetricsUseCaseProtocol {
     func execute(sessionID: UUID) async throws -> SessionInfoSnapshot
 }
+
+protocol LoadAPIKeyUseCaseProtocol {
+    func execute() throws -> String?
+}
+
+protocol SaveAPIKeyUseCaseProtocol {
+    func execute(apiKey: String) throws
+    func delete() throws
+}

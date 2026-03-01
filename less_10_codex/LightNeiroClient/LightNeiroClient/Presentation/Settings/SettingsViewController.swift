@@ -11,6 +11,9 @@ final class SettingsViewController: NSViewController {
     private let temperatureLabel = NSTextField(labelWithString: "Temperature: 0.40")
     private let windowSlider = NSSlider(value: 12, minValue: 4, maxValue: 30, target: nil, action: nil)
     private let windowLabel = NSTextField(labelWithString: "Window: 12")
+    private let apiKeyField = NSSecureTextField()
+    private let saveAPIKeyButton = NSButton(title: "Save API Key", target: nil, action: nil)
+    private let apiKeyStatusLabel = NSTextField(labelWithString: "")
 
     init(viewModel: SettingsViewModel) {
         self.viewModel = viewModel
@@ -46,6 +49,14 @@ final class SettingsViewController: NSViewController {
         temperatureSlider.action = #selector(temperatureChanged)
         windowSlider.target = self
         windowSlider.action = #selector(windowChanged)
+        apiKeyField.target = self
+        apiKeyField.action = #selector(apiKeyEdited)
+        apiKeyField.placeholderString = "routerai key"
+        saveAPIKeyButton.target = self
+        saveAPIKeyButton.action = #selector(saveAPIKeyTapped)
+        apiKeyStatusLabel.textColor = .secondaryLabelColor
+        apiKeyStatusLabel.lineBreakMode = .byWordWrapping
+        apiKeyStatusLabel.maximumNumberOfLines = 2
 
         let stack = NSStackView(views: [
             makeRow(label: "Model", control: modelPopup),
@@ -53,7 +64,10 @@ final class SettingsViewController: NSViewController {
             temperatureLabel,
             temperatureSlider,
             windowLabel,
-            windowSlider
+            windowSlider,
+            makeRow(label: "RouterAI API Key", control: apiKeyField),
+            saveAPIKeyButton,
+            apiKeyStatusLabel
         ])
         stack.orientation = .vertical
         stack.spacing = 8
@@ -79,6 +93,23 @@ final class SettingsViewController: NSViewController {
                 self.windowSlider.doubleValue = Double(settings.windowSize)
                 self.temperatureLabel.stringValue = String(format: "Temperature: %.2f", settings.temperature)
                 self.windowLabel.stringValue = "Window: \(settings.windowSize)"
+            }
+            .store(in: &cancellables)
+
+        viewModel.$apiKey
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] apiKey in
+                guard let self else { return }
+                if self.apiKeyField.stringValue != apiKey {
+                    self.apiKeyField.stringValue = apiKey
+                }
+            }
+            .store(in: &cancellables)
+
+        viewModel.$apiKeyStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.apiKeyStatusLabel.stringValue = status
             }
             .store(in: &cancellables)
     }
@@ -116,5 +147,16 @@ final class SettingsViewController: NSViewController {
     @objc
     private func windowChanged() {
         viewModel.updateWindowSize(Int(windowSlider.intValue))
+    }
+
+    @objc
+    private func apiKeyEdited() {
+        viewModel.updateAPIKey(apiKeyField.stringValue)
+    }
+
+    @objc
+    private func saveAPIKeyTapped() {
+        viewModel.updateAPIKey(apiKeyField.stringValue)
+        viewModel.saveAPIKey()
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 
 enum LLMModel: String, CaseIterable, Codable {
+    case deepseekV32 = "deepseek/deepseek-v3.2"
     case gpt4oMini = "gpt-4o-mini"
     case gpt4o = "gpt-4o"
 }
@@ -18,7 +19,7 @@ struct LLMSettings: Codable, Equatable {
     var windowSize: Int
 
     static let `default` = LLMSettings(
-        model: .gpt4oMini,
+        model: .deepseekV32,
         summarizationMode: .concise,
         temperature: 0.4,
         windowSize: 12

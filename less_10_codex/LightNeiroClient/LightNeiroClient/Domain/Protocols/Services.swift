@@ -25,3 +25,9 @@ protocol ContextBuilderProtocol {
         settings: LLMSettings
     ) async throws -> (facts: [StickyFact], messages: [ChatMessage])
 }
+
+protocol APIKeyStoreProtocol {
+    nonisolated func fetchAPIKey() throws -> String?
+    nonisolated func saveAPIKey(_ apiKey: String) throws
+    nonisolated func deleteAPIKey() throws
+}

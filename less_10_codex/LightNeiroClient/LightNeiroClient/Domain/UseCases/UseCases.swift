@@ -200,3 +200,36 @@ final class CollectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol {
         )
     }
 }
+
+final class LoadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol {
+    private let apiKeyStore: APIKeyStoreProtocol
+
+    init(apiKeyStore: APIKeyStoreProtocol) {
+        self.apiKeyStore = apiKeyStore
+    }
+
+    func execute() throws -> String? {
+        try apiKeyStore.fetchAPIKey()
+    }
+}
+
+final class SaveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol {
+    private let apiKeyStore: APIKeyStoreProtocol
+
+    init(apiKeyStore: APIKeyStoreProtocol) {
+        self.apiKeyStore = apiKeyStore
+    }
+
+    func execute(apiKey: String) throws {
+        let normalizedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedKey.isEmpty else {
+            try apiKeyStore.deleteAPIKey()
+            return
+        }
+        try apiKeyStore.saveAPIKey(normalizedKey)
+    }
+
+    func delete() throws {
+        try apiKeyStore.deleteAPIKey()
+    }
+}

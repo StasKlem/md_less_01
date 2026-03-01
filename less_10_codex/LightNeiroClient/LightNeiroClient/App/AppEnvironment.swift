@@ -8,6 +8,8 @@ struct AppEnvironment {
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let switchBranchUseCase: SwitchBranchUseCaseProtocol
+    let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
+    let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -16,7 +18,18 @@ struct AppEnvironment {
         let factsRepository = MockFactsRepository()
         let settingsRepository = MockSettingsRepository()
         let metricsRepository = MockMetricsRepository()
-        let llmClient = MockLLMClient()
+        let apiKeyStore = KeychainAPIKeyStore()
+        let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
+        let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
+        let llmClient = RouterAILLMClient(
+            configuration: RouterAIConfiguration(
+                endpoint: RouterAIConfiguration.default.endpoint,
+                timeoutInterval: RouterAIConfiguration.default.timeoutInterval,
+                apiKeyProvider: {
+                    try? apiKeyStore.fetchAPIKey()
+                }
+            )
+        )
 
         let buildContext = BuildContextUseCase(
             factsRepository: factsRepository,
@@ -62,7 +75,9 @@ struct AppEnvironment {
             sendMessageUseCase: sendMessage,
             applySettingsUseCase: applySettings,
             collectSessionMetricsUseCase: collectMetrics,
-            switchBranchUseCase: switchBranch
+            switchBranchUseCase: switchBranch,
+            loadAPIKeyUseCase: loadAPIKey,
+            saveAPIKeyUseCase: saveAPIKey
         )
     }
 }
