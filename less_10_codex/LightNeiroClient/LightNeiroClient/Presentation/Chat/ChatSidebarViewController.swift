@@ -6,7 +6,7 @@ final class ChatSidebarViewController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
 
     private let historyTableView = NSTableView()
-    private let messagesTableView = NSTableView()
+    private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
     private let inputField = NSTextField()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
 
@@ -37,34 +37,27 @@ final class ChatSidebarViewController: NSViewController {
         historyScroll.documentView = historyTableView
         historyScroll.hasVerticalScroller = true
 
-        let messagesScroll = NSScrollView()
-        messagesScroll.documentView = messagesTableView
-        messagesScroll.hasVerticalScroller = true
-
         historyTableView.headerView = nil
-        messagesTableView.headerView = nil
 
         let historyColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("history"))
         historyColumn.title = "Chats"
         historyTableView.addTableColumn(historyColumn)
 
-        let messageColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("messages"))
-        messageColumn.title = "Messages"
-        messagesTableView.addTableColumn(messageColumn)
-
         historyTableView.delegate = self
         historyTableView.dataSource = self
-        messagesTableView.delegate = self
-        messagesTableView.dataSource = self
 
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
+
+        addChild(dialogHistoryViewController)
+        let dialogView = dialogHistoryViewController.view
+        dialogView.translatesAutoresizingMaskIntoConstraints = false
 
         let inputRow = NSStackView(views: [inputField, sendButton])
         inputRow.orientation = .horizontal
         inputRow.spacing = 8
 
-        let root = NSStackView(views: [historyScroll, messagesScroll, inputRow])
+        let root = NSStackView(views: [historyScroll, dialogView, inputRow])
         root.orientation = .vertical
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
@@ -87,15 +80,17 @@ final class ChatSidebarViewController: NSViewController {
             .sink { [weak self] _ in self?.historyTableView.reloadData() }
             .store(in: &cancellables)
 
-        viewModel.$messageItems
+        viewModel.$dialogItems
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.messagesTableView.reloadData()
-                let count = self.viewModel.messageItems.count
-                if count > 0 {
-                    self.messagesTableView.scrollRowToVisible(count - 1)
-                }
+            .sink { [weak self] items in
+                self?.dialogHistoryViewController.apply(items: items)
+            }
+            .store(in: &cancellables)
+
+        viewModel.dialogPatchesPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] patches in
+                self?.dialogHistoryViewController.apply(patches: patches)
             }
             .store(in: &cancellables)
 
@@ -117,25 +112,15 @@ final class ChatSidebarViewController: NSViewController {
 
 extension ChatSidebarViewController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        if tableView == historyTableView {
-            return viewModel.historyItems.count
-        }
-        return viewModel.messageItems.count
+        viewModel.historyItems.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = NSTextField(labelWithString: "")
         cell.lineBreakMode = .byTruncatingTail
 
-        if tableView == historyTableView {
-            let item = viewModel.historyItems[row]
-            cell.stringValue = item.isActive ? "• \(item.title)" : item.title
-            return cell
-        }
-
-        let item = viewModel.messageItems[row]
-        cell.stringValue = "[\(item.role.rawValue)] \(item.text)"
-        cell.maximumNumberOfLines = 2
+        let item = viewModel.historyItems[row]
+        cell.stringValue = item.isActive ? "• \(item.title)" : item.title
         return cell
     }
 }

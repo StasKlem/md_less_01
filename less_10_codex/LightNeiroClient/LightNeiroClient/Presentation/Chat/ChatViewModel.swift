@@ -1,23 +1,21 @@
 import Combine
 import Foundation
 
-struct ChatMessageItem: Equatable {
-    let id: UUID
-    let role: MessageRole
-    let text: String
-    let createdAt: Date
-}
-
 struct ChatHistoryItem: Equatable {
     let id: UUID
     let title: String
     let isActive: Bool
 }
 
+@MainActor
 final class ChatViewModel {
     @Published private(set) var historyItems: [ChatHistoryItem] = []
-    @Published private(set) var messageItems: [ChatMessageItem] = []
+    @Published private(set) var dialogItems: [DialogHistoryItemViewState] = []
     @Published private(set) var isSending = false
+
+    var dialogPatchesPublisher: AnyPublisher<[DialogHistoryPatch], Never> {
+        dialogPatchesSubject.eraseToAnyPublisher()
+    }
 
     var onDidSendMessage: (() -> Void)?
 
@@ -25,6 +23,7 @@ final class ChatViewModel {
     private let branchID: UUID
     private let sendMessageUseCase: SendMessageUseCaseProtocol
 
+    private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
 
     init(sessionID: UUID, branchID: UUID, sendMessageUseCase: SendMessageUseCaseProtocol) {
@@ -45,13 +44,26 @@ final class ChatViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return }
 
-        let localUser = ChatMessageItem(id: UUID(), role: .user, text: trimmed, createdAt: Date())
-        messageItems.append(localUser)
+        let userState = DialogHistoryItemViewState(
+            kind: .user,
+            text: trimmed,
+            status: .sent
+        )
+        dialogItems.append(userState)
+
+        let assistantID = UUID()
+        var assistantState = DialogHistoryItemViewState(
+            id: assistantID,
+            kind: .assistant,
+            text: "",
+            status: .streaming
+        )
+        dialogItems.append(assistantState)
+
         isSending = true
 
         Task { [weak self] in
             guard let self else { return }
-            defer { self.isSending = false }
 
             do {
                 let response = try await self.sendMessageUseCase.execute(
@@ -59,24 +71,74 @@ final class ChatViewModel {
                     branchID: self.branchID,
                     userText: trimmed
                 )
-                let localAssistant = ChatMessageItem(
-                    id: response.id,
-                    role: .assistant,
+                let chunks = self.chunked(response.content, size: 10)
+                var streamed = ""
+                for chunk in chunks {
+                    try await Task.sleep(nanoseconds: 35_000_000)
+                    streamed += chunk
+                    assistantState = DialogHistoryItemViewState(
+                        id: assistantID,
+                        kind: .assistant,
+                        text: streamed,
+                        status: .streaming
+                    )
+                    self.replaceDialogItem(assistantState)
+                    self.dialogPatchesSubject.send([DialogHistoryPatch(id: assistantID, state: assistantState)])
+                }
+
+                assistantState = DialogHistoryItemViewState(
+                    id: assistantID,
+                    kind: .assistant,
                     text: response.content,
-                    createdAt: response.createdAt
+                    status: .sent
                 )
-                self.messageItems.append(localAssistant)
+                self.replaceDialogItem(assistantState)
+                self.dialogPatchesSubject.send([DialogHistoryPatch(id: assistantID, state: assistantState)])
                 self.onDidSendMessage?()
             } catch {
-                self.messageItems.append(
-                    ChatMessageItem(
-                        id: UUID(),
-                        role: .system,
+                let failedAssistant = DialogHistoryItemViewState(
+                    id: assistantID,
+                    kind: .assistant,
+                    text: "Request failed",
+                    status: .failed
+                )
+                self.replaceDialogItem(failedAssistant)
+                self.dialogPatchesSubject.send([DialogHistoryPatch(id: assistantID, state: failedAssistant)])
+
+                self.dialogItems.append(
+                    DialogHistoryItemViewState(
+                        kind: .system,
                         text: "Error: \(error.localizedDescription)",
-                        createdAt: Date()
+                        status: .failed
                     )
                 )
             }
+            self.isSending = false
         }
+    }
+
+    private func replaceDialogItem(_ state: DialogHistoryItemViewState) {
+        guard let index = dialogItems.firstIndex(where: { $0.id == state.id }) else { return }
+        dialogItems[index] = state
+    }
+
+    private func chunked(_ text: String, size: Int) -> [String] {
+        guard size > 0 else { return [text] }
+
+        var chunks: [String] = []
+        var current = ""
+
+        for char in text {
+            current.append(char)
+            if current.count >= size {
+                chunks.append(current)
+                current = ""
+            }
+        }
+
+        if !current.isEmpty {
+            chunks.append(current)
+        }
+        return chunks
     }
 }
