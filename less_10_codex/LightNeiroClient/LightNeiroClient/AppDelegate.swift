@@ -17,7 +17,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        let viewController = ViewController()
         let defaultFrame = NSRect(
             x: 0,
             y: 0,
@@ -35,10 +34,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.setContentSize(NSSize(width: UI.defaultWindowWidth, height: UI.defaultWindowHeight))
         window.title = "LightNeiroClient"
-        window.contentViewController = viewController
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = window
+
+        Task { @MainActor in
+            let environment = await AppEnvironment.bootstrap()
+            let chatViewModel = ChatViewModel(
+                sessionID: environment.sessionID,
+                branchID: environment.branchID,
+                sendMessageUseCase: environment.sendMessageUseCase
+            )
+            let settingsViewModel = SettingsViewModel(
+                sessionID: environment.sessionID,
+                applySettingsUseCase: environment.applySettingsUseCase
+            )
+            let sessionInfoViewModel = SessionInfoViewModel(
+                sessionID: environment.sessionID,
+                collectSessionMetricsUseCase: environment.collectSessionMetricsUseCase
+            )
+            let mainViewModel = MainViewModel(
+                chatViewModel: chatViewModel,
+                settingsViewModel: settingsViewModel,
+                sessionInfoViewModel: sessionInfoViewModel
+            )
+
+            window.contentViewController = MainSplitViewController(viewModel: mainViewModel)
+        }
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
