@@ -6,21 +6,13 @@ enum LLMModel: String, CaseIterable, Codable {
     case gpt4o = "gpt-4o"
 }
 
-enum SummarizationMode: String, CaseIterable, Codable {
-    case off
-    case concise
-    case detailed
-}
-
 struct LLMSettings: Codable, Equatable {
     var model: LLMModel
-    var summarizationMode: SummarizationMode
     var temperature: Double
     var windowSize: Int
 
     static let `default` = LLMSettings(
         model: .deepseekV32,
-        summarizationMode: .concise,
         temperature: 0.4,
         windowSize: 12
     )

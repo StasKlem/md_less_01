@@ -6,7 +6,6 @@ final class SettingsViewController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
 
     private let modelPopup = NSPopUpButton()
-    private let summarizationPopup = NSPopUpButton()
     private let temperatureSlider = NSSlider(value: 0.4, minValue: 0, maxValue: 1.2, target: nil, action: nil)
     private let temperatureLabel = NSTextField(labelWithString: "Temperature: 0.40")
     private let windowSlider = NSSlider(value: 12, minValue: 4, maxValue: 30, target: nil, action: nil)
@@ -39,12 +38,9 @@ final class SettingsViewController: NSViewController {
 
     private func setupUI() {
         modelPopup.addItems(withTitles: LLMModel.allCases.map { $0.rawValue })
-        summarizationPopup.addItems(withTitles: SummarizationMode.allCases.map { $0.rawValue })
 
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged)
-        summarizationPopup.target = self
-        summarizationPopup.action = #selector(summarizationChanged)
         temperatureSlider.target = self
         temperatureSlider.action = #selector(temperatureChanged)
         windowSlider.target = self
@@ -60,7 +56,6 @@ final class SettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             makeRow(label: "Model", control: modelPopup),
-            makeRow(label: "Summarization", control: summarizationPopup),
             temperatureLabel,
             temperatureSlider,
             windowLabel,
@@ -88,7 +83,6 @@ final class SettingsViewController: NSViewController {
             .sink { [weak self] settings in
                 guard let self else { return }
                 self.modelPopup.selectItem(withTitle: settings.model.rawValue)
-                self.summarizationPopup.selectItem(withTitle: settings.summarizationMode.rawValue)
                 self.temperatureSlider.doubleValue = settings.temperature
                 self.windowSlider.doubleValue = Double(settings.windowSize)
                 self.temperatureLabel.stringValue = String(format: "Temperature: %.2f", settings.temperature)
@@ -130,13 +124,6 @@ final class SettingsViewController: NSViewController {
         guard let title = modelPopup.selectedItem?.title,
               let model = LLMModel(rawValue: title) else { return }
         viewModel.updateModel(model)
-    }
-
-    @objc
-    private func summarizationChanged() {
-        guard let title = summarizationPopup.selectedItem?.title,
-              let mode = SummarizationMode(rawValue: title) else { return }
-        viewModel.updateSummarizationMode(mode)
     }
 
     @objc

@@ -32,11 +32,6 @@ final class SettingsViewModel {
         persist()
     }
 
-    func updateSummarizationMode(_ mode: SummarizationMode) {
-        settings.summarizationMode = mode
-        persist()
-    }
-
     func updateTemperature(_ value: Double) {
         settings.temperature = value
         persist()
