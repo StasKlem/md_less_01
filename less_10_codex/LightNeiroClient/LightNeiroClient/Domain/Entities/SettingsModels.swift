@@ -40,6 +40,7 @@ struct LLMSettings: Codable, Equatable {
 struct RequestMetric: Identifiable, Codable, Equatable {
     let id: UUID
     let messageID: UUID
+    let branchID: UUID
     let startedAt: Date
     let endedAt: Date
     let latencyMs: Int

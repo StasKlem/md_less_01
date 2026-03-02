@@ -73,6 +73,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             )
             let sessionInfoViewModel = SessionInfoViewModel(
                 sessionID: environment.sessionID,
+                activeBranchID: environment.branchID,
                 collectSessionMetricsUseCase: environment.collectSessionMetricsUseCase
             )
             let mainViewModel = MainViewModel(

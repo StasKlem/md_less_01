@@ -49,7 +49,7 @@ protocol FetchSettingsUseCaseProtocol {
 }
 
 protocol CollectSessionMetricsUseCaseProtocol {
-    func execute(sessionID: UUID) async throws -> SessionInfoSnapshot
+    func execute(sessionID: UUID, branchID: UUID) async throws -> SessionInfoSnapshot
 }
 
 protocol LoadAPIKeyUseCaseProtocol {

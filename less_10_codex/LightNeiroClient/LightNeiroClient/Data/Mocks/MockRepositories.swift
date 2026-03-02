@@ -93,7 +93,7 @@ struct MockMetricsRepository: MetricsRepositoryProtocol {
     private let store = InMemoryChatStore.shared
 
     func appendMetric(_ metric: RequestMetric) async throws {
-        let sessionID = await resolveSessionID(for: metric.messageID)
+        let sessionID = await resolveSessionID(for: metric.branchID)
         guard let sessionID else { return }
 
         var current = await store.metricsBySession[sessionID] ?? []
@@ -105,17 +105,13 @@ struct MockMetricsRepository: MetricsRepositoryProtocol {
         await store.metricsBySession[sessionID] ?? []
     }
 
-    private func resolveSessionID(for messageID: UUID) async -> UUID? {
+    private func resolveSessionID(for branchID: UUID) async -> UUID? {
         let sessions = await store.sessions
         let branchesBySession = await store.branches
-        let messagesByBranch = await store.messages
 
         for (sessionID, sessionBranches) in branchesBySession where sessions[sessionID] != nil {
-            for branch in sessionBranches {
-                let messages = messagesByBranch[branch.id] ?? []
-                if messages.contains(where: { $0.id == messageID }) {
-                    return sessionID
-                }
+            if sessionBranches.contains(where: { $0.id == branchID }) {
+                return sessionID
             }
         }
         return nil

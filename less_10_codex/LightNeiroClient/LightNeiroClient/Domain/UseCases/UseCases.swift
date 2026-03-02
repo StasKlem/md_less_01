@@ -265,6 +265,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         let metric = RequestMetric(
             id: UUID(),
             messageID: assistantMessage.id,
+            branchID: branchID,
             startedAt: Date().addingTimeInterval(-Double(response.latencyMs) / 1000.0),
             endedAt: Date(),
             latencyMs: response.latencyMs,
@@ -382,16 +383,17 @@ final class CollectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol {
         self.metricsRepository = metricsRepository
     }
 
-    func execute(sessionID: UUID) async throws -> SessionInfoSnapshot {
+    func execute(sessionID: UUID, branchID: UUID) async throws -> SessionInfoSnapshot {
         let metrics = try await metricsRepository.fetchMetrics(sessionID: sessionID)
-        let totalIn = metrics.reduce(0) { $0 + $1.inputTokens }
-        let totalOut = metrics.reduce(0) { $0 + $1.outputTokens }
-        let lastLatency = metrics.last?.latencyMs ?? 0
+        let branchMetrics = metrics.filter { $0.branchID == branchID }
+        let totalIn = branchMetrics.reduce(0) { $0 + $1.inputTokens }
+        let totalOut = branchMetrics.reduce(0) { $0 + $1.outputTokens }
+        let lastLatency = branchMetrics.last?.latencyMs ?? 0
 
         return SessionInfoSnapshot(
             totalInputTokens: totalIn,
             totalOutputTokens: totalOut,
-            totalRequests: metrics.count,
+            totalRequests: branchMetrics.count,
             lastLatencyMs: lastLatency
         )
     }
