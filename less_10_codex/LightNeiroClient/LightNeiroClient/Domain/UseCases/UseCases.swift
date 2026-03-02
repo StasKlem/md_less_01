@@ -14,9 +14,11 @@ final class BuildContextUseCase: BuildContextUseCaseProtocol {
         branchID: UUID,
         settings: LLMSettings
     ) async throws -> (facts: [StickyFact], messages: [ChatMessage]) {
-        let messages = try await messageRepository.fetchMessages(branchID: branchID)
+        let branchMessages = try await messageRepository.fetchMessages(branchID: branchID)
+        let messages = branchMessages.filter { $0.role != .system }
+        let strategy = settings.contextStrategy(for: branchID)
 
-        switch settings.contextStrategy {
+        switch strategy {
         case .normal:
             return ([], messages)
         case .slidingWindow:
@@ -82,106 +84,76 @@ final class CloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol {
 
 final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
     private let factsRepository: FactsRepositoryProtocol
+    private let llmClient: LLMClientProtocol
+    private let decoder = JSONDecoder()
 
-    init(factsRepository: FactsRepositoryProtocol) {
+    init(factsRepository: FactsRepositoryProtocol, llmClient: LLMClientProtocol) {
         self.factsRepository = factsRepository
+        self.llmClient = llmClient
     }
 
-    func execute(sessionID: UUID, latestUserMessage: String) async throws {
+    func execute(sessionID: UUID, latestUserMessage: String, settings: LLMSettings) async throws {
         let trimmed = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         let existing = try await factsRepository.fetchFacts(sessionID: sessionID)
-        let extracted = extractFacts(from: trimmed)
-        let alwaysSaved = StickyFactCandidate(key: "last-user-message", value: trimmed, confidence: 0.5)
-
-        let merged = mergeFacts(
-            existing: existing,
-            with: extracted + [alwaysSaved],
-            sessionID: sessionID
-        )
+        let extracted = try await extractFactsUsingLLM(from: trimmed, settings: settings)
+        let merged = mergeFacts(existing: existing, with: extracted, sessionID: sessionID, lastUserMessage: trimmed)
         try await factsRepository.upsertFacts(sessionID: sessionID, facts: merged)
     }
 
-    private func extractFacts(from text: String) -> [StickyFactCandidate] {
-        let lines = text
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+    private func extractFactsUsingLLM(from text: String, settings: LLMSettings) async throws -> [StickyFactCandidate] {
+        let requestText = """
+        Extract only durable and important facts from the user message.
+        Output strict JSON object only.
+        Allowed keys: goal, constraints, preferences, decisions, agreements.
+        Values must be short strings.
+        Omit keys with no new info.
+        User message:
+        \(text)
+        """
 
-        var candidates: [StickyFactCandidate] = []
+        let response = try await llmClient.send(
+            request: LLMRequest(
+                systemPrompt: "You extract structured memory for chat context.",
+                facts: [],
+                messages: [ChatMessage(branchID: UUID(), role: .user, content: requestText)],
+                settings: LLMSettings(
+                    model: settings.model,
+                    contextStrategy: .normal,
+                    temperature: 0.0,
+                    windowSize: 1,
+                    contextStrategyByBranch: [:]
+                )
+            )
+        )
 
-        for line in lines {
-            if let candidate = candidateFromExplicitKV(line: line) {
-                candidates.append(candidate)
-                continue
-            }
-            if let candidate = candidateFromSemanticLine(line: line) {
-                candidates.append(candidate)
-            }
-        }
-
-        return deduplicated(candidates)
+        let payload = extractJSONObject(from: response.content)
+        guard let data = payload.data(using: String.Encoding.utf8) else { return [] }
+        let decoded = try decoder.decode(LLMFactExtractionResult.self, from: data)
+        return decoded.candidates
     }
 
-    private func candidateFromExplicitKV(line: String) -> StickyFactCandidate? {
-        let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return nil }
-
-        let keyPart = normalize(parts[0])
-        let valuePart = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !valuePart.isEmpty else { return nil }
-        guard let key = mapToFactKey(from: keyPart) else { return nil }
-
-        return StickyFactCandidate(key: key, value: valuePart, confidence: 0.85)
+    private func extractJSONObject(from text: String) -> String {
+        guard let start = text.firstIndex(of: "{"),
+              let end = text.lastIndex(of: "}") else {
+            return "{}"
+        }
+        return String(text[start...end])
     }
 
-    private func candidateFromSemanticLine(line: String) -> StickyFactCandidate? {
-        let normalized = normalize(line)
-
-        if containsAny(normalized, ["мы решили", "решили ", "decision", "выбрали", "selected"]) {
-            return StickyFactCandidate(key: "decisions", value: line, confidence: 0.65)
-        }
-        if containsAny(normalized, ["договор", "agreement", "согласовали", "agreed"]) {
-            return StickyFactCandidate(key: "agreements", value: line, confidence: 0.65)
-        }
-        if containsAny(normalized, ["предпоч", "preference", "format", "style", "тон"]) {
-            return StickyFactCandidate(key: "preferences", value: line, confidence: 0.6)
-        }
-        if containsAny(normalized, ["огранич", "constraint", "limit", "запрет", "требован"]) {
-            return StickyFactCandidate(key: "constraints", value: line, confidence: 0.6)
-        }
-        if containsAny(normalized, ["цель", "goal", "objective", "задача"]) {
-            return StickyFactCandidate(key: "goal", value: line, confidence: 0.6)
-        }
-
-        return nil
-    }
-
-    private func mapToFactKey(from normalizedKey: String) -> String? {
-        if containsAny(normalizedKey, ["цель", "goal", "objective", "задача"]) {
-            return "goal"
-        }
-        if containsAny(normalizedKey, ["огранич", "constraint", "limit", "запрет", "требован"]) {
-            return "constraints"
-        }
-        if containsAny(normalizedKey, ["предпоч", "preference", "style", "format", "тон"]) {
-            return "preferences"
-        }
-        if containsAny(normalizedKey, ["решени", "decision", "выбор", "выбрали"]) {
-            return "decisions"
-        }
-        if containsAny(normalizedKey, ["договор", "agreement", "соглас"]) {
-            return "agreements"
-        }
-        return nil
-    }
-
-    private func mergeFacts(existing: [StickyFact], with extracted: [StickyFactCandidate], sessionID: UUID) -> [StickyFact] {
+    private func mergeFacts(
+        existing: [StickyFact],
+        with extracted: [StickyFactCandidate],
+        sessionID: UUID,
+        lastUserMessage: String
+    ) -> [StickyFact] {
         var map = Dictionary(uniqueKeysWithValues: existing.map { ($0.key, $0) })
         let now = Date()
 
-        for candidate in extracted {
+        let candidates = extracted + [StickyFactCandidate(key: "last-user-message", value: lastUserMessage, confidence: 0.5)]
+
+        for candidate in candidates {
             let value = candidate.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { continue }
 
@@ -198,30 +170,42 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
 
         return map.values.sorted { $0.key < $1.key }
     }
-
-    private func deduplicated(_ candidates: [StickyFactCandidate]) -> [StickyFactCandidate] {
-        var map: [String: StickyFactCandidate] = [:]
-        for candidate in candidates {
-            map[candidate.key] = candidate
-        }
-        return Array(map.values)
-    }
-
-    private func normalize(_ text: String) -> String {
-        text
-            .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func containsAny(_ text: String, _ tokens: [String]) -> Bool {
-        tokens.contains { text.contains($0) }
-    }
 }
 
 private struct StickyFactCandidate {
     let key: String
     let value: String
     let confidence: Double
+}
+
+private struct LLMFactExtractionResult: Decodable {
+    let goal: String?
+    let constraints: String?
+    let preferences: String?
+    let decisions: String?
+    let agreements: String?
+
+    var candidates: [StickyFactCandidate] {
+        var result: [StickyFactCandidate] = []
+
+        if let goal, !goal.isEmpty {
+            result.append(.init(key: "goal", value: goal, confidence: 0.8))
+        }
+        if let constraints, !constraints.isEmpty {
+            result.append(.init(key: "constraints", value: constraints, confidence: 0.8))
+        }
+        if let preferences, !preferences.isEmpty {
+            result.append(.init(key: "preferences", value: preferences, confidence: 0.75))
+        }
+        if let decisions, !decisions.isEmpty {
+            result.append(.init(key: "decisions", value: decisions, confidence: 0.75))
+        }
+        if let agreements, !agreements.isEmpty {
+            result.append(.init(key: "agreements", value: agreements, confidence: 0.75))
+        }
+
+        return result
+    }
 }
 
 final class SendMessageUseCase: SendMessageUseCaseProtocol {
@@ -251,9 +235,13 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
         let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
-        try await updateFactsUseCase.execute(sessionID: sessionID, latestUserMessage: userText)
 
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
+        if settings.contextStrategy(for: branchID) == .stickyFacts {
+            // Fact extraction should not block the main assistant response path.
+            try? await updateFactsUseCase.execute(sessionID: sessionID, latestUserMessage: userText, settings: settings)
+        }
+
         let context = try await buildContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
 
         let request = LLMRequest(
@@ -372,6 +360,18 @@ final class ApplySettingsUseCase: ApplySettingsUseCaseProtocol {
 
     func execute(sessionID: UUID, settings: LLMSettings) async throws {
         try await settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+    }
+}
+
+final class FetchSettingsUseCase: FetchSettingsUseCaseProtocol {
+    private let settingsRepository: SettingsRepositoryProtocol
+
+    init(settingsRepository: SettingsRepositoryProtocol) {
+        self.settingsRepository = settingsRepository
+    }
+
+    func execute(sessionID: UUID) async throws -> LLMSettings {
+        try await settingsRepository.fetchSettings(sessionID: sessionID)
     }
 }
 

@@ -11,6 +11,7 @@ struct AppEnvironment {
     let createBranchUseCase: CreateBranchUseCaseProtocol
     let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
+    let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let switchBranchUseCase: SwitchBranchUseCaseProtocol
     let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
@@ -40,7 +41,10 @@ struct AppEnvironment {
             factsRepository: factsRepository,
             messageRepository: messageRepository
         )
-        let updateFacts = UpdateFactsUseCase(factsRepository: factsRepository)
+        let updateFacts = UpdateFactsUseCase(
+            factsRepository: factsRepository,
+            llmClient: llmClient
+        )
         let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
         let cloneDialogToBranch = CloneDialogToBranchUseCase(messageRepository: messageRepository)
@@ -55,6 +59,7 @@ struct AppEnvironment {
         let createBranch = CreateBranchUseCase(branchRepository: branchRepository)
         let addBranchCreatedSystemMessage = AddBranchCreatedSystemMessageUseCase(messageRepository: messageRepository)
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
+        let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
         let switchBranch = SwitchBranchUseCase(sessionRepository: sessionRepository)
 
@@ -89,6 +94,7 @@ struct AppEnvironment {
             createBranchUseCase: createBranch,
             addBranchCreatedSystemMessageUseCase: addBranchCreatedSystemMessage,
             applySettingsUseCase: applySettings,
+            fetchSettingsUseCase: fetchSettings,
             collectSessionMetricsUseCase: collectMetrics,
             switchBranchUseCase: switchBranch,
             loadAPIKeyUseCase: loadAPIKey,

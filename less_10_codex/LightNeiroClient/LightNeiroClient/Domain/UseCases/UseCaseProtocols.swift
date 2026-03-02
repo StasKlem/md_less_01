@@ -21,7 +21,7 @@ protocol CloneDialogToBranchUseCaseProtocol {
 }
 
 protocol UpdateFactsUseCaseProtocol {
-    func execute(sessionID: UUID, latestUserMessage: String) async throws
+    func execute(sessionID: UUID, latestUserMessage: String, settings: LLMSettings) async throws
 }
 
 protocol CreateCheckpointUseCaseProtocol {
@@ -42,6 +42,10 @@ protocol SwitchBranchUseCaseProtocol {
 
 protocol ApplySettingsUseCaseProtocol {
     func execute(sessionID: UUID, settings: LLMSettings) async throws
+}
+
+protocol FetchSettingsUseCaseProtocol {
+    func execute(sessionID: UUID) async throws -> LLMSettings
 }
 
 protocol CollectSessionMetricsUseCaseProtocol {

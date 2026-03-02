@@ -10,6 +10,7 @@ final class SettingsViewModel {
 
     private let sessionID: UUID
     private var activeBranchID: UUID
+    private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     private let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
@@ -17,17 +18,20 @@ final class SettingsViewModel {
     init(
         sessionID: UUID,
         activeBranchID: UUID,
+        fetchSettingsUseCase: FetchSettingsUseCaseProtocol,
         applySettingsUseCase: ApplySettingsUseCaseProtocol,
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
         self.sessionID = sessionID
         self.activeBranchID = activeBranchID
+        self.fetchSettingsUseCase = fetchSettingsUseCase
         self.applySettingsUseCase = applySettingsUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
         self.saveAPIKeyUseCase = saveAPIKeyUseCase
 
         loadAPIKey()
+        loadSettings()
     }
 
     func updateModel(_ model: LLMModel) {
@@ -69,7 +73,7 @@ final class SettingsViewModel {
 
     func switchActiveBranch(to branchID: UUID) {
         activeBranchID = branchID
-        settings.contextStrategy = settings.contextStrategy(for: branchID)
+        settings.setContextStrategy(settings.contextStrategy(for: branchID), for: branchID)
         persist()
     }
 
@@ -86,6 +90,21 @@ final class SettingsViewModel {
             apiKey = try loadAPIKeyUseCase.execute() ?? ""
         } catch {
             apiKeyStatus = "Failed to load API key: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadSettings() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                var loaded = try await fetchSettingsUseCase.execute(sessionID: sessionID)
+                loaded.setContextStrategy(loaded.contextStrategy(for: activeBranchID), for: activeBranchID)
+                settings = loaded
+                onSettingsChanged?(loaded)
+                try await applySettingsUseCase.execute(sessionID: sessionID, settings: loaded)
+            } catch {
+                apiKeyStatus = "Failed to load settings: \(error.localizedDescription)"
+            }
         }
     }
 }
