@@ -95,21 +95,6 @@ final class ChatViewModel {
                     branchID: targetBranchID,
                     userText: trimmed
                 )
-                let chunks = self.chunked(response.content, size: 10)
-                var streamed = ""
-                for chunk in chunks {
-                    try await Task.sleep(nanoseconds: 35_000_000)
-                    streamed += chunk
-                    assistantState = DialogHistoryItemViewState(
-                        id: assistantID,
-                        kind: .assistant,
-                        text: streamed,
-                        status: .streaming
-                    )
-                    self.replaceDialogItem(assistantState)
-                    self.dialogPatchesSubject.send([DialogHistoryPatch(id: assistantID, state: assistantState)])
-                }
-
                 assistantState = DialogHistoryItemViewState(
                     id: assistantID,
                     kind: .assistant,
@@ -275,25 +260,5 @@ final class ChatViewModel {
         case .assistant:
             return .assistant
         }
-    }
-
-    private func chunked(_ text: String, size: Int) -> [String] {
-        guard size > 0 else { return [text] }
-
-        var chunks: [String] = []
-        var current = ""
-
-        for char in text {
-            current.append(char)
-            if current.count >= size {
-                chunks.append(current)
-                current = ""
-            }
-        }
-
-        if !current.isEmpty {
-            chunks.append(current)
-        }
-        return chunks
     }
 }
