@@ -13,7 +13,7 @@ struct RouterAIConfiguration {
 
     static let `default` = RouterAIConfiguration(
         endpoint: URL(string: "https://routerai.ru/api/v1/chat/completions")!,
-        timeoutInterval: 60,
+        timeoutInterval: 120,
         apiKeyProvider: { ProcessInfo.processInfo.environment["ROUTERAI_API_KEY"] }
     )
 }

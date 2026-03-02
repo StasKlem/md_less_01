@@ -43,6 +43,7 @@ struct AppEnvironment {
         )
         let updateFacts = UpdateFactsUseCase(
             factsRepository: factsRepository,
+            messageRepository: messageRepository,
             llmClient: llmClient
         )
         let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
