@@ -32,6 +32,10 @@ protocol CreateBranchUseCaseProtocol {
     func execute(sessionID: UUID, parentCheckpointID: UUID?, name: String) async throws -> ChatBranch
 }
 
+protocol AddBranchCreatedSystemMessageUseCaseProtocol {
+    func execute(branchID: UUID, sourceBranchName: String) async throws
+}
+
 protocol SwitchBranchUseCaseProtocol {
     func execute(sessionID: UUID, targetBranchID: UUID) async throws -> ChatSession
 }

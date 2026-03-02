@@ -28,6 +28,7 @@ final class ChatViewModel {
     private let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
     private let switchBranchUseCase: SwitchBranchUseCaseProtocol
     private let createBranchUseCase: CreateBranchUseCaseProtocol
+    private let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
@@ -40,7 +41,8 @@ final class ChatViewModel {
         fetchMessagesUseCase: FetchMessagesUseCaseProtocol,
         cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol,
         switchBranchUseCase: SwitchBranchUseCaseProtocol,
-        createBranchUseCase: CreateBranchUseCaseProtocol
+        createBranchUseCase: CreateBranchUseCaseProtocol,
+        addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
     ) {
         self.sessionID = sessionID
         self.activeBranchID = branchID
@@ -50,6 +52,7 @@ final class ChatViewModel {
         self.cloneDialogToBranchUseCase = cloneDialogToBranchUseCase
         self.switchBranchUseCase = switchBranchUseCase
         self.createBranchUseCase = createBranchUseCase
+        self.addBranchCreatedSystemMessageUseCase = addBranchCreatedSystemMessageUseCase
 
         Task { [weak self] in
             await self?.loadInitialState()
@@ -147,10 +150,6 @@ final class ChatViewModel {
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.cloneDialogToBranchUseCase.execute(
-                    sourceBranchID: self.activeBranchID,
-                    targetBranchID: selected.id
-                )
                 _ = try await self.switchBranchUseCase.execute(
                     sessionID: self.sessionID,
                     targetBranchID: selected.id
@@ -174,23 +173,33 @@ final class ChatViewModel {
     func createBranch() {
         guard !isSending else { return }
         let nextName = nextBranchName()
+        let sourceBranchID = activeBranchID
 
         Task { [weak self] in
             guard let self else { return }
             do {
+                let sourceBranchName = try await self.resolveBranchName(branchID: sourceBranchID)
                 let branch = try await self.createBranchUseCase.execute(
                     sessionID: self.sessionID,
                     parentCheckpointID: nil,
                     name: nextName
                 )
+                try await self.cloneDialogToBranchUseCase.execute(
+                    sourceBranchID: sourceBranchID,
+                    targetBranchID: branch.id
+                )
                 _ = try await self.switchBranchUseCase.execute(
                     sessionID: self.sessionID,
                     targetBranchID: branch.id
                 )
+                try await self.addBranchCreatedSystemMessageUseCase.execute(
+                    branchID: branch.id,
+                    sourceBranchName: sourceBranchName
+                )
                 self.activeBranchID = branch.id
                 self.onActiveBranchChanged?(branch.id)
-                self.dialogItems = []
                 try await self.refreshHistoryItems()
+                try await self.loadDialog(for: branch.id)
             } catch {
                 self.dialogItems.append(
                     DialogHistoryItemViewState(
@@ -250,6 +259,11 @@ final class ChatViewModel {
             return Int(item.title.dropFirst(prefix.count))
         }
         return "\(prefix)\((indices.max() ?? 0) + 1)"
+    }
+
+    private func resolveBranchName(branchID: UUID) async throws -> String {
+        let branches = try await fetchBranchesUseCase.execute(sessionID: sessionID)
+        return branches.first(where: { $0.id == branchID })?.name ?? "unknown"
     }
 
     private func kind(for role: MessageRole) -> DialogMessageKind {

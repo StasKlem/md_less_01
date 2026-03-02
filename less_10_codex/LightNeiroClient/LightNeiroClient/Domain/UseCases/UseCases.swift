@@ -329,6 +329,23 @@ final class CreateBranchUseCase: CreateBranchUseCaseProtocol {
     }
 }
 
+final class AddBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol {
+    private let messageRepository: MessageRepositoryProtocol
+
+    init(messageRepository: MessageRepositoryProtocol) {
+        self.messageRepository = messageRepository
+    }
+
+    func execute(branchID: UUID, sourceBranchName: String) async throws {
+        let message = ChatMessage(
+            branchID: branchID,
+            role: .system,
+            content: "создана ветка от [\(sourceBranchName)]"
+        )
+        try await messageRepository.saveMessage(message)
+    }
+}
+
 final class SwitchBranchUseCase: SwitchBranchUseCaseProtocol {
     private let sessionRepository: ChatSessionRepositoryProtocol
 

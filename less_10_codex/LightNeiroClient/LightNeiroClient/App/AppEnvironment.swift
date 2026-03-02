@@ -9,6 +9,7 @@ struct AppEnvironment {
     let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
     let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
     let createBranchUseCase: CreateBranchUseCaseProtocol
+    let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let switchBranchUseCase: SwitchBranchUseCaseProtocol
@@ -52,6 +53,7 @@ struct AppEnvironment {
             metricsRepository: metricsRepository
         )
         let createBranch = CreateBranchUseCase(branchRepository: branchRepository)
+        let addBranchCreatedSystemMessage = AddBranchCreatedSystemMessageUseCase(messageRepository: messageRepository)
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
         let switchBranch = SwitchBranchUseCase(sessionRepository: sessionRepository)
@@ -85,6 +87,7 @@ struct AppEnvironment {
             fetchMessagesUseCase: fetchMessages,
             cloneDialogToBranchUseCase: cloneDialogToBranch,
             createBranchUseCase: createBranch,
+            addBranchCreatedSystemMessageUseCase: addBranchCreatedSystemMessage,
             applySettingsUseCase: applySettings,
             collectSessionMetricsUseCase: collectMetrics,
             switchBranchUseCase: switchBranch,

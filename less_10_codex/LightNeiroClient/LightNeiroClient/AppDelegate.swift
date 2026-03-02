@@ -48,7 +48,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,
                 cloneDialogToBranchUseCase: environment.cloneDialogToBranchUseCase,
                 switchBranchUseCase: environment.switchBranchUseCase,
-                createBranchUseCase: environment.createBranchUseCase
+                createBranchUseCase: environment.createBranchUseCase,
+                addBranchCreatedSystemMessageUseCase: environment.addBranchCreatedSystemMessageUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 sessionID: environment.sessionID,
