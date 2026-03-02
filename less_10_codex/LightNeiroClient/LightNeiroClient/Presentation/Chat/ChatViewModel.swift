@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 
+/// Элемент списка веток в боковой истории чатов.
 struct ChatHistoryItem: Equatable {
     let id: UUID
     let title: String
@@ -8,11 +9,13 @@ struct ChatHistoryItem: Equatable {
 }
 
 @MainActor
+/// ViewModel чата: история веток, сообщения активной ветки и действия пользователя.
 final class ChatViewModel {
     @Published private(set) var historyItems: [ChatHistoryItem] = []
     @Published private(set) var dialogItems: [DialogHistoryItemViewState] = []
     @Published private(set) var isSending = false
 
+    /// Паблишер точечных патчей для частичного обновления ячеек диалога.
     var dialogPatchesPublisher: AnyPublisher<[DialogHistoryPatch], Never> {
         dialogPatchesSubject.eraseToAnyPublisher()
     }
@@ -33,6 +36,7 @@ final class ChatViewModel {
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
 
+    /// Создаёт ViewModel чата и загружает начальное состояние.
     init(
         sessionID: UUID,
         branchID: UUID,
@@ -59,13 +63,17 @@ final class ChatViewModel {
         }
     }
 
+    /// Применяет актуальные настройки, пришедшие из SettingsViewModel.
     func apply(settings: LLMSettings) {
         currentSettings = settings
     }
 
+    /// Отправляет пользовательский текст в активную ветку.
     func send(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return }
+        // Фиксируем ветку на момент отправки: если пользователь быстро переключится,
+        // ответ и метрики все равно сохранятся в исходную ветку.
         let targetBranchID = activeBranchID
 
         let userState = DialogHistoryItemViewState(
@@ -126,6 +134,7 @@ final class ChatViewModel {
         }
     }
 
+    /// Переключает активную ветку по индексу выбранной строки в истории.
     func selectHistoryItem(at index: Int) {
         guard !isSending else { return }
         guard historyItems.indices.contains(index) else { return }
@@ -135,11 +144,13 @@ final class ChatViewModel {
         Task { [weak self] in
             guard let self else { return }
             do {
+                // Доменное переключение: обновляем activeBranchID у сессии в репозитории.
                 _ = try await self.switchBranchUseCase.execute(
                     sessionID: self.sessionID,
                     targetBranchID: selected.id
                 )
                 self.activeBranchID = selected.id
+                // Нотификация нужна, чтобы Settings/SessionInfo переключились на ту же ветку.
                 self.onActiveBranchChanged?(selected.id)
                 try await self.refreshHistoryItems()
                 try await self.loadDialog(for: selected.id)
@@ -155,6 +166,7 @@ final class ChatViewModel {
         }
     }
 
+    /// Создаёт новую ветку, клонирует в неё текущий диалог и переключается на неё.
     func createBranch() {
         guard !isSending else { return }
         let nextName = nextBranchName()
@@ -169,6 +181,8 @@ final class ChatViewModel {
                     parentCheckpointID: nil,
                     name: nextName
                 )
+                // Новая ветка стартует с копией текущего диалога, чтобы можно было продолжить
+                // обсуждение от текущего контекста, не теряя уже набранную историю.
                 try await self.cloneDialogToBranchUseCase.execute(
                     sourceBranchID: sourceBranchID,
                     targetBranchID: branch.id
@@ -182,6 +196,7 @@ final class ChatViewModel {
                     sourceBranchName: sourceBranchName
                 )
                 self.activeBranchID = branch.id
+                // После создания ветки синхронизируем все панели так же, как и при обычном switch.
                 self.onActiveBranchChanged?(branch.id)
                 try await self.refreshHistoryItems()
                 try await self.loadDialog(for: branch.id)
@@ -197,11 +212,13 @@ final class ChatViewModel {
         }
     }
 
+    /// Заменяет временное состояние сообщения (например, streaming -> sent/failed).
     private func replaceDialogItem(_ state: DialogHistoryItemViewState) {
         guard let index = dialogItems.firstIndex(where: { $0.id == state.id }) else { return }
         dialogItems[index] = state
     }
 
+    /// Загружает список веток и сообщения для стартовой активной ветки.
     private func loadInitialState() async {
         do {
             try await refreshHistoryItems()
@@ -217,6 +234,7 @@ final class ChatViewModel {
         }
     }
 
+    /// Перечитывает ветки сессии и обновляет индикатор активной ветки.
     private func refreshHistoryItems() async throws {
         let branches = try await fetchBranchesUseCase.execute(sessionID: sessionID)
         historyItems = branches.map {
@@ -224,6 +242,7 @@ final class ChatViewModel {
         }
     }
 
+    /// Загружает все сообщения выбранной ветки и маппит их в view state.
     private func loadDialog(for branchID: UUID) async throws {
         let messages = try await fetchMessagesUseCase.execute(branchID: branchID)
         dialogItems = messages.map { message in
@@ -237,6 +256,7 @@ final class ChatViewModel {
         }
     }
 
+    /// Генерирует следующее имя ветки в формате `branch-N`.
     private func nextBranchName() -> String {
         let prefix = "branch-"
         let indices = historyItems.compactMap { item -> Int? in
@@ -246,11 +266,13 @@ final class ChatViewModel {
         return "\(prefix)\((indices.max() ?? 0) + 1)"
     }
 
+    /// Возвращает отображаемое имя ветки по идентификатору.
     private func resolveBranchName(branchID: UUID) async throws -> String {
         let branches = try await fetchBranchesUseCase.execute(sessionID: sessionID)
         return branches.first(where: { $0.id == branchID })?.name ?? "unknown"
     }
 
+    /// Преобразует доменную роль сообщения в UI-тип ячейки.
     private func kind(for role: MessageRole) -> DialogMessageKind {
         switch role {
         case .system:

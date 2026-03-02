@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 
+/// ViewModel панели агрегированных метрик по активной ветке.
 final class SessionInfoViewModel {
     @Published private(set) var snapshot = SessionInfoSnapshot(
         totalInputTokens: 0,
@@ -13,6 +14,7 @@ final class SessionInfoViewModel {
     private var activeBranchID: UUID
     private let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
 
+    /// Создаёт ViewModel метрик для конкретной сессии и активной ветки.
     init(
         sessionID: UUID,
         activeBranchID: UUID,
@@ -23,10 +25,12 @@ final class SessionInfoViewModel {
         self.collectSessionMetricsUseCase = collectSessionMetricsUseCase
     }
 
+    /// Переключает ветку, по которой должна считаться статистика.
     func switchActiveBranch(to branchID: UUID) {
         activeBranchID = branchID
     }
 
+    /// Запрашивает и публикует актуальный snapshot метрик для текущей ветки.
     func refresh() {
         Task { [weak self] in
             guard let self else { return }

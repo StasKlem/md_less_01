@@ -1,17 +1,23 @@
 import Foundation
 
+/// Список поддерживаемых LLM-моделей.
 enum LLMModel: String, CaseIterable, Codable {
     case deepseekV32 = "deepseek/deepseek-v3.2"
     case gpt4oMini = "gpt-4o-mini"
     case gpt4o = "gpt-4o"
 }
 
+/// Способ формирования контекста для запроса к модели.
 enum ContextStrategy: String, CaseIterable, Codable {
+    // Полный контекст ветки (без system-сообщений).
     case normal
+    // Последние N сообщений ветки.
     case slidingWindow
+    // Последние N сообщений + sticky facts на уровне сессии.
     case stickyFacts
 }
 
+/// Пользовательские настройки LLM и стратегии контекста на уровне сессии.
 struct LLMSettings: Codable, Equatable {
     var model: LLMModel
     var contextStrategy: ContextStrategy
@@ -19,6 +25,7 @@ struct LLMSettings: Codable, Equatable {
     var windowSize: Int
     var contextStrategyByBranch: [UUID: ContextStrategy]
 
+    /// Значения настроек по умолчанию для новой сессии.
     static let `default` = LLMSettings(
         model: .deepseekV32,
         contextStrategy: .normal,
@@ -27,16 +34,22 @@ struct LLMSettings: Codable, Equatable {
         contextStrategyByBranch: [:]
     )
 
+    /// Возвращает стратегию для указанной ветки с fallback на общее значение.
     func contextStrategy(for branchID: UUID) -> ContextStrategy {
+        // Если для ветки нет явной настройки, используем общее значение.
         contextStrategyByBranch[branchID] ?? contextStrategy
     }
 
+    /// Устанавливает стратегию для указанной ветки и синхронизирует текущее значение UI.
     mutating func setContextStrategy(_ strategy: ContextStrategy, for branchID: UUID) {
+        // Сохраняем стратегию отдельно для активной ветки.
         contextStrategyByBranch[branchID] = strategy
+        // И синхронно обновляем "текущее" поле для корректного отображения в UI.
         contextStrategy = strategy
     }
 }
 
+/// Метрика одного запроса в LLM.
 struct RequestMetric: Identifiable, Codable, Equatable {
     let id: UUID
     let messageID: UUID
@@ -48,6 +61,7 @@ struct RequestMetric: Identifiable, Codable, Equatable {
     let outputTokens: Int
 }
 
+/// Агрегированная статистика по ветке для панели Session Info.
 struct SessionInfoSnapshot: Equatable {
     let totalInputTokens: Int
     let totalOutputTokens: Int

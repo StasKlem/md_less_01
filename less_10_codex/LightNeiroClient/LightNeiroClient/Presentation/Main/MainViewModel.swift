@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+/// Корневой coordinator ViewModel:
+/// связывает чат, настройки и панель метрик в единый поток событий.
 final class MainViewModel {
     let chatViewModel: ChatViewModel
     let settingsViewModel: SettingsViewModel
@@ -8,6 +10,7 @@ final class MainViewModel {
 
     private var cancellables = Set<AnyCancellable>()
 
+    /// Создаёт MainViewModel и настраивает подписки между дочерними ViewModel.
     init(
         chatViewModel: ChatViewModel,
         settingsViewModel: SettingsViewModel,
@@ -22,6 +25,8 @@ final class MainViewModel {
         }
 
         chatViewModel.onActiveBranchChanged = { [weak self] branchID in
+            // Единая точка синхронизации branch-switch для правой панели:
+            // настройки и метрики всегда должны смотреть на ту же ветку, что и чат.
             self?.settingsViewModel.switchActiveBranch(to: branchID)
             self?.sessionInfoViewModel.switchActiveBranch(to: branchID)
             self?.sessionInfoViewModel.refresh()
