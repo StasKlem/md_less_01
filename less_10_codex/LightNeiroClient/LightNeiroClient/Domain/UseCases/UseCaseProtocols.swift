@@ -21,7 +21,7 @@ protocol CloneDialogToBranchUseCaseProtocol {
 }
 
 protocol UpdateFactsUseCaseProtocol {
-    func execute(sessionID: UUID, latestUserMessage: String, settings: LLMSettings) async throws
+    func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws
 }
 
 protocol CreateCheckpointUseCaseProtocol {

@@ -84,40 +84,44 @@ final class CloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol {
 
 final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
     private let factsRepository: FactsRepositoryProtocol
+    private let messageRepository: MessageRepositoryProtocol
     private let llmClient: LLMClientProtocol
     private let decoder = JSONDecoder()
 
-    init(factsRepository: FactsRepositoryProtocol, llmClient: LLMClientProtocol) {
+    init(
+        factsRepository: FactsRepositoryProtocol,
+        messageRepository: MessageRepositoryProtocol,
+        llmClient: LLMClientProtocol
+    ) {
         self.factsRepository = factsRepository
+        self.messageRepository = messageRepository
         self.llmClient = llmClient
     }
 
-    func execute(sessionID: UUID, latestUserMessage: String, settings: LLMSettings) async throws {
+    func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws {
         let trimmed = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         let existing = try await factsRepository.fetchFacts(sessionID: sessionID)
-        let extracted = try await extractFactsUsingLLM(from: trimmed, settings: settings)
+        let extractionMessages = try await buildExtractionMessages(branchID: branchID, latestUserMessage: trimmed)
+        let extracted = try await extractFactsUsingLLM(messages: extractionMessages, settings: settings)
         let merged = mergeFacts(existing: existing, with: extracted, sessionID: sessionID, lastUserMessage: trimmed)
         try await factsRepository.upsertFacts(sessionID: sessionID, facts: merged)
     }
 
-    private func extractFactsUsingLLM(from text: String, settings: LLMSettings) async throws -> [StickyFactCandidate] {
-        let requestText = """
-        Extract only durable and important facts from the user message.
-        Output strict JSON object only.
-        Allowed keys: goal, constraints, preferences, decisions, agreements.
-        Values must be short strings.
-        Omit keys with no new info.
-        User message:
-        \(text)
-        """
-
+    private func extractFactsUsingLLM(messages: [ChatMessage], settings: LLMSettings) async throws -> [StickyFactCandidate] {
         let response = try await llmClient.send(
             request: LLMRequest(
-                systemPrompt: "You extract structured memory for chat context.",
+                systemPrompt: """
+                You extract structured memory for chat context.
+                Analyze only durable and important facts from the conversation.
+                Output strict JSON object only.
+                Allowed keys: goal, constraints, preferences, decisions, agreements.
+                Values must be short strings.
+                Omit keys with no new info.
+                """,
                 facts: [],
-                messages: [ChatMessage(branchID: UUID(), role: .user, content: requestText)],
+                messages: messages,
                 settings: LLMSettings(
                     model: settings.model,
                     contextStrategy: .normal,
@@ -132,6 +136,26 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
         guard let data = payload.data(using: String.Encoding.utf8) else { return [] }
         let decoded = try decoder.decode(LLMFactExtractionResult.self, from: data)
         return decoded.candidates
+    }
+
+    private func buildExtractionMessages(branchID: UUID, latestUserMessage: String) async throws -> [ChatMessage] {
+        let history = try await messageRepository.fetchMessages(branchID: branchID)
+        let assistantReply = history
+            .last(where: { $0.role == .assistant })?
+            .content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let assistantContent: String
+        if let assistantReply, !assistantReply.isEmpty {
+            assistantContent = assistantReply
+        } else {
+            assistantContent = "No previous assistant response."
+        }
+
+        return [
+            ChatMessage(branchID: branchID, role: .assistant, content: assistantContent),
+            ChatMessage(branchID: branchID, role: .user, content: latestUserMessage)
+        ]
     }
 
     private func extractJSONObject(from text: String) -> String {
@@ -239,7 +263,12 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
         if settings.contextStrategy(for: branchID) == .stickyFacts {
             // Fact extraction should not block the main assistant response path.
-            try? await updateFactsUseCase.execute(sessionID: sessionID, latestUserMessage: userText, settings: settings)
+            try? await updateFactsUseCase.execute(
+                sessionID: sessionID,
+                branchID: branchID,
+                latestUserMessage: userText,
+                settings: settings
+            )
         }
 
         let context = try await buildContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
