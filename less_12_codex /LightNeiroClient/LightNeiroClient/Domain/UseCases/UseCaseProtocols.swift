@@ -12,6 +12,10 @@ protocol FetchBranchesUseCaseProtocol {
     func execute(sessionID: UUID) async throws -> [ChatBranch]
 }
 
+protocol FetchCheckpointsUseCaseProtocol {
+    func execute(branchID: UUID) async throws -> [ChatCheckpoint]
+}
+
 protocol FetchMessagesUseCaseProtocol {
     func execute(branchID: UUID) async throws -> [ChatMessage]
 }

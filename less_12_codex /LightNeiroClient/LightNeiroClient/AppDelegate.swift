@@ -57,8 +57,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 branchID: environment.branchID,
                 sendMessageUseCase: environment.sendMessageUseCase,
                 fetchBranchesUseCase: environment.fetchBranchesUseCase,
+                fetchCheckpointsUseCase: environment.fetchCheckpointsUseCase,
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,
                 cloneDialogToBranchUseCase: environment.cloneDialogToBranchUseCase,
+                createCheckpointUseCase: environment.createCheckpointUseCase,
                 switchBranchUseCase: environment.switchBranchUseCase,
                 createBranchUseCase: environment.createBranchUseCase,
                 addBranchCreatedSystemMessageUseCase: environment.addBranchCreatedSystemMessageUseCase

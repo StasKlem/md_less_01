@@ -8,6 +8,7 @@ protocol ChatSessionRepositoryProtocol {
 
 protocol BranchRepositoryProtocol {
     func fetchBranches(sessionID: UUID) async throws -> [ChatBranch]
+    func fetchCheckpoints(branchID: UUID) async throws -> [ChatCheckpoint]
     func saveBranch(_ branch: ChatBranch) async throws
     func saveCheckpoint(_ checkpoint: ChatCheckpoint) async throws
 }

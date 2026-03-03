@@ -8,10 +8,19 @@ struct ChatHistoryItem: Equatable {
     let isActive: Bool
 }
 
+/// Узел дерева веток для отображения в outline view.
+struct ChatBranchTreeItem: Equatable {
+    let id: UUID
+    let title: String
+    let isActive: Bool
+    let children: [ChatBranchTreeItem]
+}
+
 @MainActor
 /// ViewModel чата: история веток, сообщения активной ветки и действия пользователя.
 final class ChatViewModel {
     @Published private(set) var historyItems: [ChatHistoryItem] = []
+    @Published private(set) var branchTreeItems: [ChatBranchTreeItem] = []
     @Published private(set) var dialogItems: [DialogHistoryItemViewState] = []
     @Published private(set) var isSending = false
 
@@ -27,8 +36,10 @@ final class ChatViewModel {
     private var activeBranchID: UUID
     private let sendMessageUseCase: SendMessageUseCaseProtocol
     private let fetchBranchesUseCase: FetchBranchesUseCaseProtocol
+    private let fetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol
     private let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
     private let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
+    private let createCheckpointUseCase: CreateCheckpointUseCaseProtocol
     private let switchBranchUseCase: SwitchBranchUseCaseProtocol
     private let createBranchUseCase: CreateBranchUseCaseProtocol
     private let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
@@ -42,8 +53,10 @@ final class ChatViewModel {
         branchID: UUID,
         sendMessageUseCase: SendMessageUseCaseProtocol,
         fetchBranchesUseCase: FetchBranchesUseCaseProtocol,
+        fetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol,
         fetchMessagesUseCase: FetchMessagesUseCaseProtocol,
         cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol,
+        createCheckpointUseCase: CreateCheckpointUseCaseProtocol,
         switchBranchUseCase: SwitchBranchUseCaseProtocol,
         createBranchUseCase: CreateBranchUseCaseProtocol,
         addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
@@ -52,8 +65,10 @@ final class ChatViewModel {
         self.activeBranchID = branchID
         self.sendMessageUseCase = sendMessageUseCase
         self.fetchBranchesUseCase = fetchBranchesUseCase
+        self.fetchCheckpointsUseCase = fetchCheckpointsUseCase
         self.fetchMessagesUseCase = fetchMessagesUseCase
         self.cloneDialogToBranchUseCase = cloneDialogToBranchUseCase
+        self.createCheckpointUseCase = createCheckpointUseCase
         self.switchBranchUseCase = switchBranchUseCase
         self.createBranchUseCase = createBranchUseCase
         self.addBranchCreatedSystemMessageUseCase = addBranchCreatedSystemMessageUseCase
@@ -135,12 +150,10 @@ final class ChatViewModel {
         }
     }
 
-    /// Переключает активную ветку по индексу выбранной строки в истории.
-    func selectHistoryItem(at index: Int) {
+    /// Переключает активную ветку по её идентификатору.
+    func selectBranch(id: UUID) {
         guard !isSending else { return }
-        guard historyItems.indices.contains(index) else { return }
-        let selected = historyItems[index]
-        guard selected.id != activeBranchID else { return }
+        guard id != activeBranchID else { return }
 
         Task { [weak self] in
             guard let self else { return }
@@ -148,13 +161,13 @@ final class ChatViewModel {
                 // Доменное переключение: обновляем activeBranchID у сессии в репозитории.
                 _ = try await self.switchBranchUseCase.execute(
                     sessionID: self.sessionID,
-                    targetBranchID: selected.id
+                    targetBranchID: id
                 )
-                self.activeBranchID = selected.id
+                self.activeBranchID = id
                 // Нотификация нужна, чтобы Settings/SessionInfo переключились на ту же ветку.
-                self.onActiveBranchChanged?(selected.id)
+                self.onActiveBranchChanged?(id)
                 try await self.refreshHistoryItems()
-                try await self.loadDialog(for: selected.id)
+                try await self.loadDialog(for: id)
             } catch {
                 self.dialogItems.append(
                     DialogHistoryItemViewState(
@@ -177,9 +190,18 @@ final class ChatViewModel {
             guard let self else { return }
             do {
                 let sourceBranchName = try await self.resolveBranchName(branchID: sourceBranchID)
+                let sourceMessages = try await self.fetchMessagesUseCase.execute(branchID: sourceBranchID)
+                var checkpoint: ChatCheckpoint?
+                if let lastMessage = sourceMessages.last {
+                    checkpoint = try await self.createCheckpointUseCase.execute(
+                        branchID: sourceBranchID,
+                        messageID: lastMessage.id,
+                        name: "branch-point"
+                    )
+                }
                 let branch = try await self.createBranchUseCase.execute(
                     sessionID: self.sessionID,
-                    parentCheckpointID: nil,
+                    parentCheckpointID: checkpoint?.id,
                     name: nextName
                 )
                 // Новая ветка стартует с копией текущего диалога, чтобы можно было продолжить
@@ -241,6 +263,7 @@ final class ChatViewModel {
         historyItems = branches.map {
             ChatHistoryItem(id: $0.id, title: $0.name, isActive: $0.id == activeBranchID)
         }
+        branchTreeItems = try await buildBranchTreeItems(from: branches)
     }
 
     /// Загружает все сообщения выбранной ветки и маппит их в view state.
@@ -271,6 +294,45 @@ final class ChatViewModel {
     private func resolveBranchName(branchID: UUID) async throws -> String {
         let branches = try await fetchBranchesUseCase.execute(sessionID: sessionID)
         return branches.first(where: { $0.id == branchID })?.name ?? "unknown"
+    }
+
+    private func buildBranchTreeItems(from branches: [ChatBranch]) async throws -> [ChatBranchTreeItem] {
+        var checkpointsByID: [UUID: ChatCheckpoint] = [:]
+        for branch in branches {
+            let checkpoints = try await fetchCheckpointsUseCase.execute(branchID: branch.id)
+            for checkpoint in checkpoints {
+                checkpointsByID[checkpoint.id] = checkpoint
+            }
+        }
+
+        let sortedBranches = branches.sorted { $0.createdAt < $1.createdAt }
+        let branchByID = Dictionary(uniqueKeysWithValues: sortedBranches.map { ($0.id, $0) })
+        var childrenByParent: [UUID: [UUID]] = [:]
+        var roots: [UUID] = []
+
+        for branch in sortedBranches {
+            guard let parentCheckpointID = branch.parentCheckpointID,
+                  let parentCheckpoint = checkpointsByID[parentCheckpointID],
+                  branchByID[parentCheckpoint.branchID] != nil else {
+                roots.append(branch.id)
+                continue
+            }
+            childrenByParent[parentCheckpoint.branchID, default: []].append(branch.id)
+        }
+
+        func buildNode(branchID: UUID) -> ChatBranchTreeItem? {
+            guard let branch = branchByID[branchID] else { return nil }
+            let childIDs = childrenByParent[branchID] ?? []
+            let children = childIDs.compactMap(buildNode(branchID:))
+            return ChatBranchTreeItem(
+                id: branch.id,
+                title: branch.name,
+                isActive: branch.id == activeBranchID,
+                children: children
+            )
+        }
+
+        return roots.compactMap(buildNode(branchID:))
     }
 
     /// Преобразует доменную роль сообщения в UI-тип ячейки.

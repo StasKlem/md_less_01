@@ -104,6 +104,18 @@ final class FetchBranchesUseCase: FetchBranchesUseCaseProtocol {
     }
 }
 
+final class FetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol {
+    private let branchRepository: BranchRepositoryProtocol
+
+    init(branchRepository: BranchRepositoryProtocol) {
+        self.branchRepository = branchRepository
+    }
+
+    func execute(branchID: UUID) async throws -> [ChatCheckpoint] {
+        try await branchRepository.fetchCheckpoints(branchID: branchID)
+    }
+}
+
 final class FetchMessagesUseCase: FetchMessagesUseCaseProtocol {
     private let messageRepository: MessageRepositoryProtocol
 

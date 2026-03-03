@@ -40,6 +40,10 @@ struct MockBranchRepository: BranchRepositoryProtocol {
         await store.branches[sessionID] ?? []
     }
 
+    func fetchCheckpoints(branchID: UUID) async throws -> [ChatCheckpoint] {
+        (await store.checkpoints[branchID] ?? []).sorted { $0.createdAt < $1.createdAt }
+    }
+
     func saveBranch(_ branch: ChatBranch) async throws {
         var current = await store.branches[branch.sessionID] ?? []
         current.removeAll { $0.id == branch.id }

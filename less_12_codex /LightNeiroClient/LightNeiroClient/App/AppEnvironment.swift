@@ -6,8 +6,10 @@ struct AppEnvironment {
 
     let sendMessageUseCase: SendMessageUseCaseProtocol
     let fetchBranchesUseCase: FetchBranchesUseCaseProtocol
+    let fetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol
     let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
     let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
+    let createCheckpointUseCase: CreateCheckpointUseCaseProtocol
     let createBranchUseCase: CreateBranchUseCaseProtocol
     let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
@@ -65,6 +67,7 @@ struct AppEnvironment {
         let saveUserPromptProfiles = SaveUserPromptProfilesUseCase(longTermMemoryRepository: longTermMemoryRepository)
         let resolveUserPromptPrefix = ResolveUserPromptPrefixUseCase(fetchUserPromptProfilesUseCase: fetchUserPromptProfiles)
         let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
+        let fetchCheckpoints = FetchCheckpointsUseCase(branchRepository: branchRepository)
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
         let cloneDialogToBranch = CloneDialogToBranchUseCase(messageRepository: messageRepository)
         let sendMessage = SendMessageUseCase(
@@ -78,6 +81,7 @@ struct AppEnvironment {
             metricsRepository: metricsRepository,
             resolveUserPromptPrefixUseCase: resolveUserPromptPrefix
         )
+        let createCheckpoint = CreateCheckpointUseCase(branchRepository: branchRepository)
         let createBranch = CreateBranchUseCase(branchRepository: branchRepository)
         let addBranchCreatedSystemMessage = AddBranchCreatedSystemMessageUseCase(messageRepository: messageRepository)
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
@@ -111,8 +115,10 @@ struct AppEnvironment {
             branchID: branchID,
             sendMessageUseCase: sendMessage,
             fetchBranchesUseCase: fetchBranches,
+            fetchCheckpointsUseCase: fetchCheckpoints,
             fetchMessagesUseCase: fetchMessages,
             cloneDialogToBranchUseCase: cloneDialogToBranch,
+            createCheckpointUseCase: createCheckpoint,
             createBranchUseCase: createBranch,
             addBranchCreatedSystemMessageUseCase: addBranchCreatedSystemMessage,
             applySettingsUseCase: applySettings,

@@ -1,11 +1,36 @@
 import Cocoa
 import Combine
 
+private final class BranchTreeNode {
+    let id: UUID
+    let title: String
+    let isActive: Bool
+    let children: [BranchTreeNode]
+
+    init(id: UUID, title: String, isActive: Bool, children: [BranchTreeNode]) {
+        self.id = id
+        self.title = title
+        self.isActive = isActive
+        self.children = children
+    }
+}
+
+private func makeBranchTreeNode(from item: ChatBranchTreeItem) -> BranchTreeNode {
+    let children = item.children.map(makeBranchTreeNode(from:))
+    return BranchTreeNode(
+        id: item.id,
+        title: item.title,
+        isActive: item.isActive,
+        children: children
+    )
+}
+
 final class ChatSidebarViewController: NSViewController {
     private let viewModel: ChatViewModel
     private var cancellables = Set<AnyCancellable>()
+    private var rootNodes: [BranchTreeNode] = []
 
-    private let historyTableView = NSTableView()
+    private let branchOutlineView = NSOutlineView()
     private let newBranchButton = NSButton(title: "New Branch", target: nil, action: nil)
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
     private let inputField = NSTextField()
@@ -35,17 +60,20 @@ final class ChatSidebarViewController: NSViewController {
 
     private func setupUI() {
         let historyScroll = NSScrollView()
-        historyScroll.documentView = historyTableView
+        historyScroll.documentView = branchOutlineView
         historyScroll.hasVerticalScroller = true
 
-        historyTableView.headerView = nil
+        branchOutlineView.headerView = nil
 
         let historyColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("history"))
         historyColumn.title = "Chats"
-        historyTableView.addTableColumn(historyColumn)
+        historyColumn.resizingMask = .autoresizingMask
+        branchOutlineView.addTableColumn(historyColumn)
+        branchOutlineView.outlineTableColumn = historyColumn
 
-        historyTableView.delegate = self
-        historyTableView.dataSource = self
+        branchOutlineView.delegate = self
+        branchOutlineView.dataSource = self
+        branchOutlineView.selectionHighlightStyle = .regular
 
         newBranchButton.target = self
         newBranchButton.action = #selector(createBranchTapped)
@@ -82,14 +110,14 @@ final class ChatSidebarViewController: NSViewController {
     }
 
     private func bind() {
-        viewModel.$historyItems
+        viewModel.$branchTreeItems
             .receive(on: DispatchQueue.main)
             .sink { [weak self] items in
                 guard let self else { return }
-                self.historyTableView.reloadData()
-                if let activeIndex = items.firstIndex(where: \.isActive) {
-                    self.historyTableView.selectRowIndexes(IndexSet(integer: activeIndex), byExtendingSelection: false)
-                }
+                self.rootNodes = items.map(makeBranchTreeNode(from:))
+                self.branchOutlineView.reloadData()
+                self.expandAllNodes()
+                self.selectActiveNode()
             }
             .store(in: &cancellables)
 
@@ -126,23 +154,67 @@ final class ChatSidebarViewController: NSViewController {
     private func createBranchTapped() {
         viewModel.createBranch()
     }
-}
 
-extension ChatSidebarViewController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        viewModel.historyItems.count
+    private func expandAllNodes() {
+        func expandRecursively(_ node: BranchTreeNode) {
+            guard !node.children.isEmpty else { return }
+            branchOutlineView.expandItem(node, expandChildren: false)
+            node.children.forEach(expandRecursively)
+        }
+        rootNodes.forEach(expandRecursively)
     }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+    private func selectActiveNode() {
+        func findActive(in nodes: [BranchTreeNode]) -> BranchTreeNode? {
+            for node in nodes {
+                if node.isActive {
+                    return node
+                }
+                if let nested = findActive(in: node.children) {
+                    return nested
+                }
+            }
+            return nil
+        }
+
+        guard let active = findActive(in: rootNodes) else {
+            branchOutlineView.deselectAll(nil)
+            return
+        }
+
+        let row = branchOutlineView.row(forItem: active)
+        guard row >= 0 else { return }
+        branchOutlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+    }
+}
+
+extension ChatSidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        guard let node = item as? BranchTreeNode else { return rootNodes.count }
+        return node.children.count
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        guard let node = item as? BranchTreeNode else { return false }
+        return !node.children.isEmpty
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        guard let node = item as? BranchTreeNode else { return rootNodes[index] }
+        return node.children[index]
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         let cell = NSTextField(labelWithString: "")
         cell.lineBreakMode = .byTruncatingTail
 
-        let item = viewModel.historyItems[row]
-        cell.stringValue = item.isActive ? "• \(item.title)" : item.title
+        guard let node = item as? BranchTreeNode else { return cell }
+        cell.stringValue = node.isActive ? "• \(node.title)" : node.title
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        viewModel.selectHistoryItem(at: historyTableView.selectedRow)
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        guard let node = branchOutlineView.item(atRow: branchOutlineView.selectedRow) as? BranchTreeNode else { return }
+        viewModel.selectBranch(id: node.id)
     }
 }
