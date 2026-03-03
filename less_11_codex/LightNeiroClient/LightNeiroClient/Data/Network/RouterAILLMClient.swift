@@ -107,14 +107,22 @@ final class RouterAILLMClient: LLMClientProtocol {
             messages.append(.init(role: .system, content: systemPrompt))
         }
 
-        if !request.facts.isEmpty {
-            let factsBlock = request.facts
+        if !request.workingMemory.isEmpty {
+            let workingBlock = request.workingMemory
                 .map { "\($0.key): \($0.value)" }
                 .joined(separator: "\n")
-            messages.append(.init(role: .system, content: "Known facts:\n\(factsBlock)"))
+            messages.append(.init(role: .system, content: "WORKING_MEMORY:\n\(workingBlock)"))
         }
 
-        messages.append(contentsOf: request.messages.map {
+        if !request.longTermMemory.isEmpty {
+            let longTermBlock = request.longTermMemory
+                .map { "[\($0.namespace.rawValue)] \($0.key): \($0.value)" }
+                .joined(separator: "\n")
+            messages.append(.init(role: .system, content: "LONG_TERM_MEMORY:\n\(longTermBlock)"))
+        }
+
+        messages.append(.init(role: .system, content: "RECENT_DIALOG:"))
+        messages.append(contentsOf: request.shortTermMessages.map {
             RouterAIMessagePayload(role: .init(domainRole: $0.role), content: $0.content)
         })
 

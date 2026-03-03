@@ -4,8 +4,8 @@ protocol SendMessageUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage
 }
 
-protocol BuildContextUseCaseProtocol {
-    func execute(sessionID: UUID, branchID: UUID, settings: LLMSettings) async throws -> (facts: [StickyFact], messages: [ChatMessage])
+protocol BuildMemoryContextUseCaseProtocol {
+    func execute(sessionID: UUID, branchID: UUID, settings: LLMSettings) async throws -> MemoryContext
 }
 
 protocol FetchBranchesUseCaseProtocol {
@@ -20,7 +20,20 @@ protocol CloneDialogToBranchUseCaseProtocol {
     func execute(sourceBranchID: UUID, targetBranchID: UUID) async throws
 }
 
-protocol UpdateFactsUseCaseProtocol {
+protocol UpdateShortTermMemoryUseCaseProtocol {
+    func execute(sessionID: UUID, branchID: UUID, windowSize: Int) async throws
+}
+
+protocol UpdateWorkingMemoryUseCaseProtocol {
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        latestUserMessage: String,
+        latestAssistantMessage: String?
+    ) async throws
+}
+
+protocol UpdateLongTermMemoryUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws
 }
 

@@ -2,8 +2,9 @@ import Foundation
 
 struct LLMRequest {
     let systemPrompt: String
-    let facts: [StickyFact]
-    let messages: [ChatMessage]
+    let shortTermMessages: [ChatMessage]
+    let workingMemory: [WorkingMemoryItem]
+    let longTermMemory: [LongTermMemoryItem]
     let settings: LLMSettings
 }
 
@@ -23,7 +24,7 @@ protocol ContextBuilderProtocol {
         sessionID: UUID,
         branchID: UUID,
         settings: LLMSettings
-    ) async throws -> (facts: [StickyFact], messages: [ChatMessage])
+    ) async throws -> MemoryContext
 }
 
 protocol APIKeyStoreProtocol {

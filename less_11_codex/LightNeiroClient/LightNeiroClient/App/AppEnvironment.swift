@@ -21,6 +21,9 @@ struct AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
         let branchRepository = MockBranchRepository()
         let messageRepository = MockMessageRepository()
+        let shortTermRepository = MockShortTermMemoryRepository()
+        let workingMemoryRepository = MockWorkingMemoryRepository()
+        let longTermMemoryRepository = FileLongTermMemoryRepository()
         let factsRepository = MockFactsRepository()
         let settingsRepository = MockSettingsRepository()
         let metricsRepository = MockMetricsRepository()
@@ -37,14 +40,24 @@ struct AppEnvironment {
             )
         )
 
-        let buildContext = BuildContextUseCase(
-            factsRepository: factsRepository,
+        let buildMemoryContext = BuildMemoryContextUseCase(
+            shortTermRepository: shortTermRepository,
+            workingMemoryRepository: workingMemoryRepository,
+            longTermMemoryRepository: longTermMemoryRepository,
             messageRepository: messageRepository
         )
-        let updateFacts = UpdateFactsUseCase(
-            factsRepository: factsRepository,
+        let updateShortTermMemory = UpdateShortTermMemoryUseCase(
             messageRepository: messageRepository,
-            llmClient: llmClient
+            shortTermRepository: shortTermRepository
+        )
+        let updateWorkingMemory = UpdateWorkingMemoryUseCase(
+            workingMemoryRepository: workingMemoryRepository
+        )
+        let updateLongTermMemory = UpdateLongTermMemoryUseCase(
+            longTermRepository: longTermMemoryRepository,
+            messageRepository: messageRepository,
+            llmClient: llmClient,
+            legacyFactsRepository: factsRepository
         )
         let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
@@ -53,8 +66,10 @@ struct AppEnvironment {
             settingsRepository: settingsRepository,
             messageRepository: messageRepository,
             llmClient: llmClient,
-            buildContextUseCase: buildContext,
-            updateFactsUseCase: updateFacts,
+            buildMemoryContextUseCase: buildMemoryContext,
+            updateShortTermMemoryUseCase: updateShortTermMemory,
+            updateWorkingMemoryUseCase: updateWorkingMemory,
+            updateLongTermMemoryUseCase: updateLongTermMemory,
             metricsRepository: metricsRepository
         )
         let createBranch = CreateBranchUseCase(branchRepository: branchRepository)

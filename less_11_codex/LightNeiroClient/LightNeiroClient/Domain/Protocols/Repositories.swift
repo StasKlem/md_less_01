@@ -17,6 +17,24 @@ protocol MessageRepositoryProtocol {
     func saveMessage(_ message: ChatMessage) async throws
 }
 
+protocol ShortTermMemoryRepositoryProtocol {
+    func fetchSnapshot(sessionID: UUID, branchID: UUID) async throws -> ShortTermMemorySnapshot?
+    func saveSnapshot(_ snapshot: ShortTermMemorySnapshot) async throws
+    func clear(sessionID: UUID, branchID: UUID) async throws
+}
+
+protocol WorkingMemoryRepositoryProtocol {
+    func fetchActive(sessionID: UUID, branchID: UUID) async throws -> [WorkingMemoryItem]
+    func upsert(sessionID: UUID, branchID: UUID, items: [WorkingMemoryItem]) async throws
+    func resolve(sessionID: UUID, branchID: UUID, keys: [String]) async throws
+}
+
+protocol LongTermMemoryRepositoryProtocol {
+    func fetch(sessionID: UUID, namespaces: [LongTermMemoryNamespace]?) async throws -> [LongTermMemoryItem]
+    func upsert(sessionID: UUID, items: [LongTermMemoryItem]) async throws
+    func delete(sessionID: UUID, keys: [String]) async throws
+}
+
 protocol FactsRepositoryProtocol {
     func fetchFacts(sessionID: UUID) async throws -> [StickyFact]
     func upsertFacts(sessionID: UUID, facts: [StickyFact]) async throws

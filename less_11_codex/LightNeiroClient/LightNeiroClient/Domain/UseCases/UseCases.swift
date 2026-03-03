@@ -1,41 +1,91 @@
 import Foundation
 
-/// Формирует контекст, который будет отправлен в LLM для конкретной ветки диалога.
-/// Ключевой момент: стратегия контекста может отличаться между ветками одной сессии.
-final class BuildContextUseCase: BuildContextUseCaseProtocol {
-    private let factsRepository: FactsRepositoryProtocol
+/// Формирует unified memory context для конкретной ветки.
+final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
+    private let shortTermRepository: ShortTermMemoryRepositoryProtocol
+    private let workingMemoryRepository: WorkingMemoryRepositoryProtocol
+    private let longTermMemoryRepository: LongTermMemoryRepositoryProtocol
     private let messageRepository: MessageRepositoryProtocol
 
-    /// Создаёт use case сборки контекста.
-    init(factsRepository: FactsRepositoryProtocol, messageRepository: MessageRepositoryProtocol) {
-        self.factsRepository = factsRepository
+    private let maxLongTermItems = 12
+
+    init(
+        shortTermRepository: ShortTermMemoryRepositoryProtocol,
+        workingMemoryRepository: WorkingMemoryRepositoryProtocol,
+        longTermMemoryRepository: LongTermMemoryRepositoryProtocol,
+        messageRepository: MessageRepositoryProtocol
+    ) {
+        self.shortTermRepository = shortTermRepository
+        self.workingMemoryRepository = workingMemoryRepository
+        self.longTermMemoryRepository = longTermMemoryRepository
         self.messageRepository = messageRepository
     }
 
-    /// Собирает набор `facts` и `messages` согласно стратегии активной ветки.
     func execute(
         sessionID: UUID,
         branchID: UUID,
         settings: LLMSettings
-    ) async throws -> (facts: [StickyFact], messages: [ChatMessage]) {
-        // Берем сообщения только активной ветки, чтобы не смешивать параллельные ветки.
-        let branchMessages = try await messageRepository.fetchMessages(branchID: branchID)
-        // System-сообщения служебные (например, "создана ветка..."), в prompt их не передаем.
-        let messages = branchMessages.filter { $0.role != .system }
-        let strategy = settings.contextStrategy(for: branchID)
+    ) async throws -> MemoryContext {
+        let snapshot = try await shortTermRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID)
+        let nonSystemMessages = try await fetchNonSystemMessages(branchID: branchID)
+        let shortTermMessages = selectShortTermMessages(
+            snapshot: snapshot,
+            fallbackMessages: nonSystemMessages,
+            strategy: settings.contextStrategy(for: branchID),
+            windowSize: settings.windowSize
+        )
 
+        let workingMemory = try await workingMemoryRepository.fetchActive(sessionID: sessionID, branchID: branchID)
+        let longTermMemory = try await prioritizedLongTermMemory(sessionID: sessionID)
+
+        return MemoryContext(
+            shortTermMessages: shortTermMessages,
+            workingMemory: workingMemory,
+            longTermMemory: longTermMemory
+        )
+    }
+
+    private func fetchNonSystemMessages(branchID: UUID) async throws -> [ChatMessage] {
+        let branchMessages = try await messageRepository.fetchMessages(branchID: branchID)
+        return branchMessages.filter { $0.role != .system }
+    }
+
+    private func selectShortTermMessages(
+        snapshot: ShortTermMemorySnapshot?,
+        fallbackMessages: [ChatMessage],
+        strategy: ContextStrategy,
+        windowSize: Int
+    ) -> [ChatMessage] {
+        let sourceMessages = snapshot?.messages ?? fallbackMessages
         switch strategy {
         case .normal:
-            // Полная история ветки: максимальная полнота, но выше расход токенов.
-            return ([], messages)
-        case .slidingWindow:
-            // Скользящее окно: ограничиваем контекст последними N сообщениями.
-            return ([], Array(messages.suffix(settings.windowSize)))
-        case .stickyFacts:
-            // Комбинированный режим: короткое окно + долговременная "память" в facts.
-            let facts = try await factsRepository.fetchFacts(sessionID: sessionID)
-            return (facts, Array(messages.suffix(settings.windowSize)))
+            return sourceMessages
+        case .slidingWindow, .stickyFacts:
+            return Array(sourceMessages.suffix(max(1, windowSize)))
         }
+    }
+
+    private func prioritizedLongTermMemory(sessionID: UUID) async throws -> [LongTermMemoryItem] {
+        let items = try await longTermMemoryRepository.fetch(sessionID: sessionID, namespaces: nil)
+        let namespacePriority: [LongTermMemoryNamespace: Int] = [
+            .profile: 0,
+            .decisions: 1,
+            .knowledge: 2
+        ]
+
+        let sorted = items.sorted { lhs, rhs in
+            let leftPriority = namespacePriority[lhs.namespace] ?? Int.max
+            let rightPriority = namespacePriority[rhs.namespace] ?? Int.max
+            if leftPriority != rightPriority {
+                return leftPriority < rightPriority
+            }
+            if lhs.confidence != rhs.confidence {
+                return lhs.confidence > rhs.confidence
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+
+        return Array(sorted.prefix(maxLongTermItems))
     }
 }
 
@@ -100,56 +150,190 @@ final class CloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol {
     }
 }
 
-final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
-    private let factsRepository: FactsRepositoryProtocol
+final class UpdateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol {
+    private let messageRepository: MessageRepositoryProtocol
+    private let shortTermRepository: ShortTermMemoryRepositoryProtocol
+
+    init(
+        messageRepository: MessageRepositoryProtocol,
+        shortTermRepository: ShortTermMemoryRepositoryProtocol
+    ) {
+        self.messageRepository = messageRepository
+        self.shortTermRepository = shortTermRepository
+    }
+
+    func execute(sessionID: UUID, branchID: UUID, windowSize: Int) async throws {
+        let allMessages = try await messageRepository.fetchMessages(branchID: branchID)
+            .filter { $0.role != .system }
+
+        let snapshot = ShortTermMemorySnapshot(
+            sessionID: sessionID,
+            branchID: branchID,
+            messages: Array(allMessages.suffix(max(1, windowSize))),
+            windowSize: max(1, windowSize),
+            updatedAt: Date()
+        )
+        try await shortTermRepository.saveSnapshot(snapshot)
+    }
+}
+
+final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
+    private let workingMemoryRepository: WorkingMemoryRepositoryProtocol
+
+    init(workingMemoryRepository: WorkingMemoryRepositoryProtocol) {
+        self.workingMemoryRepository = workingMemoryRepository
+    }
+
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        latestUserMessage: String,
+        latestAssistantMessage: String?
+    ) async throws {
+        let userText = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userText.isEmpty else { return }
+
+        let active = try await workingMemoryRepository.fetchActive(sessionID: sessionID, branchID: branchID)
+        let extracted = extractCandidates(from: userText, assistantText: latestAssistantMessage ?? "")
+        let merged = merge(active: active, with: extracted, sessionID: sessionID, branchID: branchID)
+        if !merged.isEmpty {
+            try await workingMemoryRepository.upsert(sessionID: sessionID, branchID: branchID, items: merged)
+        }
+
+        let resolvedKeys = resolveKeys(from: userText, assistantText: latestAssistantMessage ?? "")
+        if !resolvedKeys.isEmpty {
+            try await workingMemoryRepository.resolve(sessionID: sessionID, branchID: branchID, keys: resolvedKeys)
+        }
+    }
+
+    private func extractCandidates(from userText: String, assistantText: String) -> [WorkingMemoryCandidate] {
+        let normalized = userText.lowercased()
+        var result: [WorkingMemoryCandidate] = []
+
+        if let value = extractValue(in: userText, prefixes: ["goal:", "цель:"]) {
+            result.append(.init(key: "task.goal", value: value, confidence: 0.9))
+        } else if normalized.contains("need to") || normalized.contains("нужно") {
+            result.append(.init(key: "task.goal", value: userText, confidence: 0.75))
+        }
+
+        if let value = extractValue(in: userText, prefixes: ["constraint:", "ограничение:"]) {
+            result.append(.init(key: "task.constraints", value: value, confidence: 0.85))
+        }
+
+        if let value = extractValue(in: userText, prefixes: ["step:", "шаг:"]) {
+            result.append(.init(key: "task.current_step", value: value, confidence: 0.8))
+        }
+
+        if userText.contains("?") {
+            result.append(.init(key: "task.open_question", value: userText, confidence: 0.75))
+        }
+
+        if let value = extractValue(in: assistantText, prefixes: ["decision:", "решение:"]) {
+            result.append(.init(key: "task.decision", value: value, confidence: 0.8))
+        }
+
+        return result
+    }
+
+    private func merge(
+        active: [WorkingMemoryItem],
+        with candidates: [WorkingMemoryCandidate],
+        sessionID: UUID,
+        branchID: UUID
+    ) -> [WorkingMemoryItem] {
+        var map = Dictionary(uniqueKeysWithValues: active.map { ($0.key, $0) })
+        let now = Date()
+        let taskID = branchID.uuidString
+
+        for candidate in candidates {
+            let trimmedValue = candidate.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedValue.isEmpty else { continue }
+
+            let current = map[candidate.key]
+            map[candidate.key] = WorkingMemoryItem(
+                id: current?.id ?? UUID(),
+                sessionID: sessionID,
+                branchID: branchID,
+                taskID: taskID,
+                key: candidate.key,
+                value: trimmedValue,
+                status: .active,
+                confidence: candidate.confidence,
+                updatedAt: now
+            )
+        }
+
+        return map.values.sorted { $0.key < $1.key }
+    }
+
+    private func resolveKeys(from userText: String, assistantText: String) -> [String] {
+        let markerSet = ["done", "completed", "resolved", "выполнено", "закрыто", "решено"]
+        let combined = "\(userText.lowercased()) \(assistantText.lowercased())"
+        let hasCompletionMarker = markerSet.contains { combined.contains($0) }
+        guard hasCompletionMarker else { return [] }
+        return ["task.current_step", "task.open_question"]
+    }
+
+    private func extractValue(in text: String, prefixes: [String]) -> String? {
+        let lines = text.split(separator: "\n").map(String.init)
+        for line in lines {
+            let lowercasedLine = line.lowercased()
+            for prefix in prefixes where lowercasedLine.hasPrefix(prefix) {
+                let value = line.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { return value }
+            }
+        }
+        return nil
+    }
+}
+
+final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
+    private let longTermRepository: LongTermMemoryRepositoryProtocol
     private let messageRepository: MessageRepositoryProtocol
     private let llmClient: LLMClientProtocol
+    private let legacyFactsRepository: FactsRepositoryProtocol?
     private let decoder = JSONDecoder()
+    private let threshold = 0.7
 
-    /// Создаёт use case обновления sticky facts по последнему сообщению.
     init(
-        factsRepository: FactsRepositoryProtocol,
+        longTermRepository: LongTermMemoryRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
-        llmClient: LLMClientProtocol
+        llmClient: LLMClientProtocol,
+        legacyFactsRepository: FactsRepositoryProtocol?
     ) {
-        self.factsRepository = factsRepository
+        self.longTermRepository = longTermRepository
         self.messageRepository = messageRepository
         self.llmClient = llmClient
+        self.legacyFactsRepository = legacyFactsRepository
     }
 
-    /// Извлекает и обновляет устойчивые факты сессии на основе контекста ветки.
     func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws {
         let trimmed = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Пустой ввод не несет фактической ценности для "долгой памяти".
         guard !trimmed.isEmpty else { return }
 
-        // Sticky facts хранятся на уровне сессии, а не ветки:
-        // это общая "память" для всех веток одного диалога.
-        let existing = try await factsRepository.fetchFacts(sessionID: sessionID)
-        // В экстракцию отправляем минимальный, но информативный срез:
-        // последний ответ ассистента + новое сообщение пользователя.
+        try await migrateStickyFactsIfNeeded(sessionID: sessionID)
+        let existing = try await longTermRepository.fetch(sessionID: sessionID, namespaces: nil)
         let extractionMessages = try await buildExtractionMessages(branchID: branchID, latestUserMessage: trimmed)
-        let extracted = try await extractFactsUsingLLM(messages: extractionMessages, settings: settings)
-        let merged = mergeFacts(existing: existing, with: extracted, sessionID: sessionID, lastUserMessage: trimmed)
-        try await factsRepository.upsertFacts(sessionID: sessionID, facts: merged)
+        let extracted = try await extractMemoryUsingLLM(messages: extractionMessages, settings: settings)
+        let merged = mergeMemory(existing: existing, with: extracted, sessionID: sessionID)
+        if !merged.isEmpty {
+            try await longTermRepository.upsert(sessionID: sessionID, items: merged)
+        }
     }
 
-    /// Вызывает LLM в режиме извлечения памяти и декодирует JSON-результат.
-    private func extractFactsUsingLLM(messages: [ChatMessage], settings: LLMSettings) async throws -> [StickyFactCandidate] {
-        // Для извлечения фактов принудительно используем "детерминированный" запрос:
-        // температура = 0, минимальное окно, без подмешивания существующих facts.
+    private func extractMemoryUsingLLM(messages: [ChatMessage], settings: LLMSettings) async throws -> [LongTermMemoryCandidate] {
         let response = try await llmClient.send(
             request: LLMRequest(
                 systemPrompt: """
-                You extract structured memory for chat context.
-                Analyze only durable and important facts from the conversation.
-                Output strict JSON object only.
-                Allowed keys: goal, constraints, preferences, decisions, agreements.
-                Values must be short strings.
-                Omit keys with no new info.
+                You extract durable long-term memory.
+                Return strict JSON object with optional keys:
+                profile, decisions, knowledge.
+                Each value must be a short string.
+                Exclude volatile or turn-local details.
                 """,
-                facts: [],
-                messages: messages,
+                shortTermMessages: messages,
+                workingMemory: [],
+                longTermMemory: [],
                 settings: LLMSettings(
                     model: settings.model,
                     contextStrategy: .normal,
@@ -162,11 +346,10 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
 
         let payload = extractJSONObject(from: response.content)
         guard let data = payload.data(using: String.Encoding.utf8) else { return [] }
-        let decoded = try decoder.decode(LLMFactExtractionResult.self, from: data)
+        let decoded = try decoder.decode(LLMLongTermExtractionResult.self, from: data)
         return decoded.candidates
     }
 
-    /// Формирует минимальный диалог для extraction-запроса.
     private func buildExtractionMessages(branchID: UUID, latestUserMessage: String) async throws -> [ChatMessage] {
         let history = try await messageRepository.fetchMessages(branchID: branchID)
         let assistantReply = history
@@ -178,7 +361,6 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
         if let assistantReply, !assistantReply.isEmpty {
             assistantContent = assistantReply
         } else {
-            // Явный fallback помогает поддерживать стабильный формат запроса к LLM.
             assistantContent = "No previous assistant response."
         }
 
@@ -188,10 +370,7 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
         ]
     }
 
-    /// Достаёт JSON-объект из произвольного текстового ответа модели.
     private func extractJSONObject(from text: String) -> String {
-        // Провайдер может вернуть JSON с поясняющим текстом.
-        // Извлекаем первую "рамку" объекта и декодируем только ее.
         guard let start = text.firstIndex(of: "{"),
               let end = text.lastIndex(of: "}") else {
             return "{}"
@@ -199,71 +378,83 @@ final class UpdateFactsUseCase: UpdateFactsUseCaseProtocol {
         return String(text[start...end])
     }
 
-    /// Мержит существующие и новые факты в единый набор, обновляя значения по ключам.
-    private func mergeFacts(
-        existing: [StickyFact],
-        with extracted: [StickyFactCandidate],
-        sessionID: UUID,
-        lastUserMessage: String
-    ) -> [StickyFact] {
-        // Источник истины по каждому ключу один: последняя версия в словаре.
-        var map = Dictionary(uniqueKeysWithValues: existing.map { ($0.key, $0) })
+    private func mergeMemory(
+        existing: [LongTermMemoryItem],
+        with extracted: [LongTermMemoryCandidate],
+        sessionID: UUID
+    ) -> [LongTermMemoryItem] {
+        var map = Dictionary(uniqueKeysWithValues: existing.map { ("\($0.namespace.rawValue)|\($0.key)", $0) })
         let now = Date()
 
-        // last-user-message обновляем всегда, даже если LLM не вернула новых структурных фактов.
-        let candidates = extracted + [StickyFactCandidate(key: "last-user-message", value: lastUserMessage, confidence: 0.5)]
-
-        for candidate in candidates {
+        for candidate in extracted where candidate.confidence >= threshold {
             let value = candidate.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { continue }
+            let mapKey = "\(candidate.namespace.rawValue)|\(candidate.key)"
 
-            let current = map[candidate.key]
-            map[candidate.key] = StickyFact(
+            let current = map[mapKey]
+            map[mapKey] = LongTermMemoryItem(
                 id: current?.id ?? UUID(),
                 sessionID: sessionID,
+                namespace: candidate.namespace,
                 key: candidate.key,
                 value: value,
                 confidence: candidate.confidence,
+                source: candidate.source,
                 updatedAt: now
             )
         }
 
-        return map.values.sorted { $0.key < $1.key }
+        return map.values.sorted {
+            if $0.namespace != $1.namespace {
+                return $0.namespace.rawValue < $1.namespace.rawValue
+            }
+            return $0.key < $1.key
+        }
+    }
+
+    private func migrateStickyFactsIfNeeded(sessionID: UUID) async throws {
+        guard let legacyFactsRepository else { return }
+        let existing = try await longTermRepository.fetch(sessionID: sessionID, namespaces: nil)
+        guard existing.isEmpty else { return }
+
+        let stickyFacts = try await legacyFactsRepository.fetchFacts(sessionID: sessionID)
+        guard !stickyFacts.isEmpty else { return }
+
+        let converted = stickyFacts.map(LongTermMemoryItem.init(stickyFact:))
+        try await longTermRepository.upsert(sessionID: sessionID, items: converted)
     }
 }
 
-private struct StickyFactCandidate {
+private struct WorkingMemoryCandidate {
     let key: String
     let value: String
     let confidence: Double
 }
 
-private struct LLMFactExtractionResult: Decodable {
-    let goal: String?
-    let constraints: String?
-    let preferences: String?
+private struct LongTermMemoryCandidate {
+    let namespace: LongTermMemoryNamespace
+    let key: String
+    let value: String
+    let confidence: Double
+    let source: String
+}
+
+private struct LLMLongTermExtractionResult: Decodable {
+    let profile: String?
     let decisions: String?
-    let agreements: String?
+    let knowledge: String?
 
-    var candidates: [StickyFactCandidate] {
-        var result: [StickyFactCandidate] = []
-
-        if let goal, !goal.isEmpty {
-            result.append(.init(key: "goal", value: goal, confidence: 0.8))
-        }
-        if let constraints, !constraints.isEmpty {
-            result.append(.init(key: "constraints", value: constraints, confidence: 0.8))
-        }
-        if let preferences, !preferences.isEmpty {
-            result.append(.init(key: "preferences", value: preferences, confidence: 0.75))
+    var candidates: [LongTermMemoryCandidate] {
+        var result: [LongTermMemoryCandidate] = []
+        if let profile, !profile.isEmpty {
+            result.append(.init(namespace: .profile, key: "summary", value: profile, confidence: 0.8, source: "llm-extraction"))
         }
         if let decisions, !decisions.isEmpty {
-            result.append(.init(key: "decisions", value: decisions, confidence: 0.75))
+            result.append(.init(namespace: .decisions, key: "latest", value: decisions, confidence: 0.8, source: "llm-extraction"))
         }
-        if let agreements, !agreements.isEmpty {
-            result.append(.init(key: "agreements", value: agreements, confidence: 0.75))
+        if let knowledge, !knowledge.isEmpty {
+            result.append(.init(namespace: .knowledge, key: "summary", value: knowledge, confidence: 0.75, source: "llm-extraction"))
         }
-
         return result
     }
 }
@@ -272,61 +463,61 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let settingsRepository: SettingsRepositoryProtocol
     private let messageRepository: MessageRepositoryProtocol
     private let llmClient: LLMClientProtocol
-    private let buildContextUseCase: BuildContextUseCaseProtocol
-    private let updateFactsUseCase: UpdateFactsUseCaseProtocol
+    private let buildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol
+    private let updateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol
+    private let updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol
+    private let updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol
     private let metricsRepository: MetricsRepositoryProtocol
 
-    /// Создаёт use case отправки сообщения пользователем и получения ответа ассистента.
     init(
         settingsRepository: SettingsRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
         llmClient: LLMClientProtocol,
-        buildContextUseCase: BuildContextUseCaseProtocol,
-        updateFactsUseCase: UpdateFactsUseCaseProtocol,
+        buildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol,
+        updateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol,
+        updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol,
+        updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol,
         metricsRepository: MetricsRepositoryProtocol
     ) {
         self.settingsRepository = settingsRepository
         self.messageRepository = messageRepository
         self.llmClient = llmClient
-        self.buildContextUseCase = buildContextUseCase
-        self.updateFactsUseCase = updateFactsUseCase
+        self.buildMemoryContextUseCase = buildMemoryContextUseCase
+        self.updateShortTermMemoryUseCase = updateShortTermMemoryUseCase
+        self.updateWorkingMemoryUseCase = updateWorkingMemoryUseCase
+        self.updateLongTermMemoryUseCase = updateLongTermMemoryUseCase
         self.metricsRepository = metricsRepository
     }
 
-    /// Выполняет полный цикл запроса: сохранение user-сообщения, сбор контекста,
-    /// вызов LLM, сохранение ответа и метрик.
     func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
-        // 1) Сохраняем пользовательское сообщение сразу, чтобы история ветки была консистентной
-        // даже если downstream-запрос в LLM завершится ошибкой.
         let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
 
-        // 2) Загружаем настройки сессии и определяем стратегию для текущей ветки.
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
-        if settings.contextStrategy(for: branchID) == .stickyFacts {
-            // Обновление фактов не должно блокировать основной ответ ассистента.
-            // Если экстракция памяти не удалась, продолжаем выполнять запрос к LLM.
-            try? await updateFactsUseCase.execute(
-                sessionID: sessionID,
-                branchID: branchID,
-                latestUserMessage: userText,
-                settings: settings
-            )
-        }
+        try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize)
+        try? await updateWorkingMemoryUseCase.execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            latestUserMessage: userText,
+            latestAssistantMessage: nil
+        )
+        try? await updateLongTermMemoryUseCase.execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            latestUserMessage: userText,
+            settings: settings
+        )
 
-        // 3) Формируем контекст по branch-aware стратегии (normal/slidingWindow/stickyFacts).
-        let context = try await buildContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
-
-        // 4) Выполняем основной запрос в LLM.
+        let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
         let request = LLMRequest(
             systemPrompt: "You are a helpful assistant.",
-            facts: context.facts,
-            messages: context.messages,
+            shortTermMessages: context.shortTermMessages,
+            workingMemory: context.workingMemory,
+            longTermMemory: context.longTermMemory,
             settings: settings
         )
         let response = try await llmClient.send(request: request)
 
-        // 5) Сохраняем ответ ассистента в ту же ветку.
         let assistantMessage = ChatMessage(
             branchID: branchID,
             role: .assistant,
@@ -337,7 +528,14 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         )
         try await messageRepository.saveMessage(assistantMessage)
 
-        // 6) Пишем метрики запроса по ветке для блока Session Info.
+        try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize)
+        try? await updateWorkingMemoryUseCase.execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            latestUserMessage: userText,
+            latestAssistantMessage: assistantMessage.content
+        )
+
         let metric = RequestMetric(
             id: UUID(),
             messageID: assistantMessage.id,
