@@ -25,7 +25,7 @@ struct AppEnvironment {
         let workingMemoryRepository = MockWorkingMemoryRepository()
         let longTermMemoryRepository = FileLongTermMemoryRepository()
         let factsRepository = MockFactsRepository()
-        let settingsRepository = MockSettingsRepository()
+        let settingsRepository = UserDefaultsSettingsRepository()
         let metricsRepository = MockMetricsRepository()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
