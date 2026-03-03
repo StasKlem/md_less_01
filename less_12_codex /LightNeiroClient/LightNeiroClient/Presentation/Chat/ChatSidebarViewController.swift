@@ -26,6 +26,11 @@ private func makeBranchTreeNode(from item: ChatBranchTreeItem) -> BranchTreeNode
 }
 
 final class ChatSidebarViewController: NSViewController {
+    private enum InputLayout {
+        static let visibleLines = 3
+        static let textContainerInset = NSSize(width: 6, height: 6)
+    }
+
     private let viewModel: ChatViewModel
     private var cancellables = Set<AnyCancellable>()
     private var rootNodes: [BranchTreeNode] = []
@@ -33,7 +38,8 @@ final class ChatSidebarViewController: NSViewController {
     private let branchOutlineView = NSOutlineView()
     private let newBranchButton = NSButton(title: "New Branch", target: nil, action: nil)
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
-    private let inputField = NSTextField()
+    private let inputTextView = NSTextView()
+    private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
 
     init(viewModel: ChatViewModel) {
@@ -79,13 +85,15 @@ final class ChatSidebarViewController: NSViewController {
         newBranchButton.action = #selector(createBranchTapped)
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
+        configureInputTextView()
 
         addChild(dialogHistoryViewController)
         let dialogView = dialogHistoryViewController.view
         dialogView.translatesAutoresizingMaskIntoConstraints = false
 
-        let inputRow = NSStackView(views: [inputField, sendButton])
+        let inputRow = NSStackView(views: [inputScrollView, sendButton])
         inputRow.orientation = .horizontal
+        inputRow.alignment = .bottom
         inputRow.spacing = 8
 
         let historyHeaderRow = NSStackView(views: [newBranchButton])
@@ -106,7 +114,40 @@ final class ChatSidebarViewController: NSViewController {
             root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
             sendButton.widthAnchor.constraint(equalToConstant: 88),
+            inputScrollView.heightAnchor.constraint(equalToConstant: inputHeightForThreeLines()),
         ])
+    }
+
+    private func configureInputTextView() {
+        inputTextView.isRichText = false
+        inputTextView.importsGraphics = false
+        inputTextView.isAutomaticQuoteSubstitutionEnabled = false
+        inputTextView.isAutomaticTextCompletionEnabled = false
+        inputTextView.textContainerInset = InputLayout.textContainerInset
+        inputTextView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        inputTextView.isVerticallyResizable = true
+        inputTextView.isHorizontallyResizable = false
+        inputTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        inputTextView.minSize = .zero
+        inputTextView.textContainer?.widthTracksTextView = true
+        inputTextView.textContainer?.heightTracksTextView = false
+        inputTextView.textContainer?.containerSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+
+        inputScrollView.borderType = .bezelBorder
+        inputScrollView.hasVerticalScroller = true
+        inputScrollView.autohidesScrollers = true
+        inputScrollView.hasHorizontalScroller = false
+        inputScrollView.drawsBackground = false
+        inputScrollView.documentView = inputTextView
+    }
+
+    private func inputHeightForThreeLines() -> CGFloat {
+        let font = inputTextView.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lineHeight = inputTextView.layoutManager?.defaultLineHeight(for: font) ?? 17
+        return lineHeight * CGFloat(InputLayout.visibleLines) + InputLayout.textContainerInset.height * 2
     }
 
     private func bind() {
@@ -145,8 +186,8 @@ final class ChatSidebarViewController: NSViewController {
 
     @objc
     private func sendTapped() {
-        let text = inputField.stringValue
-        inputField.stringValue = ""
+        let text = inputTextView.string
+        inputTextView.string = ""
         viewModel.send(text: text)
     }
 
