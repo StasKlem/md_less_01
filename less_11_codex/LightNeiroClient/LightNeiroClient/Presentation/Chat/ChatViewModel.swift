@@ -111,6 +111,7 @@ final class ChatViewModel {
                 )
                 self.replaceDialogItem(assistantState)
                 self.dialogPatchesSubject.send([DialogHistoryPatch(id: assistantID, state: assistantState)])
+                try await self.loadDialog(for: targetBranchID)
                 self.onDidSendMessage?()
             } catch {
                 let failedAssistant = DialogHistoryItemViewState(

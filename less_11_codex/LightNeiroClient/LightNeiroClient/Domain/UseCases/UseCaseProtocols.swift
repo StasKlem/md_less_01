@@ -21,7 +21,7 @@ protocol CloneDialogToBranchUseCaseProtocol {
 }
 
 protocol UpdateShortTermMemoryUseCaseProtocol {
-    func execute(sessionID: UUID, branchID: UUID, windowSize: Int) async throws
+    func execute(sessionID: UUID, branchID: UUID, windowSize: Int) async throws -> MemoryWriteEvent?
 }
 
 protocol UpdateWorkingMemoryUseCaseProtocol {
@@ -30,11 +30,11 @@ protocol UpdateWorkingMemoryUseCaseProtocol {
         branchID: UUID,
         latestUserMessage: String,
         latestAssistantMessage: String?
-    ) async throws
+    ) async throws -> [MemoryWriteEvent]
 }
 
 protocol UpdateLongTermMemoryUseCaseProtocol {
-    func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws
+    func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws -> [MemoryWriteEvent]
 }
 
 protocol CreateCheckpointUseCaseProtocol {

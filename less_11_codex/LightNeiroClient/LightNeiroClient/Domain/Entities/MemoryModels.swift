@@ -49,6 +49,17 @@ struct MemoryContext: Equatable {
     let longTermMemory: [LongTermMemoryItem]
 }
 
+enum MemoryLayer: String, Equatable {
+    case shortTerm = "краткосрочная"
+    case working = "рабочая"
+    case longTerm = "долговременная"
+}
+
+struct MemoryWriteEvent: Equatable {
+    let layer: MemoryLayer
+    let details: String
+}
+
 extension LongTermMemoryItem {
     init(stickyFact: StickyFact) {
         self.init(
