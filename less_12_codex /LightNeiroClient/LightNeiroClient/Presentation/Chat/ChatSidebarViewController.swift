@@ -1,6 +1,42 @@
 import Cocoa
 import Combine
 
+private final class ChatInputTextView: NSTextView {
+    override var acceptsFirstResponder: Bool { true }
+
+    /// Перехватывает Cmd+V на уровне keyDown, чтобы вставка работала
+    /// даже когда событие не проходит через стандартное меню Edit.
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "v" {
+            paste(nil)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    /// Поддерживает системный путь обработки key-equivalent для Cmd+V.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return super.performKeyEquivalent(with: event) }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "v" {
+            paste(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Вставляет plain text из буфера обмена, чтобы избежать отказа вставки
+    /// при несоответствии форматов содержимого pasteboard.
+    override func paste(_ sender: Any?) {
+        if let plainText = NSPasteboard.general.string(forType: .string) {
+            insertText(plainText, replacementRange: selectedRange())
+            return
+        }
+        super.paste(sender)
+    }
+}
+
 private final class BranchTreeNode {
     let id: UUID
     let title: String
@@ -38,7 +74,7 @@ final class ChatSidebarViewController: NSViewController {
     private let branchOutlineView = NSOutlineView()
     private let newBranchButton = NSButton(title: "New Branch", target: nil, action: nil)
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
-    private let inputTextView = NSTextView()
+    private let inputTextView = ChatInputTextView()
     private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
 
@@ -118,7 +154,11 @@ final class ChatSidebarViewController: NSViewController {
         ])
     }
 
+    /// Настраивает многострочное поле ввода и контейнер со скроллом.
     private func configureInputTextView() {
+        inputTextView.isEditable = true
+        inputTextView.isSelectable = true
+        inputTextView.allowsUndo = true
         inputTextView.isRichText = false
         inputTextView.importsGraphics = false
         inputTextView.isAutomaticQuoteSubstitutionEnabled = false
@@ -144,6 +184,13 @@ final class ChatSidebarViewController: NSViewController {
         inputScrollView.documentView = inputTextView
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // Сразу переводим фокус в поле ввода для работы горячих клавиш.
+        view.window?.makeFirstResponder(inputTextView)
+    }
+
+    /// Возвращает фиксированную высоту поля ввода: ровно 3 строки текста.
     private func inputHeightForThreeLines() -> CGFloat {
         let font = inputTextView.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
         let lineHeight = inputTextView.layoutManager?.defaultLineHeight(for: font) ?? 17
