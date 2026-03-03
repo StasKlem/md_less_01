@@ -7,6 +7,10 @@ protocol DialogCollectionCellProtocol where Self: NSCollectionViewItem {
 }
 
 class BaseMessageCollectionItem: NSCollectionViewItem, DialogCollectionCellProtocol {
+    private enum UI {
+        static let profileSeparator = "\n\n"
+    }
+
     private let bubbleView = NSView()
     private let textLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
@@ -51,7 +55,7 @@ class BaseMessageCollectionItem: NSCollectionViewItem, DialogCollectionCellProto
 
     func apply(_ state: DialogHistoryItemViewState) {
         currentState = state
-        textLabel.stringValue = state.text
+        textLabel.attributedStringValue = makeAttributedMessage(for: state)
         statusLabel.stringValue = statusText(for: state.status)
         applyStyle(for: state)
     }
@@ -63,7 +67,7 @@ class BaseMessageCollectionItem: NSCollectionViewItem, DialogCollectionCellProto
         }
 
         currentState = state
-        textLabel.stringValue = state.text
+        textLabel.attributedStringValue = makeAttributedMessage(for: state)
         statusLabel.stringValue = statusText(for: state.status)
     }
 
@@ -89,6 +93,27 @@ class BaseMessageCollectionItem: NSCollectionViewItem, DialogCollectionCellProto
         case .failed:
             return "failed"
         }
+    }
+
+    private func makeAttributedMessage(for state: DialogHistoryItemViewState) -> NSAttributedString {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: textLabel.font as Any,
+            .foregroundColor: NSColor.labelColor
+        ]
+        let result = NSMutableAttributedString(string: state.text, attributes: attributes)
+
+        guard state.kind == .user else {
+            return result
+        }
+        guard let separatorRange = state.text.range(of: UI.profileSeparator),
+              separatorRange.lowerBound > state.text.startIndex else {
+            return result
+        }
+
+        let profilePrefix = String(state.text[..<separatorRange.lowerBound])
+        let range = NSRange(location: 0, length: (profilePrefix as NSString).length)
+        result.addAttribute(.foregroundColor, value: NSColor.systemTeal, range: range)
+        return result
     }
 }
 

@@ -68,6 +68,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 activeBranchID: environment.branchID,
                 fetchSettingsUseCase: environment.fetchSettingsUseCase,
                 applySettingsUseCase: environment.applySettingsUseCase,
+                fetchUserPromptProfilesUseCase: environment.fetchUserPromptProfilesUseCase,
+                saveUserPromptProfilesUseCase: environment.saveUserPromptProfilesUseCase,
                 loadAPIKeyUseCase: environment.loadAPIKeyUseCase,
                 saveAPIKeyUseCase: environment.saveAPIKeyUseCase
             )

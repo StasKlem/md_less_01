@@ -528,6 +528,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol
     private let updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol
     private let metricsRepository: MetricsRepositoryProtocol
+    private let resolveUserPromptPrefixUseCase: ResolveUserPromptPrefixUseCaseProtocol
 
     /// Создает use case отправки сообщения и внедряет все необходимые зависимости.
     ///
@@ -540,6 +541,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - updateWorkingMemoryUseCase: обновление рабочего слоя памяти.
     ///   - updateLongTermMemoryUseCase: обновление долговременного слоя памяти.
     ///   - metricsRepository: хранилище телеметрии запроса/ответа модели.
+    ///   - resolveUserPromptPrefixUseCase: получает профильный префикс пользовательского сообщения.
     init(
         settingsRepository: SettingsRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
@@ -548,7 +550,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         updateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol,
         updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol,
         updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol,
-        metricsRepository: MetricsRepositoryProtocol
+        metricsRepository: MetricsRepositoryProtocol,
+        resolveUserPromptPrefixUseCase: ResolveUserPromptPrefixUseCaseProtocol
     ) {
         self.settingsRepository = settingsRepository
         self.messageRepository = messageRepository
@@ -558,6 +561,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         self.updateWorkingMemoryUseCase = updateWorkingMemoryUseCase
         self.updateLongTermMemoryUseCase = updateLongTermMemoryUseCase
         self.metricsRepository = metricsRepository
+        self.resolveUserPromptPrefixUseCase = resolveUserPromptPrefixUseCase
     }
 
     /// Выполняет end-to-end обработку пользовательского сообщения.
@@ -585,7 +589,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - userText: текст сообщения пользователя.
     /// - Returns: сохраненное сообщение ассистента.
     func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
-        let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
+        let prefixedUserText = await enrichUserMessage(userText, sessionID: sessionID)
+        let userMessage = ChatMessage(branchID: branchID, role: .user, content: prefixedUserText)
         try await messageRepository.saveMessage(userMessage)
 
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
@@ -652,6 +657,18 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         try await metricsRepository.appendMetric(metric)
 
         return assistantMessage
+    }
+
+    /// Добавляет профильный префикс к сообщению пользователя в формате "prefix + blank line + message".
+    private func enrichUserMessage(_ userText: String, sessionID: UUID) async -> String {
+        let resolvedPrefix = try? await resolveUserPromptPrefixUseCase.execute(sessionID: sessionID)
+        let prefix = resolvedPrefix?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let prefix, !prefix.isEmpty else {
+            return userText
+        }
+        return "\(prefix)\n\n\(userText)"
     }
 
     /// Добавляет системные сообщения о событиях записи памяти.
@@ -805,6 +822,99 @@ final class FetchSettingsUseCase: FetchSettingsUseCaseProtocol {
     /// Возвращает актуальные настройки LLM для сессии.
     func execute(sessionID: UUID) async throws -> LLMSettings {
         try await settingsRepository.fetchSettings(sessionID: sessionID)
+    }
+}
+
+private enum UserPromptProfileStorage {
+    static let selectedProfileKey = "user_prompt_profile.selected"
+    static let source = "user_prompt_profile_settings"
+
+    static func textKey(for profile: UserPromptProfile) -> String {
+        "user_prompt_profile.\(profile.rawValue)"
+    }
+}
+
+final class FetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol {
+    private let longTermMemoryRepository: LongTermMemoryRepositoryProtocol
+
+    init(longTermMemoryRepository: LongTermMemoryRepositoryProtocol) {
+        self.longTermMemoryRepository = longTermMemoryRepository
+    }
+
+    func execute(sessionID: UUID) async throws -> UserPromptProfiles {
+        let items = try await longTermMemoryRepository.fetch(sessionID: sessionID, namespaces: [.profile])
+        var profiles = UserPromptProfiles.default
+
+        for item in items {
+            if item.key == UserPromptProfileStorage.selectedProfileKey,
+               let selected = UserPromptProfile(rawValue: item.value) {
+                profiles.selectedProfile = selected
+                continue
+            }
+
+            for profile in UserPromptProfile.allCases where item.key == UserPromptProfileStorage.textKey(for: profile) {
+                profiles.setText(item.value, for: profile)
+            }
+        }
+
+        return profiles
+    }
+}
+
+final class SaveUserPromptProfilesUseCase: SaveUserPromptProfilesUseCaseProtocol {
+    private let longTermMemoryRepository: LongTermMemoryRepositoryProtocol
+
+    init(longTermMemoryRepository: LongTermMemoryRepositoryProtocol) {
+        self.longTermMemoryRepository = longTermMemoryRepository
+    }
+
+    func execute(sessionID: UUID, profiles: UserPromptProfiles) async throws {
+        let now = Date()
+        var items: [LongTermMemoryItem] = [
+            LongTermMemoryItem(
+                id: UUID(),
+                sessionID: sessionID,
+                namespace: .profile,
+                key: UserPromptProfileStorage.selectedProfileKey,
+                value: profiles.selectedProfile.rawValue,
+                confidence: 1.0,
+                source: UserPromptProfileStorage.source,
+                updatedAt: now
+            )
+        ]
+
+        for profile in UserPromptProfile.allCases {
+            items.append(
+                LongTermMemoryItem(
+                    id: UUID(),
+                    sessionID: sessionID,
+                    namespace: .profile,
+                    key: UserPromptProfileStorage.textKey(for: profile),
+                    value: profiles.text(for: profile),
+                    confidence: 1.0,
+                    source: UserPromptProfileStorage.source,
+                    updatedAt: now
+                )
+            )
+        }
+
+        try await longTermMemoryRepository.upsert(sessionID: sessionID, items: items)
+    }
+}
+
+final class ResolveUserPromptPrefixUseCase: ResolveUserPromptPrefixUseCaseProtocol {
+    private let fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol
+
+    init(fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol) {
+        self.fetchUserPromptProfilesUseCase = fetchUserPromptProfilesUseCase
+    }
+
+    func execute(sessionID: UUID) async throws -> String? {
+        let profiles = try await fetchUserPromptProfilesUseCase.execute(sessionID: sessionID)
+        let text = profiles
+            .text(for: profiles.selectedProfile)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 }
 

@@ -12,6 +12,8 @@ struct AppEnvironment {
     let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
+    let fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol
+    let saveUserPromptProfilesUseCase: SaveUserPromptProfilesUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let switchBranchUseCase: SwitchBranchUseCaseProtocol
     let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
@@ -59,6 +61,9 @@ struct AppEnvironment {
             llmClient: llmClient,
             legacyFactsRepository: factsRepository
         )
+        let fetchUserPromptProfiles = FetchUserPromptProfilesUseCase(longTermMemoryRepository: longTermMemoryRepository)
+        let saveUserPromptProfiles = SaveUserPromptProfilesUseCase(longTermMemoryRepository: longTermMemoryRepository)
+        let resolveUserPromptPrefix = ResolveUserPromptPrefixUseCase(fetchUserPromptProfilesUseCase: fetchUserPromptProfiles)
         let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
         let cloneDialogToBranch = CloneDialogToBranchUseCase(messageRepository: messageRepository)
@@ -70,7 +75,8 @@ struct AppEnvironment {
             updateShortTermMemoryUseCase: updateShortTermMemory,
             updateWorkingMemoryUseCase: updateWorkingMemory,
             updateLongTermMemoryUseCase: updateLongTermMemory,
-            metricsRepository: metricsRepository
+            metricsRepository: metricsRepository,
+            resolveUserPromptPrefixUseCase: resolveUserPromptPrefix
         )
         let createBranch = CreateBranchUseCase(branchRepository: branchRepository)
         let addBranchCreatedSystemMessage = AddBranchCreatedSystemMessageUseCase(messageRepository: messageRepository)
@@ -111,6 +117,8 @@ struct AppEnvironment {
             addBranchCreatedSystemMessageUseCase: addBranchCreatedSystemMessage,
             applySettingsUseCase: applySettings,
             fetchSettingsUseCase: fetchSettings,
+            fetchUserPromptProfilesUseCase: fetchUserPromptProfiles,
+            saveUserPromptProfilesUseCase: saveUserPromptProfiles,
             collectSessionMetricsUseCase: collectMetrics,
             switchBranchUseCase: switchBranch,
             loadAPIKeyUseCase: loadAPIKey,

@@ -1,9 +1,10 @@
 import Cocoa
 import Combine
 
-final class SettingsViewController: NSViewController {
+final class SettingsViewController: NSViewController, NSTextViewDelegate {
     private let viewModel: SettingsViewModel
     private var cancellables = Set<AnyCancellable>()
+    private var isApplyingProfileText = false
 
     private let modelPopup = NSPopUpButton()
     private let contextStrategyPopup = NSPopUpButton()
@@ -14,6 +15,10 @@ final class SettingsViewController: NSViewController {
     private let apiKeyField = NSSecureTextField()
     private let saveAPIKeyButton = NSButton(title: "Save API Key", target: nil, action: nil)
     private let apiKeyStatusLabel = NSTextField(labelWithString: "")
+    private let profileSwitcher = NSSegmentedControl(labels: UserPromptProfile.allCases.map(\.title), trackingMode: .selectOne, target: nil, action: nil)
+    private let profileTextView = NSTextView()
+    private let profileTextScrollView = NSScrollView()
+    private let profileStatusLabel = NSTextField(labelWithString: "")
 
     init(viewModel: SettingsViewModel) {
         self.viewModel = viewModel
@@ -54,6 +59,22 @@ final class SettingsViewController: NSViewController {
         apiKeyField.placeholderString = "routerai key"
         saveAPIKeyButton.target = self
         saveAPIKeyButton.action = #selector(saveAPIKeyTapped)
+        profileSwitcher.target = self
+        profileSwitcher.action = #selector(profileChanged)
+        profileTextView.isRichText = false
+        profileTextView.isAutomaticQuoteSubstitutionEnabled = false
+        profileTextView.isAutomaticDataDetectionEnabled = false
+        profileTextView.isAutomaticSpellingCorrectionEnabled = false
+        profileTextView.delegate = self
+        profileTextView.font = .systemFont(ofSize: 12)
+        profileTextScrollView.documentView = profileTextView
+        profileTextScrollView.hasVerticalScroller = true
+        profileTextScrollView.borderType = .bezelBorder
+        profileTextScrollView.translatesAutoresizingMaskIntoConstraints = false
+        profileTextScrollView.heightAnchor.constraint(equalToConstant: 90).isActive = true
+        profileStatusLabel.textColor = .secondaryLabelColor
+        profileStatusLabel.lineBreakMode = .byWordWrapping
+        profileStatusLabel.maximumNumberOfLines = 2
         apiKeyStatusLabel.textColor = .secondaryLabelColor
         apiKeyStatusLabel.lineBreakMode = .byWordWrapping
         apiKeyStatusLabel.maximumNumberOfLines = 2
@@ -65,6 +86,9 @@ final class SettingsViewController: NSViewController {
             temperatureSlider,
             windowLabel,
             windowSlider,
+            makeRow(label: "Профиль", control: profileSwitcher),
+            profileTextScrollView,
+            profileStatusLabel,
             makeRow(label: "RouterAI API Key", control: apiKeyField),
             saveAPIKeyButton,
             apiKeyStatusLabel
@@ -110,6 +134,33 @@ final class SettingsViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.apiKeyStatusLabel.stringValue = status
+            }
+            .store(in: &cancellables)
+
+        viewModel.$selectedPromptProfile
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] profile in
+                guard let self else { return }
+                let index = UserPromptProfile.allCases.firstIndex(of: profile) ?? 0
+                self.profileSwitcher.selectedSegment = index
+            }
+            .store(in: &cancellables)
+
+        viewModel.$promptProfileText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                guard let self else { return }
+                guard self.profileTextView.string != text else { return }
+                self.isApplyingProfileText = true
+                self.profileTextView.string = text
+                self.isApplyingProfileText = false
+            }
+            .store(in: &cancellables)
+
+        viewModel.$promptProfileStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.profileStatusLabel.stringValue = status
             }
             .store(in: &cancellables)
     }
@@ -158,5 +209,19 @@ final class SettingsViewController: NSViewController {
     private func saveAPIKeyTapped() {
         viewModel.updateAPIKey(apiKeyField.stringValue)
         viewModel.saveAPIKey()
+    }
+
+    @objc
+    private func profileChanged() {
+        guard profileSwitcher.selectedSegment >= 0,
+              profileSwitcher.selectedSegment < UserPromptProfile.allCases.count else { return }
+        let selected = UserPromptProfile.allCases[profileSwitcher.selectedSegment]
+        viewModel.selectPromptProfile(selected)
+    }
+
+    func textDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextView === profileTextView else { return }
+        guard !isApplyingProfileText else { return }
+        viewModel.updatePromptProfileText(profileTextView.string)
     }
 }

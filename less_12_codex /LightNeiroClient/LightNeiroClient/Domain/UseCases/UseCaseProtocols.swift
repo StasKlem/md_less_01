@@ -61,6 +61,18 @@ protocol FetchSettingsUseCaseProtocol {
     func execute(sessionID: UUID) async throws -> LLMSettings
 }
 
+protocol FetchUserPromptProfilesUseCaseProtocol {
+    func execute(sessionID: UUID) async throws -> UserPromptProfiles
+}
+
+protocol SaveUserPromptProfilesUseCaseProtocol {
+    func execute(sessionID: UUID, profiles: UserPromptProfiles) async throws
+}
+
+protocol ResolveUserPromptPrefixUseCaseProtocol {
+    func execute(sessionID: UUID) async throws -> String?
+}
+
 protocol CollectSessionMetricsUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID) async throws -> SessionInfoSnapshot
 }

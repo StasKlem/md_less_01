@@ -17,6 +17,55 @@ enum ContextStrategy: String, CaseIterable, Codable {
     case stickyFacts
 }
 
+/// Режим пользовательского префикса, который добавляется к каждому сообщению.
+enum UserPromptProfile: String, CaseIterable, Codable {
+    case auto
+    case profile1
+    case profile2
+    case profile3
+
+    var title: String {
+        switch self {
+        case .auto:
+            return "авто"
+        case .profile1:
+            return "профиль 1"
+        case .profile2:
+            return "профиль 2"
+        case .profile3:
+            return "профиль 3"
+        }
+    }
+}
+
+/// Набор текстов профилей и активный профиль для префикса пользовательского сообщения.
+struct UserPromptProfiles: Equatable {
+    var selectedProfile: UserPromptProfile
+    private(set) var textByProfile: [UserPromptProfile: String]
+
+    static let `default` = UserPromptProfiles(
+        selectedProfile: .auto,
+        textByProfile: Dictionary(uniqueKeysWithValues: UserPromptProfile.allCases.map { ($0, "") })
+    )
+
+    init(selectedProfile: UserPromptProfile, textByProfile: [UserPromptProfile: String]) {
+        self.selectedProfile = selectedProfile
+        var merged = Dictionary(uniqueKeysWithValues: UserPromptProfile.allCases.map { ($0, "") })
+        for (profile, text) in textByProfile {
+            merged[profile] = text
+        }
+        self.textByProfile = merged
+    }
+
+    func text(for profile: UserPromptProfile) -> String {
+        textByProfile[profile] ?? ""
+    }
+
+    mutating func setText(_ text: String, for profile: UserPromptProfile) {
+        textByProfile[profile] = text
+    }
+}
+
 /// Пользовательские настройки LLM и стратегии контекста на уровне сессии.
 struct LLMSettings: Codable, Equatable {
     var model: LLMModel

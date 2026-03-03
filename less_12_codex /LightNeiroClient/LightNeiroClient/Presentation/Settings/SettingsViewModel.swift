@@ -6,6 +6,9 @@ final class SettingsViewModel {
     @Published private(set) var settings: LLMSettings = .default
     @Published private(set) var apiKey: String = ""
     @Published private(set) var apiKeyStatus: String = ""
+    @Published private(set) var selectedPromptProfile: UserPromptProfile = .auto
+    @Published private(set) var promptProfileText: String = ""
+    @Published private(set) var promptProfileStatus: String = ""
 
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
@@ -13,8 +16,11 @@ final class SettingsViewModel {
     private var activeBranchID: UUID
     private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
+    private let fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol
+    private let saveUserPromptProfilesUseCase: SaveUserPromptProfilesUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     private let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
+    private var promptProfiles: UserPromptProfiles = .default
 
     /// Создаёт ViewModel настроек и загружает данные (ключ + настройки сессии).
     init(
@@ -22,6 +28,8 @@ final class SettingsViewModel {
         activeBranchID: UUID,
         fetchSettingsUseCase: FetchSettingsUseCaseProtocol,
         applySettingsUseCase: ApplySettingsUseCaseProtocol,
+        fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol,
+        saveUserPromptProfilesUseCase: SaveUserPromptProfilesUseCaseProtocol,
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
@@ -29,11 +37,14 @@ final class SettingsViewModel {
         self.activeBranchID = activeBranchID
         self.fetchSettingsUseCase = fetchSettingsUseCase
         self.applySettingsUseCase = applySettingsUseCase
+        self.fetchUserPromptProfilesUseCase = fetchUserPromptProfilesUseCase
+        self.saveUserPromptProfilesUseCase = saveUserPromptProfilesUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
         self.saveAPIKeyUseCase = saveAPIKeyUseCase
 
         loadAPIKey()
         loadSettings()
+        loadPromptProfiles()
     }
 
     /// Обновляет выбранную модель LLM.
@@ -59,6 +70,21 @@ final class SettingsViewModel {
     func updateWindowSize(_ size: Int) {
         settings.windowSize = size
         persist()
+    }
+
+    /// Переключает активный пользовательский профиль префикса.
+    func selectPromptProfile(_ profile: UserPromptProfile) {
+        promptProfiles.selectedProfile = profile
+        selectedPromptProfile = profile
+        promptProfileText = promptProfiles.text(for: profile)
+        persistPromptProfiles()
+    }
+
+    /// Обновляет текст для выбранного профиля и сохраняет его в долговременную память.
+    func updatePromptProfileText(_ text: String) {
+        promptProfiles.setText(text, for: selectedPromptProfile)
+        promptProfileText = text
+        persistPromptProfiles()
     }
 
     /// Обновляет черновик API-ключа в состоянии ViewModel.
@@ -121,6 +147,36 @@ final class SettingsViewModel {
                 try await applySettingsUseCase.execute(sessionID: sessionID, settings: loaded)
             } catch {
                 apiKeyStatus = "Failed to load settings: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Загружает выбранный профиль и тексты профилей из долговременной памяти.
+    private func loadPromptProfiles() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let loaded = try await fetchUserPromptProfilesUseCase.execute(sessionID: sessionID)
+                promptProfiles = loaded
+                selectedPromptProfile = loaded.selectedProfile
+                promptProfileText = loaded.text(for: loaded.selectedProfile)
+                promptProfileStatus = ""
+            } catch {
+                promptProfileStatus = "Failed to load profile settings: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Персистит профили в долговременную память.
+    private func persistPromptProfiles() {
+        let snapshot = promptProfiles
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await saveUserPromptProfilesUseCase.execute(sessionID: sessionID, profiles: snapshot)
+                promptProfileStatus = ""
+            } catch {
+                promptProfileStatus = "Failed to save profile settings: \(error.localizedDescription)"
             }
         }
     }
