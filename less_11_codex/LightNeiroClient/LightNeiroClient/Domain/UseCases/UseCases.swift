@@ -498,6 +498,27 @@ private struct LLMLongTermExtractionResult: Decodable {
     }
 }
 
+/// Оркеструет полный цикл обработки пользовательского сообщения в рамках ветки диалога.
+///
+/// Назначение:
+/// - принять входной `userText`;
+/// - сохранить сообщение пользователя;
+/// - обновить все релевантные слои памяти;
+/// - сформировать запрос в LLM на основе актуального memory context;
+/// - сохранить ответ ассистента и технические метрики запроса.
+///
+/// Порядок обновления памяти фиксированный и важен для консистентности:
+/// 1. `short-term` — слайдинг-окно последних сообщений (учитывает `windowSize` из настроек).
+/// 2. `working` — оперативные рабочие факты/цели/ограничения из текущего контекста.
+/// 3. `long-term` — устойчивые знания, извлеченные через LLM.
+///
+/// После получения ответа ассистента `short-term` и `working` обновляются повторно,
+/// чтобы в следующем ходу модель получила уже завершенное состояние текущего обмена.
+///
+/// Важно:
+/// - обновление short-term выполняется строго (`throws`);
+/// - обновления working/long-term выполняются в best-effort режиме (`try?`),
+///   чтобы деградация отдельных memory-адаптеров не блокировала основной ответ ассистента.
 final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let settingsRepository: SettingsRepositoryProtocol
     private let messageRepository: MessageRepositoryProtocol
@@ -508,6 +529,17 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol
     private let metricsRepository: MetricsRepositoryProtocol
 
+    /// Создает use case отправки сообщения и внедряет все необходимые зависимости.
+    ///
+    /// - Parameters:
+    ///   - settingsRepository: источник LLM-настроек сессии.
+    ///   - messageRepository: хранилище сообщений ветки.
+    ///   - llmClient: клиент модели для генерации ответа.
+    ///   - buildMemoryContextUseCase: сборщик финального memory context перед вызовом LLM.
+    ///   - updateShortTermMemoryUseCase: обновление краткосрочного слоя памяти.
+    ///   - updateWorkingMemoryUseCase: обновление рабочего слоя памяти.
+    ///   - updateLongTermMemoryUseCase: обновление долговременного слоя памяти.
+    ///   - metricsRepository: хранилище телеметрии запроса/ответа модели.
     init(
         settingsRepository: SettingsRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
@@ -528,6 +560,30 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         self.metricsRepository = metricsRepository
     }
 
+    /// Выполняет end-to-end обработку пользовательского сообщения.
+    ///
+    /// Полный сценарий:
+    /// 1. Сохраняет входное сообщение пользователя.
+    /// 2. Загружает настройки сессии.
+    /// 3. Обновляет память после user-turn:
+    ///    - short-term (strict),
+    ///    - working (best-effort),
+    ///    - long-term (best-effort).
+    /// 4. Строит `MemoryContext` и отправляет запрос в LLM.
+    /// 5. Сохраняет сообщение ассистента.
+    /// 6. Повторно обновляет short-term и working после assistant-turn.
+    /// 7. Сохраняет метрику запроса (latency/tokens).
+    ///
+    /// Ошибки:
+    /// - любые ошибки критичных этапов (`saveMessage`, `fetchSettings`, `send`, `appendMetric`)
+    ///   пробрасываются наружу;
+    /// - ошибки working/long-term update подавляются локально, чтобы не сорвать основной поток ответа.
+    ///
+    /// - Parameters:
+    ///   - sessionID: идентификатор текущей сессии.
+    ///   - branchID: идентификатор активной ветки.
+    ///   - userText: текст сообщения пользователя.
+    /// - Returns: сохраненное сообщение ассистента.
     func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
         let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
@@ -598,12 +654,27 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         return assistantMessage
     }
 
+    /// Добавляет системные сообщения о событиях записи памяти.
+    ///
+    /// Каждый `MemoryWriteEvent` превращается в отдельное системное сообщение,
+    /// чтобы история ветки содержала трассировку изменений памяти.
+    ///
+    /// - Parameters:
+    ///   - branchID: идентификатор ветки, куда пишутся системные сообщения.
+    ///   - events: список событий записи в память.
     private func appendMemoryEventMessages(branchID: UUID, events: [MemoryWriteEvent]) async throws {
         for event in events {
             try await appendMemoryEventMessage(branchID: branchID, event: event)
         }
     }
 
+    /// Добавляет одно системное сообщение о записи в конкретный слой памяти.
+    ///
+    /// Формат сообщения: `Память [<слой>] сохранено: ...`
+    ///
+    /// - Parameters:
+    ///   - branchID: идентификатор ветки.
+    ///   - event: событие записи памяти с деталями.
     private func appendMemoryEventMessage(branchID: UUID, event: MemoryWriteEvent) async throws {
         let systemMessage = ChatMessage(
             branchID: branchID,
