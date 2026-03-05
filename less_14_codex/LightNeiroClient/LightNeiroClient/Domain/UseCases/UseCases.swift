@@ -534,21 +534,34 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         userText: String,
         assistantInstruction: String?
     ) async throws -> ChatMessage {
+        // 1) Фиксируем user-turn в истории ветки как первоисточник для всех следующих шагов.
+        // Без этого память и контекст могли бы строиться по устаревшему состоянию диалога.
         let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
 
+        // 2) Получаем актуальные настройки сессии (модель, лимиты, windowSize и т.д.),
+        // которые будут использоваться и для памяти, и для вызова LLM.
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
+
+        // 3) Обновляем short-term memory строго: это критичный слой для ближайшего контекста.
+        // Если обновление прошло и вернулось событие записи памяти, сохраняем это событие в историю.
         if let event = try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize) {
             try await appendMemoryEventMessage(branchID: branchID, event: event)
         }
+
+        // 4) Обновляем working memory после сообщения пользователя.
+        // Этот шаг best-effort: при сбое не прерываем основной сценарий ответа ассистента.
         let workingUserEvents = (try? await updateWorkingMemoryUseCase.execute(
             sessionID: sessionID,
             branchID: branchID,
             latestUserMessage: userText,
             latestAssistantMessage: nil
         )) ?? []
+        // Даже если событий нет, метод безопасно обработает пустой массив.
         try await appendMemoryEventMessages(branchID: branchID, events: workingUserEvents)
 
+        // 5) Пытаемся обновить long-term memory (устойчивые факты/выводы).
+        // Это тоже best-effort, чтобы временные проблемы extraction-пайплайна не ломали чат.
         let longTermEvents = (try? await updateLongTermMemoryUseCase.execute(
             sessionID: sessionID,
             branchID: branchID,
@@ -557,6 +570,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         )) ?? []
         try await appendMemoryEventMessages(branchID: branchID, events: longTermEvents)
 
+        // 6) Собираем единый memory context из всех слоев памяти.
+        // Этот контекст отправится в модель вместе с system prompt и настройками.
         let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
         let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction)
         let request = LLMRequest(
@@ -566,8 +581,11 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             longTermMemory: context.longTermMemory,
             settings: settings
         )
+        // 7) Запрашиваем ответ у LLM. На этом этапе модель уже видит актуализированную память.
         let response = try await llmClient.send(request: request)
 
+        // 8) Преобразуем ответ модели в доменную сущность сообщения ассистента
+        // и сохраняем его в историю ветки.
         let assistantMessage = ChatMessage(
             branchID: branchID,
             role: .assistant,
@@ -578,9 +596,14 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         )
         try await messageRepository.saveMessage(assistantMessage)
 
+        // 9) После assistant-turn снова обновляем short-term memory,
+        // чтобы следующий запрос видел завершенный обмен user+assistant.
         if let event = try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize) {
             try await appendMemoryEventMessage(branchID: branchID, event: event)
         }
+
+        // 10) Повторно обновляем working memory уже с текстом ассистента.
+        // Это позволяет зафиксировать новые задачи, решения и ограничения из полного обмена.
         let workingAssistantEvents = (try? await updateWorkingMemoryUseCase.execute(
             sessionID: sessionID,
             branchID: branchID,
@@ -589,6 +612,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         )) ?? []
         try await appendMemoryEventMessages(branchID: branchID, events: workingAssistantEvents)
 
+        // 11) Формируем метрику запроса для наблюдаемости:
+        // latency, токены и временной интервал выполнения.
         let metric = RequestMetric(
             id: UUID(),
             messageID: assistantMessage.id,
@@ -605,10 +630,18 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     }
 
     private func makeSystemPrompt(extraInstruction: String?) -> String {
+        // Базовое поведение ассистента по умолчанию.
         let base = "You are a helpful assistant."
+
+        // Если инструкция отсутствует, используем только базовый system prompt.
         guard let extraInstruction else { return base }
+
+        // Защита от "пустой" инструкции (пробелы/переводы строк не должны влиять на prompt).
         let trimmed = extraInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return base }
+
+        // Дополняем базовый prompt пользовательской/системной инструкцией.
+        // Разделяем пустой строкой для лучшей читаемости итогового текста.
         return "\(base)\n\n\(trimmed)"
     }
 
