@@ -8,20 +8,20 @@ final class SettingsViewModel {
 
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
-    private let sessionID: UUID
+    private let session: ChatSession
     private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     private let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
 
     init(
-        sessionID: UUID,
+        session: ChatSession,
         fetchSettingsUseCase: FetchSettingsUseCaseProtocol,
         applySettingsUseCase: ApplySettingsUseCaseProtocol,
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
-        self.sessionID = sessionID
+        self.session = session
         self.fetchSettingsUseCase = fetchSettingsUseCase
         self.applySettingsUseCase = applySettingsUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
@@ -66,7 +66,7 @@ final class SettingsViewModel {
     private func persist() {
         let next = settings
         Task {
-            try? await applySettingsUseCase.execute(sessionID: sessionID, settings: next)
+            try? await applySettingsUseCase.execute(sessionID: session.id, settings: next)
             onSettingsChanged?(next)
         }
     }
@@ -83,10 +83,10 @@ final class SettingsViewModel {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let loaded = try await fetchSettingsUseCase.execute(sessionID: sessionID)
+                let loaded = try await fetchSettingsUseCase.execute(sessionID: session.id)
                 settings = loaded
                 onSettingsChanged?(loaded)
-                try await applySettingsUseCase.execute(sessionID: sessionID, settings: loaded)
+                try await applySettingsUseCase.execute(sessionID: session.id, settings: loaded)
             } catch {
                 apiKeyStatus = "Failed to load settings: \(error.localizedDescription)"
             }

@@ -1,8 +1,7 @@
 import Foundation
 
 struct AppEnvironment {
-    let sessionID: UUID
-    let branchID: UUID
+    let session: ChatSession
 
     let sendMessageUseCase: SendMessageUseCaseProtocol
     let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
@@ -91,8 +90,7 @@ struct AppEnvironment {
         try? await settingsRepository.saveSettings(sessionID: sessionID, settings: .default)
 
         return AppEnvironment(
-            sessionID: sessionID,
-            branchID: branchID,
+            session: rootSession,
             sendMessageUseCase: sendMessage,
             fetchMessagesUseCase: fetchMessages,
             applySettingsUseCase: applySettings,

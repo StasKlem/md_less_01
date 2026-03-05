@@ -53,21 +53,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task { @MainActor in
             let environment = await AppEnvironment.bootstrap()
             let chatViewModel = ChatViewModel(
-                sessionID: environment.sessionID,
-                branchID: environment.branchID,
+                session: environment.session,
                 sendMessageUseCase: environment.sendMessageUseCase,
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,
             )
             let settingsViewModel = SettingsViewModel(
-                sessionID: environment.sessionID,
+                session: environment.session,
                 fetchSettingsUseCase: environment.fetchSettingsUseCase,
                 applySettingsUseCase: environment.applySettingsUseCase,
                 loadAPIKeyUseCase: environment.loadAPIKeyUseCase,
                 saveAPIKeyUseCase: environment.saveAPIKeyUseCase
             )
             let sessionInfoViewModel = SessionInfoViewModel(
-                sessionID: environment.sessionID,
-                branchID: environment.branchID,
+                session: environment.session,
                 collectSessionMetricsUseCase: environment.collectSessionMetricsUseCase
             )
             let mainViewModel = MainViewModel(

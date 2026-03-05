@@ -12,8 +12,7 @@ final class ChatViewModel {
 
     var onDidSendMessage: (() -> Void)?
 
-    private let sessionID: UUID
-    private let branchID: UUID
+    private let session: ChatSession
     private let sendMessageUseCase: SendMessageUseCaseProtocol
     private let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
 
@@ -21,13 +20,11 @@ final class ChatViewModel {
     private var currentSettings: LLMSettings = .default
 
     init(
-        sessionID: UUID,
-        branchID: UUID,
+        session: ChatSession,
         sendMessageUseCase: SendMessageUseCaseProtocol,
         fetchMessagesUseCase: FetchMessagesUseCaseProtocol
     ) {
-        self.sessionID = sessionID
-        self.branchID = branchID
+        self.session = session
         self.sendMessageUseCase = sendMessageUseCase
         self.fetchMessagesUseCase = fetchMessagesUseCase
 
@@ -64,8 +61,8 @@ final class ChatViewModel {
 
             do {
                 let response = try await self.sendMessageUseCase.execute(
-                    sessionID: self.sessionID,
-                    branchID: self.branchID,
+                    sessionID: self.session.id,
+                    branchID: self.session.activeBranchID,
                     userText: trimmed,
                     assistantInstruction: nil
                 )
@@ -123,7 +120,7 @@ final class ChatViewModel {
     }
 
     private func loadDialog() async throws {
-        let messages = try await fetchMessagesUseCase.execute(branchID: branchID)
+        let messages = try await fetchMessagesUseCase.execute(branchID: session.activeBranchID)
         dialogItems = messages.map { message in
             DialogHistoryItemViewState(
                 id: message.id,

@@ -10,18 +10,15 @@ final class SessionInfoViewModel {
         lastLatencyMs: 0
     )
 
-    private let sessionID: UUID
-    private let branchID: UUID
+    private let session: ChatSession
     private let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
 
     /// Создаёт ViewModel метрик для конкретной сессии и активной ветки.
     init(
-        sessionID: UUID,
-        branchID: UUID,
+        session: ChatSession,
         collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     ) {
-        self.sessionID = sessionID
-        self.branchID = branchID
+        self.session = session
         self.collectSessionMetricsUseCase = collectSessionMetricsUseCase
     }
 
@@ -30,8 +27,8 @@ final class SessionInfoViewModel {
         Task { [weak self] in
             guard let self else { return }
             if let value = try? await self.collectSessionMetricsUseCase.execute(
-                sessionID: self.sessionID,
-                branchID: self.branchID
+                sessionID: self.session.id,
+                branchID: self.session.activeBranchID
             ) {
                 self.snapshot = value
             }
