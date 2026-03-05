@@ -5,6 +5,8 @@ final class SettingsViewModel {
     @Published private(set) var settings: LLMSettings = .default
     @Published private(set) var apiKey: String = ""
     @Published private(set) var apiKeyStatus: String = ""
+    @Published private(set) var plannerInvariantsText: String = ""
+    @Published private(set) var plannerInvariantsStatus: String = ""
 
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
@@ -46,6 +48,23 @@ final class SettingsViewModel {
         persist()
     }
 
+    func updatePlannerInvariantsText(_ text: String) {
+        plannerInvariantsText = text
+        plannerInvariantsStatus = ""
+    }
+
+    func savePlannerInvariants() {
+        let lines = plannerInvariantsText
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let normalized = lines.isEmpty ? LLMSettings.default.plannerInvariants : lines
+        settings.plannerInvariants = normalized
+        plannerInvariantsText = normalized.joined(separator: "\n")
+        plannerInvariantsStatus = "Инварианты планировщика сохранены."
+        persist()
+    }
+
     func updateAPIKey(_ value: String) {
         apiKey = value
         apiKeyStatus = ""
@@ -56,10 +75,10 @@ final class SettingsViewModel {
         do {
             try saveAPIKeyUseCase.execute(apiKey: value)
             apiKeyStatus = value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "API key removed from Keychain."
-                : "API key saved to Keychain."
+                ? "API-ключ удален из Keychain."
+                : "API-ключ сохранен в Keychain."
         } catch {
-            apiKeyStatus = "Failed to save API key: \(error.localizedDescription)"
+            apiKeyStatus = "Не удалось сохранить API-ключ: \(error.localizedDescription)"
         }
     }
 
@@ -75,7 +94,7 @@ final class SettingsViewModel {
         do {
             apiKey = try loadAPIKeyUseCase.execute() ?? ""
         } catch {
-            apiKeyStatus = "Failed to load API key: \(error.localizedDescription)"
+            apiKeyStatus = "Не удалось загрузить API-ключ: \(error.localizedDescription)"
         }
     }
 
@@ -85,10 +104,11 @@ final class SettingsViewModel {
             do {
                 let loaded = try await fetchSettingsUseCase.execute(sessionID: session.id)
                 settings = loaded
+                plannerInvariantsText = loaded.plannerInvariants.joined(separator: "\n")
                 onSettingsChanged?(loaded)
                 try await applySettingsUseCase.execute(sessionID: session.id, settings: loaded)
             } catch {
-                apiKeyStatus = "Failed to load settings: \(error.localizedDescription)"
+                apiKeyStatus = "Не удалось загрузить настройки: \(error.localizedDescription)"
             }
         }
     }

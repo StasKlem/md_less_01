@@ -12,28 +12,40 @@ struct LLMSettings: Codable, Equatable {
     var model: LLMModel
     var temperature: Double
     var windowSize: Int
+    var plannerInvariants: [String]
 
     /// Значения настроек по умолчанию для новой сессии.
     static let `default` = LLMSettings(
         model: .deepseekV32,
         temperature: 0.4,
-        windowSize: 3
+        windowSize: 3,
+        plannerInvariants: [
+            "Даты поездки: дата начала не позже даты окончания.",
+            "Бюджет: если указан, должен быть больше 0.",
+            "Количество путешественников: минимум 1.",
+            "Маршрут можно строить только после заполнения: даты, бюджет, направление/стиль.",
+            "Финализация плана возможна только при наличии маршрута и бюджета.",
+            "После подтверждения план не меняется без явного revise-запроса."
+        ]
     )
 
     private enum CodingKeys: String, CodingKey {
         case model
         case temperature
         case windowSize
+        case plannerInvariants
     }
 
     init(
         model: LLMModel,
         temperature: Double,
-        windowSize: Int
+        windowSize: Int,
+        plannerInvariants: [String]
     ) {
         self.model = model
         self.temperature = temperature
         self.windowSize = windowSize
+        self.plannerInvariants = plannerInvariants
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +53,7 @@ struct LLMSettings: Codable, Equatable {
         model = try container.decode(LLMModel.self, forKey: .model)
         temperature = try container.decode(Double.self, forKey: .temperature)
         windowSize = try container.decode(Int.self, forKey: .windowSize)
+        plannerInvariants = try container.decodeIfPresent([String].self, forKey: .plannerInvariants) ?? Self.default.plannerInvariants
     }
 }
 

@@ -10,6 +10,10 @@ struct AppEnvironment {
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
+    let startVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol
+    let handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol
+    let getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol
+    let finalizeVacationPlanUseCase: FinalizeVacationPlanUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -21,6 +25,8 @@ struct AppEnvironment {
         let factsRepository = MockFactsRepository()
         let settingsRepository = UserDefaultsSettingsRepository()
         let metricsRepository = MockMetricsRepository()
+        let vacationStateRepository = FileVacationPlanningStateRepository()
+        let vacationPlanRepository = FileVacationPlanRepository()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -67,6 +73,23 @@ struct AppEnvironment {
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
+        let vacationReducer = VacationPlannerReducer()
+        let vacationOrchestrator = VacationPlanningOrchestrator(
+            stateRepository: vacationStateRepository,
+            planRepository: vacationPlanRepository,
+            reducer: vacationReducer,
+            slotExtractionService: MockVacationSlotExtractionService(),
+            optionGenerationService: MockVacationOptionGenerationService(),
+            itineraryService: MockVacationItineraryService(),
+            budgetEstimator: MockVacationBudgetEstimator()
+        )
+        let startVacationPlanning = StartVacationPlanningUseCase(orchestrator: vacationOrchestrator)
+        let handleVacationPlanningEvent = HandleVacationPlanningEventUseCase(orchestrator: vacationOrchestrator)
+        let getVacationPlanningStatus = GetVacationPlanningStatusUseCase(stateRepository: vacationStateRepository)
+        let finalizeVacationPlan = FinalizeVacationPlanUseCase(
+            stateRepository: vacationStateRepository,
+            planRepository: vacationPlanRepository
+        )
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -97,7 +120,11 @@ struct AppEnvironment {
             fetchSettingsUseCase: fetchSettings,
             collectSessionMetricsUseCase: collectMetrics,
             loadAPIKeyUseCase: loadAPIKey,
-            saveAPIKeyUseCase: saveAPIKey
+            saveAPIKeyUseCase: saveAPIKey,
+            startVacationPlanningUseCase: startVacationPlanning,
+            handleVacationPlanningEventUseCase: handleVacationPlanningEvent,
+            getVacationPlanningStatusUseCase: getVacationPlanningStatus,
+            finalizeVacationPlanUseCase: finalizeVacationPlan
         )
     }
 }

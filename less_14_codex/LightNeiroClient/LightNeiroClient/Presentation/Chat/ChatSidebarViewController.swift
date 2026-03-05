@@ -44,7 +44,8 @@ final class ChatSidebarViewController: NSViewController {
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
     private let inputTextView = ChatInputTextView()
     private let inputScrollView = NSScrollView()
-    private let sendButton = NSButton(title: "Send", target: nil, action: nil)
+    private let sendButton = NSButton(title: "Отправить", target: nil, action: nil)
+    private let startPlannerButton = NSButton(title: "Запустить отпуск", target: nil, action: nil)
 
     init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -71,13 +72,15 @@ final class ChatSidebarViewController: NSViewController {
     private func setupUI() {
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
+        startPlannerButton.target = self
+        startPlannerButton.action = #selector(startPlannerTapped)
         configureInputTextView()
 
         addChild(dialogHistoryViewController)
         let dialogView = dialogHistoryViewController.view
         dialogView.translatesAutoresizingMaskIntoConstraints = false
 
-        let inputRow = NSStackView(views: [inputScrollView, sendButton])
+        let inputRow = NSStackView(views: [inputScrollView, startPlannerButton, sendButton])
         inputRow.orientation = .horizontal
         inputRow.alignment = .bottom
         inputRow.spacing = 8
@@ -93,6 +96,7 @@ final class ChatSidebarViewController: NSViewController {
             root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            startPlannerButton.widthAnchor.constraint(equalToConstant: 120),
             sendButton.widthAnchor.constraint(equalToConstant: 88),
             inputScrollView.heightAnchor.constraint(equalToConstant: inputHeightForThreeLines()),
         ])
@@ -157,6 +161,7 @@ final class ChatSidebarViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
+                self?.startPlannerButton.isEnabled = !sending
             }
             .store(in: &cancellables)
     }
@@ -166,5 +171,10 @@ final class ChatSidebarViewController: NSViewController {
         let text = inputTextView.string
         inputTextView.string = ""
         viewModel.send(text: text)
+    }
+
+    @objc
+    private func startPlannerTapped() {
+        viewModel.send(text: "/vacation start")
     }
 }

@@ -317,7 +317,8 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                 settings: LLMSettings(
                     model: settings.model,
                     temperature: 0.0,
-                    windowSize: 1
+                    windowSize: 1,
+                    plannerInvariants: settings.plannerInvariants
                 )
             )
         )
@@ -772,5 +773,584 @@ final class SaveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol {
     /// Явно удаляет API-ключ из Keychain.
     func delete() throws {
         try apiKeyStore.deleteAPIKey()
+    }
+}
+
+final class VacationPlannerReducer: VacationPlannerReducerProtocol {
+    func reduce(
+        snapshot: VacationPlanningSnapshot,
+        event: VacationPlanningEvent
+    ) -> VacationPlanningTransitionResult {
+        let preViolations = VacationPlanningInvariantValidator.validate(
+            state: snapshot.state,
+            context: snapshot.context,
+            snapshotUpdatedAt: snapshot.updatedAt
+        )
+        if !preViolations.isEmpty {
+            return failedTransition(
+                context: snapshot.context,
+                reason: "Нарушение инварианта: \(preViolations.map(\.message).joined(separator: ", "))"
+            )
+        }
+
+        let transition: VacationPlanningTransitionResult
+        switch (snapshot.state, event) {
+        case (.idle, .started), (.failed, .started):
+            var context = snapshot.context
+            context.lastValidationErrors = []
+            transition = VacationPlanningTransitionResult(
+                nextState: .collectingRequirements,
+                nextContext: context,
+                effects: [.askUser(questionKey: .provideBasics), .persistSnapshot]
+            )
+        case (_, let .errorOccurred(error)):
+            transition = failedTransition(context: snapshot.context, reason: error.failureReason)
+        case (_, let .userMessage(text)):
+            transition = userMessageTransition(snapshot: snapshot, text: text)
+        case (.collectingRequirements, .slotsExtracted(let extracted)), (.clarifyingMissingData, .slotsExtracted(let extracted)):
+            transition = slotsExtractedTransition(snapshot: snapshot, extracted: extracted)
+        case (.collectingRequirements, .slotsValidationFailed(let errors)), (.clarifyingMissingData, .slotsValidationFailed(let errors)):
+            transition = clarificationTransition(context: snapshot.context, errors: errors)
+        case (.generatingOptions, .optionsGenerated(let options)):
+            transition = optionsGeneratedTransition(snapshot: snapshot, options: options)
+        case (.buildingItinerary, .itineraryGenerated(let itinerary)):
+            var context = snapshot.context
+            context.itinerary = itinerary
+            context.itineraryBuiltAt = Date()
+            transition = VacationPlanningTransitionResult(
+                nextState: .budgetReview,
+                nextContext: context,
+                effects: [.calculateBudget, .persistSnapshot]
+            )
+        case (.budgetReview, .budgetCalculated(let budget)):
+            var context = snapshot.context
+            context.budgetBreakdown = budget
+            context.budgetReviewedAt = Date()
+            transition = VacationPlanningTransitionResult(
+                nextState: .awaitingApproval,
+                nextContext: context,
+                effects: [.askUser(questionKey: .approval), .persistSnapshot]
+            )
+        case (.awaitingApproval, .approved):
+            transition = approveTransition(snapshot: snapshot)
+        case (.awaitingApproval, .revisionRequested(let comment)), (.completed, .revisionRequested(let comment)):
+            transition = revisionTransition(context: snapshot.context, comment: comment)
+        case (.failed, .revisionRequested(let comment)):
+            transition = revisionTransition(context: snapshot.context, comment: comment)
+        default:
+            transition = failedTransition(
+                context: snapshot.context,
+                reason: "Недопустимый переход из состояния «\(snapshot.state.title)» на событие «\(event.debugName)»"
+            )
+        }
+
+        let now = Date()
+        var validatedContext = transition.nextContext
+        validatedContext.updatedAt = now
+        let postViolations = VacationPlanningInvariantValidator.validate(
+            state: transition.nextState,
+            context: validatedContext,
+            snapshotUpdatedAt: now
+        )
+        if !postViolations.isEmpty {
+            return failedTransition(
+                context: validatedContext,
+                reason: "Нарушение инварианта: \(postViolations.map(\.message).joined(separator: ", "))"
+            )
+        }
+
+        return VacationPlanningTransitionResult(
+            nextState: transition.nextState,
+            nextContext: validatedContext,
+            effects: transition.effects
+        )
+    }
+
+    private func userMessageTransition(
+        snapshot: VacationPlanningSnapshot,
+        text: String
+    ) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        context.lastUserMessage = text
+
+        if case .completed = snapshot.state {
+            return failedTransition(
+                context: context,
+                reason: "Завершенный план неизменяем. Отправьте запрос на правку, чтобы продолжить."
+            )
+        }
+
+        let state: VacationPlanningState = (snapshot.state == .idle) ? .collectingRequirements : snapshot.state
+        return VacationPlanningTransitionResult(
+            nextState: state,
+            nextContext: context,
+            effects: [.extractSlotsFromUserText(text), .persistSnapshot]
+        )
+    }
+
+    private func slotsExtractedTransition(
+        snapshot: VacationPlanningSnapshot,
+        extracted: VacationSlots
+    ) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        context.slots = mergeSlots(current: context.slots, incoming: extracted)
+
+        let missing = missingRequiredFields(for: context.slots)
+        if !missing.isEmpty {
+            return clarificationTransition(context: context, errors: missing)
+        }
+
+        context.lastValidationErrors = []
+        return VacationPlanningTransitionResult(
+            nextState: .generatingOptions,
+            nextContext: context,
+            effects: [.generateDestinationOptions, .persistSnapshot]
+        )
+    }
+
+    private func clarificationTransition(
+        context: VacationPlanningContext,
+        errors: [String]
+    ) -> VacationPlanningTransitionResult {
+        var next = context
+        next.lastValidationErrors = errors
+        let question: VacationQuestionKey = {
+            if errors.contains("destination") {
+                return .missingDestination
+            }
+            if errors.contains("dates") {
+                return .missingDates
+            }
+            if errors.contains("budget") {
+                return .missingBudget
+            }
+            return .provideBasics
+        }()
+        return VacationPlanningTransitionResult(
+            nextState: .clarifyingMissingData,
+            nextContext: next,
+            effects: [.askUser(questionKey: question), .persistSnapshot]
+        )
+    }
+
+    private func optionsGeneratedTransition(
+        snapshot: VacationPlanningSnapshot,
+        options: [VacationOption]
+    ) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        context.options = options
+        context.selectedOption = options.first
+        if options.isEmpty {
+            return clarificationTransition(context: context, errors: ["destination"])
+        }
+        return VacationPlanningTransitionResult(
+            nextState: .buildingItinerary,
+            nextContext: context,
+            effects: [.generateItinerary, .persistSnapshot]
+        )
+    }
+
+    private func approveTransition(snapshot: VacationPlanningSnapshot) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        guard
+            let itinerary = context.itinerary,
+            let budget = context.budgetBreakdown
+        else {
+            return failedTransition(
+                context: context,
+                reason: "Нельзя подтвердить план без маршрута и бюджета."
+            )
+        }
+        let plan = VacationPlan(
+            sessionID: snapshot.sessionID,
+            branchID: snapshot.branchID,
+            slots: context.slots,
+            selectedOption: context.selectedOption,
+            itinerary: itinerary,
+            budget: budget,
+            createdAt: Date()
+        )
+        context.finalPlan = plan
+        context.isFinalPlanLocked = true
+        return VacationPlanningTransitionResult(
+            nextState: .completed,
+            nextContext: context,
+            effects: [.emitFinalPlan, .persistSnapshot]
+        )
+    }
+
+    private func revisionTransition(
+        context: VacationPlanningContext,
+        comment: String
+    ) -> VacationPlanningTransitionResult {
+        var next = context
+        next.revisionCount += 1
+        next.isFinalPlanLocked = false
+        next.finalPlan = nil
+        if !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            next.constraintsAppend(comment)
+        }
+        if next.slots.hasMinimumInput {
+            return VacationPlanningTransitionResult(
+                nextState: .generatingOptions,
+                nextContext: next,
+                effects: [.generateDestinationOptions, .persistSnapshot]
+            )
+        }
+        return VacationPlanningTransitionResult(
+            nextState: .collectingRequirements,
+            nextContext: next,
+            effects: [.askUser(questionKey: .provideBasics), .persistSnapshot]
+        )
+    }
+
+    private func failedTransition(
+        context: VacationPlanningContext,
+        reason: String
+    ) -> VacationPlanningTransitionResult {
+        VacationPlanningTransitionResult(
+            nextState: .failed(reason: reason),
+            nextContext: context,
+            effects: [.askUser(questionKey: .retryAfterError), .persistSnapshot]
+        )
+    }
+
+    private func mergeSlots(current: VacationSlots, incoming: VacationSlots) -> VacationSlots {
+        VacationSlots(
+            destination: incoming.destination ?? current.destination,
+            dateRange: incoming.dateRange ?? current.dateRange,
+            budget: incoming.budget ?? current.budget,
+            travelerCount: max(current.travelerCount, incoming.travelerCount),
+            travelStyle: incoming.travelStyle ?? current.travelStyle,
+            interests: current.interests.mergingUnique(with: incoming.interests),
+            constraints: current.constraints.mergingUnique(with: incoming.constraints)
+        )
+    }
+
+    private func missingRequiredFields(for slots: VacationSlots) -> [String] {
+        var missing: [String] = []
+        if slots.destination == nil && slots.travelStyle == nil {
+            missing.append("destination")
+        }
+        if slots.dateRange == nil {
+            missing.append("dates")
+        }
+        if slots.budget == nil {
+            missing.append("budget")
+        }
+        return missing
+    }
+}
+
+final class StartVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol {
+    private let orchestrator: VacationPlanningOrchestrator
+
+    init(orchestrator: VacationPlanningOrchestrator) {
+        self.orchestrator = orchestrator
+    }
+
+    func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlanningTurnResult {
+        try await orchestrator.process(
+            sessionID: sessionID,
+            branchID: branchID,
+            initialEvent: .started
+        )
+    }
+}
+
+final class HandleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol {
+    private let orchestrator: VacationPlanningOrchestrator
+
+    init(orchestrator: VacationPlanningOrchestrator) {
+        self.orchestrator = orchestrator
+    }
+
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userText: String
+    ) async throws -> VacationPlanningTurnResult {
+        let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased() == "approve" {
+            return try await orchestrator.process(sessionID: sessionID, branchID: branchID, initialEvent: .approved)
+        }
+        if trimmed.lowercased().hasPrefix("revise:") {
+            let comment = String(trimmed.dropFirst("revise:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return try await orchestrator.process(
+                sessionID: sessionID,
+                branchID: branchID,
+                initialEvent: .revisionRequested(comment: comment)
+            )
+        }
+        return try await orchestrator.process(
+            sessionID: sessionID,
+            branchID: branchID,
+            initialEvent: .userMessage(text: userText)
+        )
+    }
+}
+
+final class GetVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol {
+    private let stateRepository: VacationPlanningStateRepositoryProtocol
+
+    init(stateRepository: VacationPlanningStateRepositoryProtocol) {
+        self.stateRepository = stateRepository
+    }
+
+    func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlanningSnapshot {
+        if let snapshot = try await stateRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID) {
+            return snapshot
+        }
+        return VacationPlanningSnapshot(
+            schemaVersion: VacationPlanningSnapshot.schemaVersionCurrent,
+            sessionID: sessionID,
+            branchID: branchID,
+            state: .idle,
+            context: .initial,
+            updatedAt: Date()
+        )
+    }
+}
+
+final class FinalizeVacationPlanUseCase: FinalizeVacationPlanUseCaseProtocol {
+    private let stateRepository: VacationPlanningStateRepositoryProtocol
+    private let planRepository: VacationPlanRepositoryProtocol
+
+    init(
+        stateRepository: VacationPlanningStateRepositoryProtocol,
+        planRepository: VacationPlanRepositoryProtocol
+    ) {
+        self.stateRepository = stateRepository
+        self.planRepository = planRepository
+    }
+
+    func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlan {
+        if let persisted = try await planRepository.fetchFinalPlan(sessionID: sessionID, branchID: branchID) {
+            return persisted
+        }
+        guard let snapshot = try await stateRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID) else {
+            throw VacationPlanningError.serviceFailure("Снимок планирования отсутствует.")
+        }
+        guard case .completed = snapshot.state, let plan = snapshot.context.finalPlan else {
+            throw VacationPlanningError.invalidTransition("Нельзя финализировать план до завершения.")
+        }
+        try await planRepository.saveFinalPlan(plan)
+        return plan
+    }
+}
+
+final class VacationPlanningOrchestrator {
+    private let stateRepository: VacationPlanningStateRepositoryProtocol
+    private let planRepository: VacationPlanRepositoryProtocol
+    private let reducer: VacationPlannerReducerProtocol
+    private let slotExtractionService: VacationSlotExtractionServiceProtocol
+    private let optionGenerationService: VacationOptionGenerationServiceProtocol
+    private let itineraryService: VacationItineraryServiceProtocol
+    private let budgetEstimator: VacationBudgetEstimatorProtocol
+
+    init(
+        stateRepository: VacationPlanningStateRepositoryProtocol,
+        planRepository: VacationPlanRepositoryProtocol,
+        reducer: VacationPlannerReducerProtocol,
+        slotExtractionService: VacationSlotExtractionServiceProtocol,
+        optionGenerationService: VacationOptionGenerationServiceProtocol,
+        itineraryService: VacationItineraryServiceProtocol,
+        budgetEstimator: VacationBudgetEstimatorProtocol
+    ) {
+        self.stateRepository = stateRepository
+        self.planRepository = planRepository
+        self.reducer = reducer
+        self.slotExtractionService = slotExtractionService
+        self.optionGenerationService = optionGenerationService
+        self.itineraryService = itineraryService
+        self.budgetEstimator = budgetEstimator
+    }
+
+    func process(
+        sessionID: UUID,
+        branchID: UUID,
+        initialEvent: VacationPlanningEvent
+    ) async throws -> VacationPlanningTurnResult {
+        var snapshot = try await loadSnapshot(sessionID: sessionID, branchID: branchID)
+        var queue: [VacationPlanningEvent] = [initialEvent]
+        var messages: [String] = []
+
+        while !queue.isEmpty {
+            let event = queue.removeFirst()
+            let transition = reducer.reduce(snapshot: snapshot, event: event)
+            snapshot = rebuildSnapshot(from: transition, previous: snapshot)
+
+            let execution = try await executeEffects(transition.effects, snapshot: snapshot)
+            messages.append(contentsOf: execution.messages)
+            queue.append(contentsOf: execution.events)
+
+        }
+
+        try await stateRepository.saveSnapshot(snapshot)
+        return VacationPlanningTurnResult(snapshot: snapshot, agentMessages: messages)
+    }
+
+    private func loadSnapshot(sessionID: UUID, branchID: UUID) async throws -> VacationPlanningSnapshot {
+        if let existing = try await stateRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID) {
+            return existing
+        }
+        return VacationPlanningSnapshot(
+            schemaVersion: VacationPlanningSnapshot.schemaVersionCurrent,
+            sessionID: sessionID,
+            branchID: branchID,
+            state: .idle,
+            context: .initial,
+            updatedAt: Date()
+        )
+    }
+
+    private func rebuildSnapshot(
+        from transition: VacationPlanningTransitionResult,
+        previous: VacationPlanningSnapshot
+    ) -> VacationPlanningSnapshot {
+        let now = Date()
+        var context = transition.nextContext
+        context.updatedAt = now
+        if context.createdAt > now {
+            context.createdAt = now
+        }
+        return VacationPlanningSnapshot(
+            schemaVersion: VacationPlanningSnapshot.schemaVersionCurrent,
+            sessionID: previous.sessionID,
+            branchID: previous.branchID,
+            state: transition.nextState,
+            context: context,
+            updatedAt: now
+        )
+    }
+
+    private func executeEffects(
+        _ effects: [VacationEffect],
+        snapshot: VacationPlanningSnapshot
+    ) async throws -> (events: [VacationPlanningEvent], messages: [String]) {
+        var resultingEvents: [VacationPlanningEvent] = []
+        var messages: [String] = []
+
+        for effect in effects {
+            switch effect {
+            case let .askUser(questionKey):
+                messages.append(questionText(for: questionKey))
+            case let .extractSlotsFromUserText(text):
+                let extraction = try await slotExtractionService.extractSlots(from: text, current: snapshot.context.slots)
+                if !extraction.validationErrors.isEmpty {
+                    resultingEvents.append(.slotsValidationFailed(errors: extraction.validationErrors))
+                }
+                resultingEvents.append(.slotsExtracted(extraction.slots))
+            case .generateDestinationOptions:
+                let options = try await optionGenerationService.generateOptions(context: snapshot.context)
+                resultingEvents.append(.optionsGenerated(options))
+            case .generateItinerary:
+                let itinerary = try await itineraryService.generateItinerary(context: snapshot.context)
+                resultingEvents.append(.itineraryGenerated(itinerary))
+            case .calculateBudget:
+                let budget = try await budgetEstimator.estimateBudget(context: snapshot.context)
+                resultingEvents.append(.budgetCalculated(budget))
+            case .persistSnapshot:
+                try await stateRepository.saveSnapshot(snapshot)
+            case .emitFinalPlan:
+                if let plan = snapshot.context.finalPlan {
+                    try await planRepository.saveFinalPlan(plan)
+                    messages.append("План отпуска готов и сохранен.")
+                } else {
+                    throw VacationPlanningError.serviceFailure("Невозможно опубликовать итоговый план без завершенного контекста.")
+                }
+            }
+        }
+
+        return (resultingEvents, messages)
+    }
+
+    private func questionText(for key: VacationQuestionKey) -> String {
+        switch key {
+        case .provideBasics:
+            return "Укажите направление или стиль отдыха, даты поездки и общий бюджет."
+        case .missingDestination:
+            return "Нужно указать направление или предпочитаемый стиль отдыха."
+        case .missingDates:
+            return "Укажите дату начала и дату окончания поездки."
+        case .missingBudget:
+            return "Укажите бюджет поездки и валюту."
+        case .approval:
+            return "План готов. Напишите `approve` для подтверждения или `revise: ...` для правок."
+        case .retryAfterError:
+            return "Планировщик столкнулся с ошибкой инварианта/перехода. Напишите `revise: ...`, чтобы продолжить."
+        }
+    }
+}
+
+private extension VacationPlanningContext {
+    mutating func constraintsAppend(_ comment: String) {
+        let normalized = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        let nextConstraints = slots.constraints.mergingUnique(with: [normalized])
+        slots = VacationSlots(
+            destination: slots.destination,
+            dateRange: slots.dateRange,
+            budget: slots.budget,
+            travelerCount: slots.travelerCount,
+            travelStyle: slots.travelStyle,
+            interests: slots.interests,
+            constraints: nextConstraints
+        )
+    }
+}
+
+private extension VacationPlanningEvent {
+    var debugName: String {
+        switch self {
+        case .started:
+            return "запуск"
+        case .userMessage:
+            return "сообщениеПользователя"
+        case .slotsExtracted:
+            return "слотыИзвлечены"
+        case .slotsValidationFailed:
+            return "валидацияСлотовПровалена"
+        case .optionsGenerated:
+            return "вариантыСгенерированы"
+        case .itineraryGenerated:
+            return "маршрутСгенерирован"
+        case .budgetCalculated:
+            return "бюджетРассчитан"
+        case .approved:
+            return "подтверждено"
+        case .revisionRequested:
+            return "запрошенаПравка"
+        case .errorOccurred:
+            return "ошибка"
+        }
+    }
+}
+
+private extension VacationPlanningError {
+    var failureReason: String {
+        switch self {
+        case let .invariantViolation(violations):
+            return violations.map(\.message).joined(separator: ", ")
+        case let .invalidTransition(message):
+            return message
+        case let .serviceFailure(message):
+            return message
+        }
+    }
+}
+
+private extension Array where Element == String {
+    func mergingUnique(with other: [String]) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+        for value in self + other {
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { continue }
+            if seen.insert(normalized.lowercased()).inserted {
+                result.append(normalized)
+            }
+        }
+        return result
     }
 }

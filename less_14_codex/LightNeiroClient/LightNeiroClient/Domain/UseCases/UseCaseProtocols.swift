@@ -65,3 +65,30 @@ protocol SaveAPIKeyUseCaseProtocol {
     func execute(apiKey: String) throws
     func delete() throws
 }
+
+protocol VacationPlannerReducerProtocol {
+    func reduce(
+        snapshot: VacationPlanningSnapshot,
+        event: VacationPlanningEvent
+    ) -> VacationPlanningTransitionResult
+}
+
+protocol StartVacationPlanningUseCaseProtocol {
+    func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlanningTurnResult
+}
+
+protocol HandleVacationPlanningEventUseCaseProtocol {
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userText: String
+    ) async throws -> VacationPlanningTurnResult
+}
+
+protocol GetVacationPlanningStatusUseCaseProtocol {
+    func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlanningSnapshot
+}
+
+protocol FinalizeVacationPlanUseCaseProtocol {
+    func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlan
+}

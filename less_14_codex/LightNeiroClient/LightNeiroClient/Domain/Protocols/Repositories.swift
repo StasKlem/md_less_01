@@ -50,3 +50,13 @@ protocol MetricsRepositoryProtocol {
     func appendMetric(_ metric: RequestMetric) async throws
     func fetchMetrics(sessionID: UUID) async throws -> [RequestMetric]
 }
+
+protocol VacationPlanningStateRepositoryProtocol {
+    func fetchSnapshot(sessionID: UUID, branchID: UUID) async throws -> VacationPlanningSnapshot?
+    func saveSnapshot(_ snapshot: VacationPlanningSnapshot) async throws
+}
+
+protocol VacationPlanRepositoryProtocol {
+    func fetchFinalPlan(sessionID: UUID, branchID: UUID) async throws -> VacationPlan?
+    func saveFinalPlan(_ plan: VacationPlan) async throws
+}

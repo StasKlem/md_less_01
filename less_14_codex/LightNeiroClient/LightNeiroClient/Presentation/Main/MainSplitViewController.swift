@@ -9,9 +9,11 @@ final class MainSplitViewController: NSSplitViewController {
 
         let chatVC = ChatSidebarViewController(viewModel: viewModel.chatViewModel)
         let settingsVC = SettingsViewController(viewModel: viewModel.settingsViewModel)
+        let invariantsVC = InvariantsSettingsViewController(viewModel: viewModel.settingsViewModel)
         let sessionInfoVC = SessionInfoViewController(viewModel: viewModel.sessionInfoViewModel)
         let rightVC = RightPaneSplitViewController(
             settingsViewController: settingsVC,
+            invariantsViewController: invariantsVC,
             sessionInfoViewController: sessionInfoVC
         )
 

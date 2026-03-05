@@ -14,11 +14,17 @@ enum DialogMessageStatus: Hashable {
     case failed
 }
 
+enum DialogMessageTone: Hashable {
+    case normal
+    case stateTransition
+}
+
 struct DialogHistoryItemViewState: Hashable {
     let id: UUID
     let kind: DialogMessageKind
     let text: String
     let status: DialogMessageStatus
+    let tone: DialogMessageTone
     let createdAt: Date
 
     init(
@@ -26,12 +32,14 @@ struct DialogHistoryItemViewState: Hashable {
         kind: DialogMessageKind,
         text: String,
         status: DialogMessageStatus,
+        tone: DialogMessageTone = .normal,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.kind = kind
         self.text = text
         self.status = status
+        self.tone = tone
         self.createdAt = createdAt
     }
 }

@@ -32,3 +32,24 @@ protocol APIKeyStoreProtocol {
     nonisolated func saveAPIKey(_ apiKey: String) throws
     nonisolated func deleteAPIKey() throws
 }
+
+struct VacationSlotsExtractionResult: Equatable {
+    let slots: VacationSlots
+    let validationErrors: [String]
+}
+
+protocol VacationSlotExtractionServiceProtocol {
+    func extractSlots(from userText: String, current: VacationSlots) async throws -> VacationSlotsExtractionResult
+}
+
+protocol VacationOptionGenerationServiceProtocol {
+    func generateOptions(context: VacationPlanningContext) async throws -> [VacationOption]
+}
+
+protocol VacationItineraryServiceProtocol {
+    func generateItinerary(context: VacationPlanningContext) async throws -> VacationItinerary
+}
+
+protocol VacationBudgetEstimatorProtocol {
+    func estimateBudget(context: VacationPlanningContext) async throws -> VacationBudgetBreakdown
+}

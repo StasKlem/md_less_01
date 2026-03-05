@@ -78,7 +78,12 @@ class BaseMessageCollectionItem: NSCollectionViewItem, DialogCollectionCellProto
         case .assistant:
             bubbleView.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.18).cgColor
         case .system:
-            bubbleView.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.20).cgColor
+            switch state.tone {
+            case .normal:
+                bubbleView.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.20).cgColor
+            case .stateTransition:
+                bubbleView.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.18).cgColor
+            }
         }
     }
 

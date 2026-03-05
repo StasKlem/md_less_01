@@ -148,3 +148,98 @@ final class SettingsViewController: NSViewController {
         viewModel.saveAPIKey()
     }
 }
+
+final class InvariantsSettingsViewController: NSViewController {
+    private let viewModel: SettingsViewModel
+    private var cancellables = Set<AnyCancellable>()
+
+    private let titleLabel = NSTextField(labelWithString: "Planner Invariants (Text)")
+    private let invariantsScrollView = NSScrollView()
+    private let invariantsTextView = NSTextView()
+    private let saveButton = NSButton(title: "Save Invariants", target: nil, action: nil)
+    private let statusLabel = NSTextField(labelWithString: "")
+
+    init(viewModel: SettingsViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.underPageBackgroundColor.cgColor
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        bind()
+    }
+
+    private func setupUI() {
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byWordWrapping
+        statusLabel.maximumNumberOfLines = 2
+
+        invariantsTextView.isEditable = true
+        invariantsTextView.isRichText = false
+        invariantsTextView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        invariantsTextView.isVerticallyResizable = true
+        invariantsTextView.isHorizontallyResizable = false
+        invariantsTextView.textContainer?.widthTracksTextView = true
+        invariantsTextView.textContainerInset = NSSize(width: 8, height: 8)
+
+        invariantsScrollView.borderType = .bezelBorder
+        invariantsScrollView.hasVerticalScroller = true
+        invariantsScrollView.hasHorizontalScroller = false
+        invariantsScrollView.documentView = invariantsTextView
+
+        saveButton.target = self
+        saveButton.action = #selector(saveTapped)
+
+        let stack = NSStackView(views: [titleLabel, invariantsScrollView, saveButton, statusLabel])
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            invariantsScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
+        ])
+    }
+
+    private func bind() {
+        viewModel.$plannerInvariantsText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                guard let self else { return }
+                if self.invariantsTextView.string != text {
+                    self.invariantsTextView.string = text
+                }
+            }
+            .store(in: &cancellables)
+
+        viewModel.$plannerInvariantsStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                self?.statusLabel.stringValue = text
+            }
+            .store(in: &cancellables)
+    }
+
+    @objc
+    private func saveTapped() {
+        viewModel.updatePlannerInvariantsText(invariantsTextView.string)
+        viewModel.savePlannerInvariants()
+    }
+}
