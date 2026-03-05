@@ -55,29 +55,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let chatViewModel = ChatViewModel(
                 sessionID: environment.sessionID,
                 branchID: environment.branchID,
-                taskFlowOrchestratorUseCase: environment.taskFlowOrchestratorUseCase,
-                fetchBranchesUseCase: environment.fetchBranchesUseCase,
-                fetchCheckpointsUseCase: environment.fetchCheckpointsUseCase,
+                sendMessageUseCase: environment.sendMessageUseCase,
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,
-                cloneDialogToBranchUseCase: environment.cloneDialogToBranchUseCase,
-                createCheckpointUseCase: environment.createCheckpointUseCase,
-                switchBranchUseCase: environment.switchBranchUseCase,
-                createBranchUseCase: environment.createBranchUseCase,
-                addBranchCreatedSystemMessageUseCase: environment.addBranchCreatedSystemMessageUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 sessionID: environment.sessionID,
-                activeBranchID: environment.branchID,
                 fetchSettingsUseCase: environment.fetchSettingsUseCase,
                 applySettingsUseCase: environment.applySettingsUseCase,
-                fetchUserPromptProfilesUseCase: environment.fetchUserPromptProfilesUseCase,
-                saveUserPromptProfilesUseCase: environment.saveUserPromptProfilesUseCase,
                 loadAPIKeyUseCase: environment.loadAPIKeyUseCase,
                 saveAPIKeyUseCase: environment.saveAPIKeyUseCase
             )
             let sessionInfoViewModel = SessionInfoViewModel(
                 sessionID: environment.sessionID,
-                activeBranchID: environment.branchID,
+                branchID: environment.branchID,
                 collectSessionMetricsUseCase: environment.collectSessionMetricsUseCase
             )
             let mainViewModel = MainViewModel(

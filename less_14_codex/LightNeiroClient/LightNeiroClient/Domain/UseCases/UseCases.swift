@@ -31,7 +31,6 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
         let shortTermMessages = selectShortTermMessages(
             snapshot: snapshot,
             fallbackMessages: nonSystemMessages,
-            strategy: settings.contextStrategy(for: branchID),
             windowSize: settings.windowSize
         )
 
@@ -53,16 +52,10 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
     private func selectShortTermMessages(
         snapshot: ShortTermMemorySnapshot?,
         fallbackMessages: [ChatMessage],
-        strategy: ContextStrategy,
         windowSize: Int
     ) -> [ChatMessage] {
         let sourceMessages = snapshot?.messages ?? fallbackMessages
-        switch strategy {
-        case .normal:
-            return sourceMessages
-        case .slidingWindow, .stickyFacts:
-            return Array(sourceMessages.suffix(max(1, windowSize)))
-        }
+        return Array(sourceMessages.suffix(max(1, windowSize)))
     }
 
     private func prioritizedLongTermMemory(sessionID: UUID) async throws -> [LongTermMemoryItem] {
@@ -89,33 +82,6 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
     }
 }
 
-final class FetchBranchesUseCase: FetchBranchesUseCaseProtocol {
-    private let branchRepository: BranchRepositoryProtocol
-
-    /// Создаёт use case получения веток сессии.
-    init(branchRepository: BranchRepositoryProtocol) {
-        self.branchRepository = branchRepository
-    }
-
-    /// Возвращает ветки сессии, отсортированные по времени создания.
-    func execute(sessionID: UUID) async throws -> [ChatBranch] {
-        let branches = try await branchRepository.fetchBranches(sessionID: sessionID)
-        return branches.sorted { $0.createdAt < $1.createdAt }
-    }
-}
-
-final class FetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol {
-    private let branchRepository: BranchRepositoryProtocol
-
-    init(branchRepository: BranchRepositoryProtocol) {
-        self.branchRepository = branchRepository
-    }
-
-    func execute(branchID: UUID) async throws -> [ChatCheckpoint] {
-        try await branchRepository.fetchCheckpoints(branchID: branchID)
-    }
-}
-
 final class FetchMessagesUseCase: FetchMessagesUseCaseProtocol {
     private let messageRepository: MessageRepositoryProtocol
 
@@ -127,38 +93,6 @@ final class FetchMessagesUseCase: FetchMessagesUseCaseProtocol {
     /// Возвращает все сообщения указанной ветки.
     func execute(branchID: UUID) async throws -> [ChatMessage] {
         try await messageRepository.fetchMessages(branchID: branchID)
-    }
-}
-
-final class CloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol {
-    private let messageRepository: MessageRepositoryProtocol
-
-    /// Создаёт use case клонирования диалога между ветками.
-    init(messageRepository: MessageRepositoryProtocol) {
-        self.messageRepository = messageRepository
-    }
-
-    /// Клонирует сообщения из source-ветки в target-ветку, если target ещё пустая.
-    func execute(sourceBranchID: UUID, targetBranchID: UUID) async throws {
-        let targetMessages = try await messageRepository.fetchMessages(branchID: targetBranchID)
-        // Защитное условие: если в целевой ветке уже есть сообщения, клон не делаем.
-        // Это предотвращает дубли и сохраняет идемпотентность операции.
-        guard targetMessages.isEmpty else { return }
-
-        let sourceMessages = try await messageRepository.fetchMessages(branchID: sourceBranchID)
-        for message in sourceMessages {
-            // Клонируем содержимое и метаданные в новую ветку, чтобы стартовая история совпадала.
-            let clone = ChatMessage(
-                branchID: targetBranchID,
-                role: message.role,
-                content: message.content,
-                createdAt: message.createdAt,
-                inputTokens: message.inputTokens,
-                outputTokens: message.outputTokens,
-                latencyMs: message.latencyMs
-            )
-            try await messageRepository.saveMessage(clone)
-        }
     }
 }
 
@@ -382,11 +316,8 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                 longTermMemory: [],
                 settings: LLMSettings(
                     model: settings.model,
-                    contextStrategy: .normal,
                     temperature: 0.0,
-                    windowSize: 1,
-                    contextStrategyByBranch: [:],
-                    agentFlowSettings: settings.agentFlowSettings
+                    windowSize: 1
                 )
             )
         )
@@ -541,7 +472,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol
     private let updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol
     private let metricsRepository: MetricsRepositoryProtocol
-    private let resolveUserPromptPrefixUseCase: ResolveUserPromptPrefixUseCaseProtocol
 
     /// Создает use case отправки сообщения и внедряет все необходимые зависимости.
     ///
@@ -554,7 +484,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - updateWorkingMemoryUseCase: обновление рабочего слоя памяти.
     ///   - updateLongTermMemoryUseCase: обновление долговременного слоя памяти.
     ///   - metricsRepository: хранилище телеметрии запроса/ответа модели.
-    ///   - resolveUserPromptPrefixUseCase: получает профильный префикс пользовательского сообщения.
     init(
         settingsRepository: SettingsRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
@@ -563,8 +492,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         updateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol,
         updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol,
         updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol,
-        metricsRepository: MetricsRepositoryProtocol,
-        resolveUserPromptPrefixUseCase: ResolveUserPromptPrefixUseCaseProtocol
+        metricsRepository: MetricsRepositoryProtocol
     ) {
         self.settingsRepository = settingsRepository
         self.messageRepository = messageRepository
@@ -574,7 +502,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         self.updateWorkingMemoryUseCase = updateWorkingMemoryUseCase
         self.updateLongTermMemoryUseCase = updateLongTermMemoryUseCase
         self.metricsRepository = metricsRepository
-        self.resolveUserPromptPrefixUseCase = resolveUserPromptPrefixUseCase
     }
 
     /// Выполняет end-to-end обработку пользовательского сообщения.
@@ -607,8 +534,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         userText: String,
         assistantInstruction: String?
     ) async throws -> ChatMessage {
-        let prefixedUserText = await enrichUserMessage(userText, sessionID: sessionID)
-        let userMessage = ChatMessage(branchID: branchID, role: .user, content: prefixedUserText)
+        let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
 
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
@@ -686,18 +612,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         return "\(base)\n\n\(trimmed)"
     }
 
-    /// Добавляет профильный префикс к сообщению пользователя в формате "prefix + blank line + message".
-    private func enrichUserMessage(_ userText: String, sessionID: UUID) async -> String {
-        let resolvedPrefix = try? await resolveUserPromptPrefixUseCase.execute(sessionID: sessionID)
-        let prefix = resolvedPrefix?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let prefix, !prefix.isEmpty else {
-            return userText
-        }
-        return "\(prefix)\n\n\(userText)"
-    }
-
     /// Добавляет системные сообщения о событиях записи памяти.
     ///
     /// Каждый `MemoryWriteEvent` превращается в отдельное системное сообщение,
@@ -729,330 +643,12 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     }
 }
 
-final class AdvanceTaskStageUseCase: AdvanceTaskStageUseCaseProtocol {
-    func execute(
-        currentState: TaskProgressState,
-        event: TaskFlowEvent,
-        flowSettings: AgentFlowSettings
-    ) -> TaskProgressState {
-        let now = Date()
-        switch (currentState.stage, event) {
-        case (.planning, .userContinue):
-            return TaskProgressState(stage: .execution, step: currentState.step + 1, expectedAction: .awaitContinue, updatedAt: now)
-        case (.execution, .userContinue):
-            return TaskProgressState(stage: .validation, step: currentState.step + 1, expectedAction: expectedAction(for: .validation, flowSettings: flowSettings), updatedAt: now)
-        case (.validation, .userContinue):
-            guard flowSettings.doneTransitionMode == .auto else {
-                return TaskProgressState(stage: .validation, step: currentState.step, expectedAction: .awaitConfirmation, updatedAt: now)
-            }
-            return TaskProgressState(stage: .done, step: currentState.step + 1, expectedAction: .none, updatedAt: now)
-        case (.validation, .userConfirm):
-            return TaskProgressState(stage: .done, step: currentState.step + 1, expectedAction: .none, updatedAt: now)
-        case (.done, _):
-            return TaskProgressState(stage: .done, step: currentState.step, expectedAction: .none, updatedAt: now)
-        case (_, .userClarification):
-            return TaskProgressState(
-                stage: currentState.stage,
-                step: currentState.step,
-                expectedAction: expectedAction(for: currentState.stage, flowSettings: flowSettings),
-                updatedAt: now
-            )
-        default:
-            return TaskProgressState(
-                stage: currentState.stage,
-                step: currentState.step,
-                expectedAction: expectedAction(for: currentState.stage, flowSettings: flowSettings),
-                updatedAt: now
-            )
-        }
-    }
-
-    private func expectedAction(for stage: AgentStage, flowSettings: AgentFlowSettings) -> AgentExpectedAction {
-        switch stage {
-        case .planning, .execution:
-            return .awaitContinue
-        case .validation:
-            return flowSettings.doneTransitionMode == .manualCommand ? .awaitConfirmation : .awaitContinue
-        case .done:
-            return .none
-        }
-    }
-}
-
-final class TaskFlowOrchestratorUseCase: TaskFlowOrchestratorUseCaseProtocol {
-    private let taskProgressRepository: TaskProgressRepositoryProtocol
-    private let stageArtifactRepository: StageArtifactRepositoryProtocol
-    private let advanceTaskStageUseCase: AdvanceTaskStageUseCaseProtocol
-    private let sendMessageUseCase: SendMessageUseCaseProtocol
-    private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
-
-    init(
-        taskProgressRepository: TaskProgressRepositoryProtocol,
-        stageArtifactRepository: StageArtifactRepositoryProtocol,
-        advanceTaskStageUseCase: AdvanceTaskStageUseCaseProtocol,
-        sendMessageUseCase: SendMessageUseCaseProtocol,
-        fetchSettingsUseCase: FetchSettingsUseCaseProtocol
-    ) {
-        self.taskProgressRepository = taskProgressRepository
-        self.stageArtifactRepository = stageArtifactRepository
-        self.advanceTaskStageUseCase = advanceTaskStageUseCase
-        self.sendMessageUseCase = sendMessageUseCase
-        self.fetchSettingsUseCase = fetchSettingsUseCase
-    }
-
-    func snapshot(branchID: UUID) async throws -> TaskFlowSnapshot {
-        let state = try await taskProgressRepository.fetch(branchID: branchID) ?? TaskProgressState.initial()
-        return TaskFlowSnapshot(state: state, availableActions: availableActions(for: state))
-    }
-
-    func execute(
-        sessionID: UUID,
-        branchID: UUID,
-        userInput: String,
-        userAction: TaskFlowUserAction?
-    ) async throws -> TaskFlowOutput {
-        let settings = try await fetchSettingsUseCase.execute(sessionID: sessionID)
-        let flowSettings = settings.agentFlowSettings
-        let current = try await taskProgressRepository.fetch(branchID: branchID) ?? TaskProgressState.initial()
-        let event = resolveEvent(userInput: userInput, userAction: userAction, flowSettings: flowSettings)
-        let next = advanceTaskStageUseCase.execute(
-            currentState: current,
-            event: event,
-            flowSettings: flowSettings
-        )
-
-        let previousArtifacts = try await stageArtifactRepository.fetchArtifacts(branchID: branchID)
-        let assistantInstruction = buildAssistantInstruction(
-            state: next,
-            event: event,
-            flowSettings: flowSettings,
-            previousArtifacts: previousArtifacts
-        )
-        let messageText = resolvedMessageText(userInput: userInput, userAction: userAction, flowSettings: flowSettings)
-        let assistantMessage = try await sendMessageUseCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
-            userText: messageText,
-            assistantInstruction: assistantInstruction
-        )
-
-        let artifact = StageArtifact(
-            branchID: branchID,
-            stage: next.stage,
-            step: next.step,
-            content: assistantMessage.content,
-            sourceMessageIDs: [assistantMessage.id]
-        )
-
-        try await taskProgressRepository.save(branchID: branchID, state: next)
-        try await stageArtifactRepository.save(artifact)
-
-        return TaskFlowOutput(
-            state: next,
-            artifact: artifact,
-            availableActions: availableActions(for: next)
-        )
-    }
-
-    private func resolveEvent(
-        userInput: String,
-        userAction: TaskFlowUserAction?,
-        flowSettings: AgentFlowSettings
-    ) -> TaskFlowEvent {
-        if userAction == .continueAction { return .userContinue }
-        if userAction == .confirm { return .userConfirm }
-
-        let normalized = userInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalized == "продолжить" || normalized == "continue" {
-            return .userContinue
-        }
-        if normalized == flowSettings.normalizedConfirmCommand {
-            return .userConfirm
-        }
-        return .userClarification
-    }
-
-    private func resolvedMessageText(
-        userInput: String,
-        userAction: TaskFlowUserAction?,
-        flowSettings: AgentFlowSettings
-    ) -> String {
-        let trimmed = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty { return trimmed }
-        switch userAction {
-        case .continueAction:
-            return "продолжить"
-        case .confirm:
-            return flowSettings.confirmCommand
-        case .none:
-            return "уточнение отсутствует"
-        }
-    }
-
-    private func buildAssistantInstruction(
-        state: TaskProgressState,
-        event: TaskFlowEvent,
-        flowSettings: AgentFlowSettings,
-        previousArtifacts: [StageArtifact]
-    ) -> String {
-        let expectedActions = availableActions(for: state).map(\.title).joined(separator: ", ")
-        let history = previousArtifacts
-            .sorted { $0.createdAt < $1.createdAt }
-            .suffix(6)
-            .map { artifact in
-                "[\(artifact.stage.rawValue)#\(artifact.step)] \(trimmedArtifactContent(artifact.content))"
-            }
-            .joined(separator: "\n")
-        let historyBlock = history.isEmpty ? "none" : history
-
-        return """
-        You are operating in a deterministic task flow.
-        Current stage: \(state.stage.rawValue)
-        Step: \(state.step)
-        Expected action after this response: \(state.expectedAction.rawValue)
-        Transition event: \(eventName(event))
-        Confirm command: \(flowSettings.confirmCommand)
-
-        Produce exactly three markdown sections in this order:
-        1) ## state
-        Include:
-        - stage: \(state.stage.rawValue)
-        - step: \(state.step)
-        - expectedAction: \(state.expectedAction.rawValue)
-        2) ## artifact
-        Stage-specific content only for the current stage.
-        Do not repeat full explanations from previous stages.
-        3) ## actions
-        List only these actions: \(expectedActions)
-
-        Previous artifacts summary:
-        \(historyBlock)
-        """
-    }
-
-    private func eventName(_ event: TaskFlowEvent) -> String {
-        switch event {
-        case .userContinue:
-            return "user_continue"
-        case .userConfirm:
-            return "user_confirm"
-        case .userClarification:
-            return "user_clarification"
-        }
-    }
-
-    private func availableActions(for state: TaskProgressState) -> [TaskFlowAvailableAction] {
-        switch state.stage {
-        case .planning, .execution:
-            return [.continueAction]
-        case .validation:
-            return state.expectedAction == .awaitConfirmation ? [.confirm] : [.continueAction, .confirm]
-        case .done:
-            return []
-        }
-    }
-
-    private func trimmedArtifactContent(_ content: String) -> String {
-        let flattened = content.replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard flattened.count > 160 else { return flattened }
-        return String(flattened.prefix(160)) + "..."
-    }
-}
-
 private func normalizeMemoryText(_ text: String, maxLength: Int = 120) -> String {
     let flattened = text
         .replacingOccurrences(of: "\n", with: " ")
         .trimmingCharacters(in: .whitespacesAndNewlines)
     guard flattened.count > maxLength else { return flattened }
     return String(flattened.prefix(maxLength)) + "..."
-}
-
-final class CreateCheckpointUseCase: CreateCheckpointUseCaseProtocol {
-    private let branchRepository: BranchRepositoryProtocol
-
-    /// Создаёт use case добавления checkpoint к ветке.
-    init(branchRepository: BranchRepositoryProtocol) {
-        self.branchRepository = branchRepository
-    }
-
-    /// Создаёт checkpoint для выбранного сообщения ветки.
-    func execute(branchID: UUID, messageID: UUID, name: String) async throws -> ChatCheckpoint {
-        let checkpoint = ChatCheckpoint(
-            id: UUID(),
-            branchID: branchID,
-            messageID: messageID,
-            name: name,
-            createdAt: Date()
-        )
-        try await branchRepository.saveCheckpoint(checkpoint)
-        return checkpoint
-    }
-}
-
-final class CreateBranchUseCase: CreateBranchUseCaseProtocol {
-    private let branchRepository: BranchRepositoryProtocol
-
-    /// Создаёт use case создания новой ветки.
-    init(branchRepository: BranchRepositoryProtocol) {
-        self.branchRepository = branchRepository
-    }
-
-    /// Создаёт новую ветку в рамках сессии.
-    func execute(sessionID: UUID, parentCheckpointID: UUID?, name: String) async throws -> ChatBranch {
-        // Создание ветки не переключает сессию автоматически:
-        // переключение выполняется отдельным use case (SwitchBranchUseCase).
-        let branch = ChatBranch(
-            id: UUID(),
-            sessionID: sessionID,
-            parentCheckpointID: parentCheckpointID,
-            name: name,
-            createdAt: Date()
-        )
-        try await branchRepository.saveBranch(branch)
-        return branch
-    }
-}
-
-final class AddBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol {
-    private let messageRepository: MessageRepositoryProtocol
-
-    /// Создаёт use case записи системного сообщения о создании ветки.
-    init(messageRepository: MessageRepositoryProtocol) {
-        self.messageRepository = messageRepository
-    }
-
-    /// Добавляет в ветку служебное сообщение о её происхождении.
-    func execute(branchID: UUID, sourceBranchName: String) async throws {
-        let message = ChatMessage(
-            branchID: branchID,
-            role: .system,
-            content: "создана ветка от [\(sourceBranchName)]"
-        )
-        try await messageRepository.saveMessage(message)
-    }
-}
-
-final class SwitchBranchUseCase: SwitchBranchUseCaseProtocol {
-    private let sessionRepository: ChatSessionRepositoryProtocol
-
-    /// Создаёт use case переключения активной ветки сессии.
-    init(sessionRepository: ChatSessionRepositoryProtocol) {
-        self.sessionRepository = sessionRepository
-    }
-
-    /// Переключает активную ветку в сессии и возвращает обновлённую сессию.
-    func execute(sessionID: UUID, targetBranchID: UUID) async throws -> ChatSession {
-        // Переключение ветки — это изменение только activeBranchID у сессии.
-        // Отдельной проверки "существует ли branchID" здесь нет:
-        // валидацию должен обеспечивать вызывающий слой (обычно ViewModel/репозиторий).
-        guard var session = try await sessionRepository.fetchSession(id: sessionID) else {
-            throw NSError(domain: "SwitchBranchUseCase", code: 404)
-        }
-        session.activeBranchID = targetBranchID
-        try await sessionRepository.saveSession(session)
-        return session
-    }
 }
 
 final class ApplySettingsUseCase: ApplySettingsUseCaseProtocol {
@@ -1080,99 +676,6 @@ final class FetchSettingsUseCase: FetchSettingsUseCaseProtocol {
     /// Возвращает актуальные настройки LLM для сессии.
     func execute(sessionID: UUID) async throws -> LLMSettings {
         try await settingsRepository.fetchSettings(sessionID: sessionID)
-    }
-}
-
-private enum UserPromptProfileStorage {
-    static let selectedProfileKey = "user_prompt_profile.selected"
-    static let source = "user_prompt_profile_settings"
-
-    static func textKey(for profile: UserPromptProfile) -> String {
-        "user_prompt_profile.\(profile.rawValue)"
-    }
-}
-
-final class FetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol {
-    private let longTermMemoryRepository: LongTermMemoryRepositoryProtocol
-
-    init(longTermMemoryRepository: LongTermMemoryRepositoryProtocol) {
-        self.longTermMemoryRepository = longTermMemoryRepository
-    }
-
-    func execute(sessionID: UUID) async throws -> UserPromptProfiles {
-        let items = try await longTermMemoryRepository.fetch(sessionID: sessionID, namespaces: [.profile])
-        var profiles = UserPromptProfiles.default
-
-        for item in items {
-            if item.key == UserPromptProfileStorage.selectedProfileKey,
-               let selected = UserPromptProfile(rawValue: item.value) {
-                profiles.selectedProfile = selected
-                continue
-            }
-
-            for profile in UserPromptProfile.allCases where item.key == UserPromptProfileStorage.textKey(for: profile) {
-                profiles.setText(item.value, for: profile)
-            }
-        }
-
-        return profiles
-    }
-}
-
-final class SaveUserPromptProfilesUseCase: SaveUserPromptProfilesUseCaseProtocol {
-    private let longTermMemoryRepository: LongTermMemoryRepositoryProtocol
-
-    init(longTermMemoryRepository: LongTermMemoryRepositoryProtocol) {
-        self.longTermMemoryRepository = longTermMemoryRepository
-    }
-
-    func execute(sessionID: UUID, profiles: UserPromptProfiles) async throws {
-        let now = Date()
-        var items: [LongTermMemoryItem] = [
-            LongTermMemoryItem(
-                id: UUID(),
-                sessionID: sessionID,
-                namespace: .profile,
-                key: UserPromptProfileStorage.selectedProfileKey,
-                value: profiles.selectedProfile.rawValue,
-                confidence: 1.0,
-                source: UserPromptProfileStorage.source,
-                updatedAt: now
-            )
-        ]
-
-        for profile in UserPromptProfile.allCases {
-            items.append(
-                LongTermMemoryItem(
-                    id: UUID(),
-                    sessionID: sessionID,
-                    namespace: .profile,
-                    key: UserPromptProfileStorage.textKey(for: profile),
-                    value: profiles.text(for: profile),
-                    confidence: 1.0,
-                    source: UserPromptProfileStorage.source,
-                    updatedAt: now
-                )
-            )
-        }
-
-        try await longTermMemoryRepository.upsert(sessionID: sessionID, items: items)
-    }
-}
-
-final class ResolveUserPromptPrefixUseCase: ResolveUserPromptPrefixUseCaseProtocol {
-    private let fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol
-
-    init(fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol) {
-        self.fetchUserPromptProfilesUseCase = fetchUserPromptProfilesUseCase
-    }
-
-    func execute(sessionID: UUID) async throws -> String? {
-        let profiles = try await fetchUserPromptProfilesUseCase.execute(sessionID: sessionID)
-        let text = profiles
-            .text(for: profiles.selectedProfile)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
     }
 }
 

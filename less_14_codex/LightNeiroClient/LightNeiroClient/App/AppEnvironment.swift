@@ -5,22 +5,12 @@ struct AppEnvironment {
     let branchID: UUID
 
     let sendMessageUseCase: SendMessageUseCaseProtocol
-    let fetchBranchesUseCase: FetchBranchesUseCaseProtocol
-    let fetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol
     let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
-    let cloneDialogToBranchUseCase: CloneDialogToBranchUseCaseProtocol
-    let createCheckpointUseCase: CreateCheckpointUseCaseProtocol
-    let createBranchUseCase: CreateBranchUseCaseProtocol
-    let addBranchCreatedSystemMessageUseCase: AddBranchCreatedSystemMessageUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
-    let fetchUserPromptProfilesUseCase: FetchUserPromptProfilesUseCaseProtocol
-    let saveUserPromptProfilesUseCase: SaveUserPromptProfilesUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
-    let switchBranchUseCase: SwitchBranchUseCaseProtocol
     let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
-    let taskFlowOrchestratorUseCase: TaskFlowOrchestratorUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -32,8 +22,6 @@ struct AppEnvironment {
         let factsRepository = MockFactsRepository()
         let settingsRepository = UserDefaultsSettingsRepository()
         let metricsRepository = MockMetricsRepository()
-        let taskProgressRepository = FileTaskProgressRepository()
-        let stageArtifactRepository = FileStageArtifactRepository()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -66,13 +54,7 @@ struct AppEnvironment {
             llmClient: llmClient,
             legacyFactsRepository: factsRepository
         )
-        let fetchUserPromptProfiles = FetchUserPromptProfilesUseCase(longTermMemoryRepository: longTermMemoryRepository)
-        let saveUserPromptProfiles = SaveUserPromptProfilesUseCase(longTermMemoryRepository: longTermMemoryRepository)
-        let resolveUserPromptPrefix = ResolveUserPromptPrefixUseCase(fetchUserPromptProfilesUseCase: fetchUserPromptProfiles)
-        let fetchBranches = FetchBranchesUseCase(branchRepository: branchRepository)
-        let fetchCheckpoints = FetchCheckpointsUseCase(branchRepository: branchRepository)
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
-        let cloneDialogToBranch = CloneDialogToBranchUseCase(messageRepository: messageRepository)
         let sendMessage = SendMessageUseCase(
             settingsRepository: settingsRepository,
             messageRepository: messageRepository,
@@ -81,24 +63,11 @@ struct AppEnvironment {
             updateShortTermMemoryUseCase: updateShortTermMemory,
             updateWorkingMemoryUseCase: updateWorkingMemory,
             updateLongTermMemoryUseCase: updateLongTermMemory,
-            metricsRepository: metricsRepository,
-            resolveUserPromptPrefixUseCase: resolveUserPromptPrefix
+            metricsRepository: metricsRepository
         )
-        let createCheckpoint = CreateCheckpointUseCase(branchRepository: branchRepository)
-        let createBranch = CreateBranchUseCase(branchRepository: branchRepository)
-        let addBranchCreatedSystemMessage = AddBranchCreatedSystemMessageUseCase(messageRepository: messageRepository)
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
-        let switchBranch = SwitchBranchUseCase(sessionRepository: sessionRepository)
-        let advanceTaskStage = AdvanceTaskStageUseCase()
-        let taskFlowOrchestrator = TaskFlowOrchestratorUseCase(
-            taskProgressRepository: taskProgressRepository,
-            stageArtifactRepository: stageArtifactRepository,
-            advanceTaskStageUseCase: advanceTaskStage,
-            sendMessageUseCase: sendMessage,
-            fetchSettingsUseCase: fetchSettings
-        )
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -125,22 +94,12 @@ struct AppEnvironment {
             sessionID: sessionID,
             branchID: branchID,
             sendMessageUseCase: sendMessage,
-            fetchBranchesUseCase: fetchBranches,
-            fetchCheckpointsUseCase: fetchCheckpoints,
             fetchMessagesUseCase: fetchMessages,
-            cloneDialogToBranchUseCase: cloneDialogToBranch,
-            createCheckpointUseCase: createCheckpoint,
-            createBranchUseCase: createBranch,
-            addBranchCreatedSystemMessageUseCase: addBranchCreatedSystemMessage,
             applySettingsUseCase: applySettings,
             fetchSettingsUseCase: fetchSettings,
-            fetchUserPromptProfilesUseCase: fetchUserPromptProfiles,
-            saveUserPromptProfilesUseCase: saveUserPromptProfiles,
             collectSessionMetricsUseCase: collectMetrics,
-            switchBranchUseCase: switchBranch,
             loadAPIKeyUseCase: loadAPIKey,
-            saveAPIKeyUseCase: saveAPIKey,
-            taskFlowOrchestratorUseCase: taskFlowOrchestrator
+            saveAPIKeyUseCase: saveAPIKey
         )
     }
 }

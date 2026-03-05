@@ -50,16 +50,3 @@ protocol MetricsRepositoryProtocol {
     func appendMetric(_ metric: RequestMetric) async throws
     func fetchMetrics(sessionID: UUID) async throws -> [RequestMetric]
 }
-
-protocol TaskProgressRepositoryProtocol {
-    func fetch(branchID: UUID) async throws -> TaskProgressState?
-    func save(branchID: UUID, state: TaskProgressState) async throws
-    func reset(branchID: UUID) async throws
-}
-
-protocol StageArtifactRepositoryProtocol {
-    func fetchArtifacts(branchID: UUID) async throws -> [StageArtifact]
-    func fetchLatest(branchID: UUID, stage: AgentStage) async throws -> StageArtifact?
-    func save(_ artifact: StageArtifact) async throws
-    func reset(branchID: UUID) async throws
-}

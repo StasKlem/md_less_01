@@ -4,8 +4,6 @@ import Combine
 private final class ChatInputTextView: NSTextView {
     override var acceptsFirstResponder: Bool { true }
 
-    /// Перехватывает Cmd+V на уровне keyDown, чтобы вставка работала
-    /// даже когда событие не проходит через стандартное меню Edit.
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "v" {
@@ -15,7 +13,6 @@ private final class ChatInputTextView: NSTextView {
         super.keyDown(with: event)
     }
 
-    /// Поддерживает системный путь обработки key-equivalent для Cmd+V.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.type == .keyDown else { return super.performKeyEquivalent(with: event) }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -26,8 +23,6 @@ private final class ChatInputTextView: NSTextView {
         return super.performKeyEquivalent(with: event)
     }
 
-    /// Вставляет plain text из буфера обмена, чтобы избежать отказа вставки
-    /// при несоответствии форматов содержимого pasteboard.
     override func paste(_ sender: Any?) {
         if let plainText = NSPasteboard.general.string(forType: .string) {
             insertText(plainText, replacementRange: selectedRange())
@@ -35,30 +30,6 @@ private final class ChatInputTextView: NSTextView {
         }
         super.paste(sender)
     }
-}
-
-private final class BranchTreeNode {
-    let id: UUID
-    let title: String
-    let isActive: Bool
-    let children: [BranchTreeNode]
-
-    init(id: UUID, title: String, isActive: Bool, children: [BranchTreeNode]) {
-        self.id = id
-        self.title = title
-        self.isActive = isActive
-        self.children = children
-    }
-}
-
-private func makeBranchTreeNode(from item: ChatBranchTreeItem) -> BranchTreeNode {
-    let children = item.children.map(makeBranchTreeNode(from:))
-    return BranchTreeNode(
-        id: item.id,
-        title: item.title,
-        isActive: item.isActive,
-        children: children
-    )
 }
 
 final class ChatSidebarViewController: NSViewController {
@@ -69,17 +40,11 @@ final class ChatSidebarViewController: NSViewController {
 
     private let viewModel: ChatViewModel
     private var cancellables = Set<AnyCancellable>()
-    private var rootNodes: [BranchTreeNode] = []
 
-    private let branchOutlineView = NSOutlineView()
-    private let newBranchButton = NSButton(title: "New Branch", target: nil, action: nil)
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
     private let inputTextView = ChatInputTextView()
     private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
-    private let continueButton = NSButton(title: "Продолжить", target: nil, action: nil)
-    private let confirmButton = NSButton(title: "Подтвердить", target: nil, action: nil)
-    private let taskStateLabel = NSTextField(labelWithString: "")
 
     init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -104,34 +69,9 @@ final class ChatSidebarViewController: NSViewController {
     }
 
     private func setupUI() {
-        let historyScroll = NSScrollView()
-        historyScroll.documentView = branchOutlineView
-        historyScroll.hasVerticalScroller = true
-
-        branchOutlineView.headerView = nil
-
-        let historyColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("history"))
-        historyColumn.title = "Chats"
-        historyColumn.resizingMask = .autoresizingMask
-        branchOutlineView.addTableColumn(historyColumn)
-        branchOutlineView.outlineTableColumn = historyColumn
-
-        branchOutlineView.delegate = self
-        branchOutlineView.dataSource = self
-        branchOutlineView.selectionHighlightStyle = .regular
-
-        newBranchButton.target = self
-        newBranchButton.action = #selector(createBranchTapped)
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
-        continueButton.target = self
-        continueButton.action = #selector(continueTapped)
-        confirmButton.target = self
-        confirmButton.action = #selector(confirmTapped)
         configureInputTextView()
-        taskStateLabel.textColor = .secondaryLabelColor
-        taskStateLabel.lineBreakMode = .byWordWrapping
-        taskStateLabel.maximumNumberOfLines = 2
 
         addChild(dialogHistoryViewController)
         let dialogView = dialogHistoryViewController.view
@@ -142,21 +82,10 @@ final class ChatSidebarViewController: NSViewController {
         inputRow.alignment = .bottom
         inputRow.spacing = 8
 
-        let historyHeaderRow = NSStackView(views: [newBranchButton])
-        historyHeaderRow.orientation = .horizontal
-        historyHeaderRow.alignment = .centerY
-
-        let taskActionsRow = NSStackView(views: [continueButton, confirmButton])
-        taskActionsRow.orientation = .horizontal
-        taskActionsRow.alignment = .centerY
-        taskActionsRow.spacing = 8
-
-        let root = NSStackView(views: [historyHeaderRow, historyScroll, dialogView, taskStateLabel, taskActionsRow, inputRow])
+        let root = NSStackView(views: [dialogView, inputRow])
         root.orientation = .vertical
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
-
-        historyScroll.heightAnchor.constraint(equalToConstant: 130).isActive = true
 
         view.addSubview(root)
         NSLayoutConstraint.activate([
@@ -169,7 +98,6 @@ final class ChatSidebarViewController: NSViewController {
         ])
     }
 
-    /// Настраивает многострочное поле ввода и контейнер со скроллом.
     private func configureInputTextView() {
         inputTextView.isEditable = true
         inputTextView.isSelectable = true
@@ -201,11 +129,9 @@ final class ChatSidebarViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        // Сразу переводим фокус в поле ввода для работы горячих клавиш.
         view.window?.makeFirstResponder(inputTextView)
     }
 
-    /// Возвращает фиксированную высоту поля ввода: ровно 3 строки текста.
     private func inputHeightForThreeLines() -> CGFloat {
         let font = inputTextView.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
         let lineHeight = inputTextView.layoutManager?.defaultLineHeight(for: font) ?? 17
@@ -213,17 +139,6 @@ final class ChatSidebarViewController: NSViewController {
     }
 
     private func bind() {
-        viewModel.$branchTreeItems
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] items in
-                guard let self else { return }
-                self.rootNodes = items.map(makeBranchTreeNode(from:))
-                self.branchOutlineView.reloadData()
-                self.expandAllNodes()
-                self.selectActiveNode()
-            }
-            .store(in: &cancellables)
-
         viewModel.$dialogItems
             .receive(on: DispatchQueue.main)
             .sink { [weak self] items in
@@ -242,25 +157,6 @@ final class ChatSidebarViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
-                self?.continueButton.isEnabled = !(sending || !(self?.viewModel.availableTaskActions.contains(.continueAction) ?? false))
-                self?.confirmButton.isEnabled = !(sending || !(self?.viewModel.availableTaskActions.contains(.confirm) ?? false))
-            }
-            .store(in: &cancellables)
-
-        viewModel.$taskProgressState
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                self?.taskStateLabel.stringValue = "Этап: \(state.stage.rawValue), шаг: \(state.step), ожидание: \(state.expectedAction.rawValue)"
-            }
-            .store(in: &cancellables)
-
-        viewModel.$availableTaskActions
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] actions in
-                guard let self else { return }
-                let sending = self.viewModel.isSending
-                self.continueButton.isEnabled = !sending && actions.contains(.continueAction)
-                self.confirmButton.isEnabled = !sending && actions.contains(.confirm)
             }
             .store(in: &cancellables)
     }
@@ -270,83 +166,5 @@ final class ChatSidebarViewController: NSViewController {
         let text = inputTextView.string
         inputTextView.string = ""
         viewModel.send(text: text)
-    }
-
-    @objc
-    private func createBranchTapped() {
-        viewModel.createBranch()
-    }
-
-    @objc
-    private func continueTapped() {
-        viewModel.continueTaskFlow()
-    }
-
-    @objc
-    private func confirmTapped() {
-        viewModel.confirmTaskFlow()
-    }
-
-    private func expandAllNodes() {
-        func expandRecursively(_ node: BranchTreeNode) {
-            guard !node.children.isEmpty else { return }
-            branchOutlineView.expandItem(node, expandChildren: false)
-            node.children.forEach(expandRecursively)
-        }
-        rootNodes.forEach(expandRecursively)
-    }
-
-    private func selectActiveNode() {
-        func findActive(in nodes: [BranchTreeNode]) -> BranchTreeNode? {
-            for node in nodes {
-                if node.isActive {
-                    return node
-                }
-                if let nested = findActive(in: node.children) {
-                    return nested
-                }
-            }
-            return nil
-        }
-
-        guard let active = findActive(in: rootNodes) else {
-            branchOutlineView.deselectAll(nil)
-            return
-        }
-
-        let row = branchOutlineView.row(forItem: active)
-        guard row >= 0 else { return }
-        branchOutlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-    }
-}
-
-extension ChatSidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
-    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        guard let node = item as? BranchTreeNode else { return rootNodes.count }
-        return node.children.count
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        guard let node = item as? BranchTreeNode else { return false }
-        return !node.children.isEmpty
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        guard let node = item as? BranchTreeNode else { return rootNodes[index] }
-        return node.children[index]
-    }
-
-    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        let cell = NSTextField(labelWithString: "")
-        cell.lineBreakMode = .byTruncatingTail
-
-        guard let node = item as? BranchTreeNode else { return cell }
-        cell.stringValue = node.isActive ? "• \(node.title)" : node.title
-        return cell
-    }
-
-    func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard let node = branchOutlineView.item(atRow: branchOutlineView.selectedRow) as? BranchTreeNode else { return }
-        viewModel.selectBranch(id: node.id)
     }
 }

@@ -24,14 +24,6 @@ final class MainViewModel {
             self?.sessionInfoViewModel.refresh()
         }
 
-        chatViewModel.onActiveBranchChanged = { [weak self] branchID in
-            // Единая точка синхронизации branch-switch для правой панели:
-            // настройки и метрики всегда должны смотреть на ту же ветку, что и чат.
-            self?.settingsViewModel.switchActiveBranch(to: branchID)
-            self?.sessionInfoViewModel.switchActiveBranch(to: branchID)
-            self?.sessionInfoViewModel.refresh()
-        }
-
         settingsViewModel.onSettingsChanged = { [weak self] settings in
             self?.chatViewModel.apply(settings: settings)
             self?.sessionInfoViewModel.refresh()

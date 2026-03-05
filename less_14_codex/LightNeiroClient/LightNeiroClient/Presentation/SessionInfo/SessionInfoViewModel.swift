@@ -11,23 +11,18 @@ final class SessionInfoViewModel {
     )
 
     private let sessionID: UUID
-    private var activeBranchID: UUID
+    private let branchID: UUID
     private let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
 
     /// Создаёт ViewModel метрик для конкретной сессии и активной ветки.
     init(
         sessionID: UUID,
-        activeBranchID: UUID,
+        branchID: UUID,
         collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     ) {
         self.sessionID = sessionID
-        self.activeBranchID = activeBranchID
+        self.branchID = branchID
         self.collectSessionMetricsUseCase = collectSessionMetricsUseCase
-    }
-
-    /// Переключает ветку, по которой должна считаться статистика.
-    func switchActiveBranch(to branchID: UUID) {
-        activeBranchID = branchID
     }
 
     /// Запрашивает и публикует актуальный snapshot метрик для текущей ветки.
@@ -36,7 +31,7 @@ final class SessionInfoViewModel {
             guard let self else { return }
             if let value = try? await self.collectSessionMetricsUseCase.execute(
                 sessionID: self.sessionID,
-                branchID: self.activeBranchID
+                branchID: self.branchID
             ) {
                 self.snapshot = value
             }
