@@ -13,6 +13,8 @@ actor InMemoryChatStore {
     var facts: [UUID: [StickyFact]] = [:]
     var settings: [UUID: LLMSettings] = [:]
     var metricsBySession: [UUID: [RequestMetric]] = [:]
+    var taskProgressByBranch: [UUID: TaskProgressState] = [:]
+    var artifactsByBranch: [UUID: [StageArtifact]] = [:]
 
     private init() {}
 }
@@ -212,5 +214,48 @@ struct MockMetricsRepository: MetricsRepositoryProtocol {
             }
         }
         return nil
+    }
+}
+
+struct MockTaskProgressRepository: TaskProgressRepositoryProtocol {
+    private let store = InMemoryChatStore.shared
+
+    func fetch(branchID: UUID) async throws -> TaskProgressState? {
+        await store.taskProgressByBranch[branchID]
+    }
+
+    func save(branchID: UUID, state: TaskProgressState) async throws {
+        await store.taskProgressByBranch.updateValue(state, forKey: branchID)
+    }
+
+    func reset(branchID: UUID) async throws {
+        await store.taskProgressByBranch.removeValue(forKey: branchID)
+    }
+}
+
+struct MockStageArtifactRepository: StageArtifactRepositoryProtocol {
+    private let store = InMemoryChatStore.shared
+
+    func fetchArtifacts(branchID: UUID) async throws -> [StageArtifact] {
+        (await store.artifactsByBranch[branchID] ?? []).sorted { $0.createdAt < $1.createdAt }
+    }
+
+    func fetchLatest(branchID: UUID, stage: AgentStage) async throws -> StageArtifact? {
+        let artifacts = await store.artifactsByBranch[branchID] ?? []
+        return artifacts
+            .filter { $0.stage == stage }
+            .sorted { $0.createdAt < $1.createdAt }
+            .last
+    }
+
+    func save(_ artifact: StageArtifact) async throws {
+        var current = await store.artifactsByBranch[artifact.branchID] ?? []
+        current.removeAll { $0.id == artifact.id }
+        current.append(artifact)
+        await store.artifactsByBranch.updateValue(current, forKey: artifact.branchID)
+    }
+
+    func reset(branchID: UUID) async throws {
+        await store.artifactsByBranch.removeValue(forKey: branchID)
     }
 }

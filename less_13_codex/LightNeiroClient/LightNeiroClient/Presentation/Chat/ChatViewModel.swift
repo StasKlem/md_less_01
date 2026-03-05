@@ -23,6 +23,8 @@ final class ChatViewModel {
     @Published private(set) var branchTreeItems: [ChatBranchTreeItem] = []
     @Published private(set) var dialogItems: [DialogHistoryItemViewState] = []
     @Published private(set) var isSending = false
+    @Published private(set) var taskProgressState: TaskProgressState = .initial()
+    @Published private(set) var availableTaskActions: [TaskFlowAvailableAction] = []
 
     /// Паблишер точечных патчей для частичного обновления ячеек диалога.
     var dialogPatchesPublisher: AnyPublisher<[DialogHistoryPatch], Never> {
@@ -34,7 +36,7 @@ final class ChatViewModel {
 
     private let sessionID: UUID
     private var activeBranchID: UUID
-    private let sendMessageUseCase: SendMessageUseCaseProtocol
+    private let taskFlowOrchestratorUseCase: TaskFlowOrchestratorUseCaseProtocol
     private let fetchBranchesUseCase: FetchBranchesUseCaseProtocol
     private let fetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol
     private let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
@@ -51,7 +53,7 @@ final class ChatViewModel {
     init(
         sessionID: UUID,
         branchID: UUID,
-        sendMessageUseCase: SendMessageUseCaseProtocol,
+        taskFlowOrchestratorUseCase: TaskFlowOrchestratorUseCaseProtocol,
         fetchBranchesUseCase: FetchBranchesUseCaseProtocol,
         fetchCheckpointsUseCase: FetchCheckpointsUseCaseProtocol,
         fetchMessagesUseCase: FetchMessagesUseCaseProtocol,
@@ -63,7 +65,7 @@ final class ChatViewModel {
     ) {
         self.sessionID = sessionID
         self.activeBranchID = branchID
-        self.sendMessageUseCase = sendMessageUseCase
+        self.taskFlowOrchestratorUseCase = taskFlowOrchestratorUseCase
         self.fetchBranchesUseCase = fetchBranchesUseCase
         self.fetchCheckpointsUseCase = fetchCheckpointsUseCase
         self.fetchMessagesUseCase = fetchMessagesUseCase
@@ -85,18 +87,33 @@ final class ChatViewModel {
 
     /// Отправляет пользовательский текст в активную ветку.
     func send(text: String) {
+        send(text: text, action: nil)
+    }
+
+    func continueTaskFlow() {
+        send(text: "", action: .continueAction)
+    }
+
+    func confirmTaskFlow() {
+        send(text: "", action: .confirm)
+    }
+
+    private func send(text: String, action: TaskFlowUserAction?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSending else { return }
+        guard !isSending else { return }
+        guard !trimmed.isEmpty || action != nil else { return }
         // Фиксируем ветку на момент отправки: если пользователь быстро переключится,
         // ответ и метрики все равно сохранятся в исходную ветку.
         let targetBranchID = activeBranchID
 
-        let userState = DialogHistoryItemViewState(
-            kind: .user,
-            text: trimmed,
-            status: .sent
-        )
-        dialogItems.append(userState)
+        if !trimmed.isEmpty {
+            let userState = DialogHistoryItemViewState(
+                kind: .user,
+                text: trimmed,
+                status: .sent
+            )
+            dialogItems.append(userState)
+        }
 
         let assistantID = UUID()
         var assistantState = DialogHistoryItemViewState(
@@ -113,15 +130,18 @@ final class ChatViewModel {
             guard let self else { return }
 
             do {
-                let response = try await self.sendMessageUseCase.execute(
+                let output = try await self.taskFlowOrchestratorUseCase.execute(
                     sessionID: self.sessionID,
                     branchID: targetBranchID,
-                    userText: trimmed
+                    userInput: trimmed,
+                    userAction: action
                 )
+                self.taskProgressState = output.state
+                self.availableTaskActions = output.availableActions
                 assistantState = DialogHistoryItemViewState(
                     id: assistantID,
                     kind: .assistant,
-                    text: response.content,
+                    text: output.artifact.content,
                     status: .sent
                 )
                 self.replaceDialogItem(assistantState)
@@ -168,6 +188,7 @@ final class ChatViewModel {
                 self.onActiveBranchChanged?(id)
                 try await self.refreshHistoryItems()
                 try await self.loadDialog(for: id)
+                try await self.refreshTaskFlowSnapshot(for: id)
             } catch {
                 self.dialogItems.append(
                     DialogHistoryItemViewState(
@@ -223,6 +244,7 @@ final class ChatViewModel {
                 self.onActiveBranchChanged?(branch.id)
                 try await self.refreshHistoryItems()
                 try await self.loadDialog(for: branch.id)
+                try await self.refreshTaskFlowSnapshot(for: branch.id)
             } catch {
                 self.dialogItems.append(
                     DialogHistoryItemViewState(
@@ -246,6 +268,7 @@ final class ChatViewModel {
         do {
             try await refreshHistoryItems()
             try await loadDialog(for: activeBranchID)
+            try await refreshTaskFlowSnapshot(for: activeBranchID)
         } catch {
             dialogItems = [
                 DialogHistoryItemViewState(
@@ -278,6 +301,12 @@ final class ChatViewModel {
                 createdAt: message.createdAt
             )
         }
+    }
+
+    private func refreshTaskFlowSnapshot(for branchID: UUID) async throws {
+        let snapshot = try await taskFlowOrchestratorUseCase.snapshot(branchID: branchID)
+        taskProgressState = snapshot.state
+        availableTaskActions = snapshot.availableActions
     }
 
     /// Генерирует следующее имя ветки в формате `branch-N`.

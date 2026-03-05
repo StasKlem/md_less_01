@@ -385,7 +385,8 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                     contextStrategy: .normal,
                     temperature: 0.0,
                     windowSize: 1,
-                    contextStrategyByBranch: [:]
+                    contextStrategyByBranch: [:],
+                    agentFlowSettings: settings.agentFlowSettings
                 )
             )
         )
@@ -600,7 +601,12 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - branchID: идентификатор активной ветки.
     ///   - userText: текст сообщения пользователя.
     /// - Returns: сохраненное сообщение ассистента.
-    func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userText: String,
+        assistantInstruction: String?
+    ) async throws -> ChatMessage {
         let prefixedUserText = await enrichUserMessage(userText, sessionID: sessionID)
         let userMessage = ChatMessage(branchID: branchID, role: .user, content: prefixedUserText)
         try await messageRepository.saveMessage(userMessage)
@@ -626,8 +632,9 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         try await appendMemoryEventMessages(branchID: branchID, events: longTermEvents)
 
         let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
+        let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction)
         let request = LLMRequest(
-            systemPrompt: "You are a helpful assistant.",
+            systemPrompt: systemPrompt,
             shortTermMessages: context.shortTermMessages,
             workingMemory: context.workingMemory,
             longTermMemory: context.longTermMemory,
@@ -671,6 +678,14 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         return assistantMessage
     }
 
+    private func makeSystemPrompt(extraInstruction: String?) -> String {
+        let base = "You are a helpful assistant."
+        guard let extraInstruction else { return base }
+        let trimmed = extraInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return base }
+        return "\(base)\n\n\(trimmed)"
+    }
+
     /// Добавляет профильный префикс к сообщению пользователя в формате "prefix + blank line + message".
     private func enrichUserMessage(_ userText: String, sessionID: UUID) async -> String {
         let resolvedPrefix = try? await resolveUserPromptPrefixUseCase.execute(sessionID: sessionID)
@@ -711,6 +726,237 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             content: "Память [\(event.layer.rawValue)] \(event.details)"
         )
         try await messageRepository.saveMessage(systemMessage)
+    }
+}
+
+final class AdvanceTaskStageUseCase: AdvanceTaskStageUseCaseProtocol {
+    func execute(
+        currentState: TaskProgressState,
+        event: TaskFlowEvent,
+        flowSettings: AgentFlowSettings
+    ) -> TaskProgressState {
+        let now = Date()
+        switch (currentState.stage, event) {
+        case (.planning, .userContinue):
+            return TaskProgressState(stage: .execution, step: currentState.step + 1, expectedAction: .awaitContinue, updatedAt: now)
+        case (.execution, .userContinue):
+            return TaskProgressState(stage: .validation, step: currentState.step + 1, expectedAction: expectedAction(for: .validation, flowSettings: flowSettings), updatedAt: now)
+        case (.validation, .userContinue):
+            guard flowSettings.doneTransitionMode == .auto else {
+                return TaskProgressState(stage: .validation, step: currentState.step, expectedAction: .awaitConfirmation, updatedAt: now)
+            }
+            return TaskProgressState(stage: .done, step: currentState.step + 1, expectedAction: .none, updatedAt: now)
+        case (.validation, .userConfirm):
+            return TaskProgressState(stage: .done, step: currentState.step + 1, expectedAction: .none, updatedAt: now)
+        case (.done, _):
+            return TaskProgressState(stage: .done, step: currentState.step, expectedAction: .none, updatedAt: now)
+        case (_, .userClarification):
+            return TaskProgressState(
+                stage: currentState.stage,
+                step: currentState.step,
+                expectedAction: expectedAction(for: currentState.stage, flowSettings: flowSettings),
+                updatedAt: now
+            )
+        default:
+            return TaskProgressState(
+                stage: currentState.stage,
+                step: currentState.step,
+                expectedAction: expectedAction(for: currentState.stage, flowSettings: flowSettings),
+                updatedAt: now
+            )
+        }
+    }
+
+    private func expectedAction(for stage: AgentStage, flowSettings: AgentFlowSettings) -> AgentExpectedAction {
+        switch stage {
+        case .planning, .execution:
+            return .awaitContinue
+        case .validation:
+            return flowSettings.doneTransitionMode == .manualCommand ? .awaitConfirmation : .awaitContinue
+        case .done:
+            return .none
+        }
+    }
+}
+
+final class TaskFlowOrchestratorUseCase: TaskFlowOrchestratorUseCaseProtocol {
+    private let taskProgressRepository: TaskProgressRepositoryProtocol
+    private let stageArtifactRepository: StageArtifactRepositoryProtocol
+    private let advanceTaskStageUseCase: AdvanceTaskStageUseCaseProtocol
+    private let sendMessageUseCase: SendMessageUseCaseProtocol
+    private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
+
+    init(
+        taskProgressRepository: TaskProgressRepositoryProtocol,
+        stageArtifactRepository: StageArtifactRepositoryProtocol,
+        advanceTaskStageUseCase: AdvanceTaskStageUseCaseProtocol,
+        sendMessageUseCase: SendMessageUseCaseProtocol,
+        fetchSettingsUseCase: FetchSettingsUseCaseProtocol
+    ) {
+        self.taskProgressRepository = taskProgressRepository
+        self.stageArtifactRepository = stageArtifactRepository
+        self.advanceTaskStageUseCase = advanceTaskStageUseCase
+        self.sendMessageUseCase = sendMessageUseCase
+        self.fetchSettingsUseCase = fetchSettingsUseCase
+    }
+
+    func snapshot(branchID: UUID) async throws -> TaskFlowSnapshot {
+        let state = try await taskProgressRepository.fetch(branchID: branchID) ?? TaskProgressState.initial()
+        return TaskFlowSnapshot(state: state, availableActions: availableActions(for: state))
+    }
+
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userInput: String,
+        userAction: TaskFlowUserAction?
+    ) async throws -> TaskFlowOutput {
+        let settings = try await fetchSettingsUseCase.execute(sessionID: sessionID)
+        let flowSettings = settings.agentFlowSettings
+        let current = try await taskProgressRepository.fetch(branchID: branchID) ?? TaskProgressState.initial()
+        let event = resolveEvent(userInput: userInput, userAction: userAction, flowSettings: flowSettings)
+        let next = advanceTaskStageUseCase.execute(
+            currentState: current,
+            event: event,
+            flowSettings: flowSettings
+        )
+
+        let previousArtifacts = try await stageArtifactRepository.fetchArtifacts(branchID: branchID)
+        let assistantInstruction = buildAssistantInstruction(
+            state: next,
+            event: event,
+            flowSettings: flowSettings,
+            previousArtifacts: previousArtifacts
+        )
+        let messageText = resolvedMessageText(userInput: userInput, userAction: userAction, flowSettings: flowSettings)
+        let assistantMessage = try await sendMessageUseCase.execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            userText: messageText,
+            assistantInstruction: assistantInstruction
+        )
+
+        let artifact = StageArtifact(
+            branchID: branchID,
+            stage: next.stage,
+            step: next.step,
+            content: assistantMessage.content,
+            sourceMessageIDs: [assistantMessage.id]
+        )
+
+        try await taskProgressRepository.save(branchID: branchID, state: next)
+        try await stageArtifactRepository.save(artifact)
+
+        return TaskFlowOutput(
+            state: next,
+            artifact: artifact,
+            availableActions: availableActions(for: next)
+        )
+    }
+
+    private func resolveEvent(
+        userInput: String,
+        userAction: TaskFlowUserAction?,
+        flowSettings: AgentFlowSettings
+    ) -> TaskFlowEvent {
+        if userAction == .continueAction { return .userContinue }
+        if userAction == .confirm { return .userConfirm }
+
+        let normalized = userInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "продолжить" || normalized == "continue" {
+            return .userContinue
+        }
+        if normalized == flowSettings.normalizedConfirmCommand {
+            return .userConfirm
+        }
+        return .userClarification
+    }
+
+    private func resolvedMessageText(
+        userInput: String,
+        userAction: TaskFlowUserAction?,
+        flowSettings: AgentFlowSettings
+    ) -> String {
+        let trimmed = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        switch userAction {
+        case .continueAction:
+            return "продолжить"
+        case .confirm:
+            return flowSettings.confirmCommand
+        case .none:
+            return "уточнение отсутствует"
+        }
+    }
+
+    private func buildAssistantInstruction(
+        state: TaskProgressState,
+        event: TaskFlowEvent,
+        flowSettings: AgentFlowSettings,
+        previousArtifacts: [StageArtifact]
+    ) -> String {
+        let expectedActions = availableActions(for: state).map(\.title).joined(separator: ", ")
+        let history = previousArtifacts
+            .sorted { $0.createdAt < $1.createdAt }
+            .suffix(6)
+            .map { artifact in
+                "[\(artifact.stage.rawValue)#\(artifact.step)] \(trimmedArtifactContent(artifact.content))"
+            }
+            .joined(separator: "\n")
+        let historyBlock = history.isEmpty ? "none" : history
+
+        return """
+        You are operating in a deterministic task flow.
+        Current stage: \(state.stage.rawValue)
+        Step: \(state.step)
+        Expected action after this response: \(state.expectedAction.rawValue)
+        Transition event: \(eventName(event))
+        Confirm command: \(flowSettings.confirmCommand)
+
+        Produce exactly three markdown sections in this order:
+        1) ## state
+        Include:
+        - stage: \(state.stage.rawValue)
+        - step: \(state.step)
+        - expectedAction: \(state.expectedAction.rawValue)
+        2) ## artifact
+        Stage-specific content only for the current stage.
+        Do not repeat full explanations from previous stages.
+        3) ## actions
+        List only these actions: \(expectedActions)
+
+        Previous artifacts summary:
+        \(historyBlock)
+        """
+    }
+
+    private func eventName(_ event: TaskFlowEvent) -> String {
+        switch event {
+        case .userContinue:
+            return "user_continue"
+        case .userConfirm:
+            return "user_confirm"
+        case .userClarification:
+            return "user_clarification"
+        }
+    }
+
+    private func availableActions(for state: TaskProgressState) -> [TaskFlowAvailableAction] {
+        switch state.stage {
+        case .planning, .execution:
+            return [.continueAction]
+        case .validation:
+            return state.expectedAction == .awaitConfirmation ? [.confirm] : [.continueAction, .confirm]
+        case .done:
+            return []
+        }
+    }
+
+    private func trimmedArtifactContent(_ content: String) -> String {
+        let flattened = content.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard flattened.count > 160 else { return flattened }
+        return String(flattened.prefix(160)) + "..."
     }
 }
 

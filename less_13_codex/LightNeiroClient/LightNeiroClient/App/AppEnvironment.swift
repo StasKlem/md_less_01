@@ -20,6 +20,7 @@ struct AppEnvironment {
     let switchBranchUseCase: SwitchBranchUseCaseProtocol
     let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
+    let taskFlowOrchestratorUseCase: TaskFlowOrchestratorUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -31,6 +32,8 @@ struct AppEnvironment {
         let factsRepository = MockFactsRepository()
         let settingsRepository = UserDefaultsSettingsRepository()
         let metricsRepository = MockMetricsRepository()
+        let taskProgressRepository = FileTaskProgressRepository()
+        let stageArtifactRepository = FileStageArtifactRepository()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -88,6 +91,14 @@ struct AppEnvironment {
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
         let switchBranch = SwitchBranchUseCase(sessionRepository: sessionRepository)
+        let advanceTaskStage = AdvanceTaskStageUseCase()
+        let taskFlowOrchestrator = TaskFlowOrchestratorUseCase(
+            taskProgressRepository: taskProgressRepository,
+            stageArtifactRepository: stageArtifactRepository,
+            advanceTaskStageUseCase: advanceTaskStage,
+            sendMessageUseCase: sendMessage,
+            fetchSettingsUseCase: fetchSettings
+        )
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -128,7 +139,8 @@ struct AppEnvironment {
             collectSessionMetricsUseCase: collectMetrics,
             switchBranchUseCase: switchBranch,
             loadAPIKeyUseCase: loadAPIKey,
-            saveAPIKeyUseCase: saveAPIKey
+            saveAPIKeyUseCase: saveAPIKey,
+            taskFlowOrchestratorUseCase: taskFlowOrchestrator
         )
     }
 }

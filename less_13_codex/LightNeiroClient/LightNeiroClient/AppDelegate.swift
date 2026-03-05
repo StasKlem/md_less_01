@@ -55,7 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let chatViewModel = ChatViewModel(
                 sessionID: environment.sessionID,
                 branchID: environment.branchID,
-                sendMessageUseCase: environment.sendMessageUseCase,
+                taskFlowOrchestratorUseCase: environment.taskFlowOrchestratorUseCase,
                 fetchBranchesUseCase: environment.fetchBranchesUseCase,
                 fetchCheckpointsUseCase: environment.fetchCheckpointsUseCase,
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,

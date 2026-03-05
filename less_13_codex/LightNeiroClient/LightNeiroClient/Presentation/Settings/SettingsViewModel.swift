@@ -9,6 +9,8 @@ final class SettingsViewModel {
     @Published private(set) var selectedPromptProfile: UserPromptProfile = .auto
     @Published private(set) var promptProfileText: String = ""
     @Published private(set) var promptProfileStatus: String = ""
+    @Published private(set) var doneTransitionMode: DoneTransitionMode = .manualCommand
+    @Published private(set) var confirmCommand: String = AgentFlowSettings.default.confirmCommand
 
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
@@ -72,6 +74,18 @@ final class SettingsViewModel {
         persist()
     }
 
+    func updateDoneTransitionMode(_ mode: DoneTransitionMode) {
+        settings.agentFlowSettings.doneTransitionMode = mode
+        doneTransitionMode = mode
+        persist()
+    }
+
+    func updateConfirmCommand(_ value: String) {
+        settings.agentFlowSettings.confirmCommand = value
+        confirmCommand = value
+        persist()
+    }
+
     /// Переключает активный пользовательский профиль префикса.
     func selectPromptProfile(_ profile: UserPromptProfile) {
         promptProfiles.selectedProfile = profile
@@ -112,6 +126,8 @@ final class SettingsViewModel {
         // При смене ветки подтягиваем ее стратегию в текущее состояние UI
         // и сразу персистим, чтобы остальные подписчики увидели консистентные настройки.
         settings.setContextStrategy(settings.contextStrategy(for: branchID), for: branchID)
+        doneTransitionMode = settings.agentFlowSettings.doneTransitionMode
+        confirmCommand = settings.agentFlowSettings.confirmCommand
         persist()
     }
 
@@ -143,6 +159,8 @@ final class SettingsViewModel {
                 // выбранная в UI стратегия должна соответствовать активной ветке.
                 loaded.setContextStrategy(loaded.contextStrategy(for: activeBranchID), for: activeBranchID)
                 settings = loaded
+                doneTransitionMode = loaded.agentFlowSettings.doneTransitionMode
+                confirmCommand = loaded.agentFlowSettings.confirmCommand
                 onSettingsChanged?(loaded)
                 try await applySettingsUseCase.execute(sessionID: sessionID, settings: loaded)
             } catch {

@@ -19,6 +19,8 @@ final class SettingsViewController: NSViewController, NSTextViewDelegate {
     private let profileTextView = NSTextView()
     private let profileTextScrollView = NSScrollView()
     private let profileStatusLabel = NSTextField(labelWithString: "")
+    private let doneTransitionModePopup = NSPopUpButton()
+    private let confirmCommandField = NSTextField()
 
     init(viewModel: SettingsViewModel) {
         self.viewModel = viewModel
@@ -45,6 +47,7 @@ final class SettingsViewController: NSViewController, NSTextViewDelegate {
     private func setupUI() {
         modelPopup.addItems(withTitles: LLMModel.allCases.map { $0.rawValue })
         contextStrategyPopup.addItems(withTitles: ContextStrategy.allCases.map { $0.rawValue })
+        doneTransitionModePopup.addItems(withTitles: DoneTransitionMode.allCases.map(\.title))
 
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged)
@@ -59,6 +62,11 @@ final class SettingsViewController: NSViewController, NSTextViewDelegate {
         apiKeyField.placeholderString = "routerai key"
         saveAPIKeyButton.target = self
         saveAPIKeyButton.action = #selector(saveAPIKeyTapped)
+        doneTransitionModePopup.target = self
+        doneTransitionModePopup.action = #selector(doneTransitionModeChanged)
+        confirmCommandField.target = self
+        confirmCommandField.action = #selector(confirmCommandChanged)
+        confirmCommandField.placeholderString = "ок"
         profileSwitcher.target = self
         profileSwitcher.action = #selector(profileChanged)
         profileTextView.isRichText = false
@@ -86,6 +94,8 @@ final class SettingsViewController: NSViewController, NSTextViewDelegate {
             temperatureSlider,
             windowLabel,
             windowSlider,
+            makeRow(label: "Завершение validation", control: doneTransitionModePopup),
+            makeRow(label: "Команда подтверждения", control: confirmCommandField),
             makeRow(label: "Профиль", control: profileSwitcher),
             profileTextScrollView,
             profileStatusLabel,
@@ -117,6 +127,23 @@ final class SettingsViewController: NSViewController, NSTextViewDelegate {
                 self.windowSlider.doubleValue = Double(settings.windowSize)
                 self.temperatureLabel.stringValue = String(format: "Temperature: %.2f", settings.temperature)
                 self.windowLabel.stringValue = "Window: \(settings.windowSize)"
+            }
+            .store(in: &cancellables)
+
+        viewModel.$doneTransitionMode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] mode in
+                self?.doneTransitionModePopup.selectItem(withTitle: mode.title)
+            }
+            .store(in: &cancellables)
+
+        viewModel.$confirmCommand
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] value in
+                guard let self else { return }
+                if self.confirmCommandField.stringValue != value {
+                    self.confirmCommandField.stringValue = value
+                }
             }
             .store(in: &cancellables)
 
@@ -209,6 +236,18 @@ final class SettingsViewController: NSViewController, NSTextViewDelegate {
     private func saveAPIKeyTapped() {
         viewModel.updateAPIKey(apiKeyField.stringValue)
         viewModel.saveAPIKey()
+    }
+
+    @objc
+    private func doneTransitionModeChanged() {
+        guard let title = doneTransitionModePopup.selectedItem?.title else { return }
+        guard let mode = DoneTransitionMode.allCases.first(where: { $0.title == title }) else { return }
+        viewModel.updateDoneTransitionMode(mode)
+    }
+
+    @objc
+    private func confirmCommandChanged() {
+        viewModel.updateConfirmCommand(confirmCommandField.stringValue)
     }
 
     @objc

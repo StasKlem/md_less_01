@@ -1,7 +1,23 @@
 import Foundation
 
 protocol SendMessageUseCaseProtocol {
-    func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userText: String,
+        assistantInstruction: String?
+    ) async throws -> ChatMessage
+}
+
+extension SendMessageUseCaseProtocol {
+    func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
+        try await execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            userText: userText,
+            assistantInstruction: nil
+        )
+    }
 }
 
 protocol BuildMemoryContextUseCaseProtocol {
@@ -88,4 +104,22 @@ protocol LoadAPIKeyUseCaseProtocol {
 protocol SaveAPIKeyUseCaseProtocol {
     func execute(apiKey: String) throws
     func delete() throws
+}
+
+protocol AdvanceTaskStageUseCaseProtocol {
+    func execute(
+        currentState: TaskProgressState,
+        event: TaskFlowEvent,
+        flowSettings: AgentFlowSettings
+    ) -> TaskProgressState
+}
+
+protocol TaskFlowOrchestratorUseCaseProtocol {
+    func snapshot(branchID: UUID) async throws -> TaskFlowSnapshot
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userInput: String,
+        userAction: TaskFlowUserAction?
+    ) async throws -> TaskFlowOutput
 }

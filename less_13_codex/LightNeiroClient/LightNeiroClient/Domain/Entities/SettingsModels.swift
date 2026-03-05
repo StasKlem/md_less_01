@@ -73,6 +73,7 @@ struct LLMSettings: Codable, Equatable {
     var temperature: Double
     var windowSize: Int
     var contextStrategyByBranch: [UUID: ContextStrategy]
+    var agentFlowSettings: AgentFlowSettings
 
     /// Значения настроек по умолчанию для новой сессии.
     static let `default` = LLMSettings(
@@ -80,8 +81,44 @@ struct LLMSettings: Codable, Equatable {
         contextStrategy: .normal,
         temperature: 0.4,
         windowSize: 3,
-        contextStrategyByBranch: [:]
+        contextStrategyByBranch: [:],
+        agentFlowSettings: .default
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case contextStrategy
+        case temperature
+        case windowSize
+        case contextStrategyByBranch
+        case agentFlowSettings
+    }
+
+    init(
+        model: LLMModel,
+        contextStrategy: ContextStrategy,
+        temperature: Double,
+        windowSize: Int,
+        contextStrategyByBranch: [UUID: ContextStrategy],
+        agentFlowSettings: AgentFlowSettings
+    ) {
+        self.model = model
+        self.contextStrategy = contextStrategy
+        self.temperature = temperature
+        self.windowSize = windowSize
+        self.contextStrategyByBranch = contextStrategyByBranch
+        self.agentFlowSettings = agentFlowSettings
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        model = try container.decode(LLMModel.self, forKey: .model)
+        contextStrategy = try container.decode(ContextStrategy.self, forKey: .contextStrategy)
+        temperature = try container.decode(Double.self, forKey: .temperature)
+        windowSize = try container.decode(Int.self, forKey: .windowSize)
+        contextStrategyByBranch = try container.decodeIfPresent([UUID: ContextStrategy].self, forKey: .contextStrategyByBranch) ?? [:]
+        agentFlowSettings = try container.decodeIfPresent(AgentFlowSettings.self, forKey: .agentFlowSettings) ?? .default
+    }
 
     /// Возвращает стратегию для указанной ветки с fallback на общее значение.
     func contextStrategy(for branchID: UUID) -> ContextStrategy {

@@ -77,6 +77,9 @@ final class ChatSidebarViewController: NSViewController {
     private let inputTextView = ChatInputTextView()
     private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
+    private let continueButton = NSButton(title: "Продолжить", target: nil, action: nil)
+    private let confirmButton = NSButton(title: "Подтвердить", target: nil, action: nil)
+    private let taskStateLabel = NSTextField(labelWithString: "")
 
     init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -121,7 +124,14 @@ final class ChatSidebarViewController: NSViewController {
         newBranchButton.action = #selector(createBranchTapped)
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
+        continueButton.target = self
+        continueButton.action = #selector(continueTapped)
+        confirmButton.target = self
+        confirmButton.action = #selector(confirmTapped)
         configureInputTextView()
+        taskStateLabel.textColor = .secondaryLabelColor
+        taskStateLabel.lineBreakMode = .byWordWrapping
+        taskStateLabel.maximumNumberOfLines = 2
 
         addChild(dialogHistoryViewController)
         let dialogView = dialogHistoryViewController.view
@@ -136,7 +146,12 @@ final class ChatSidebarViewController: NSViewController {
         historyHeaderRow.orientation = .horizontal
         historyHeaderRow.alignment = .centerY
 
-        let root = NSStackView(views: [historyHeaderRow, historyScroll, dialogView, inputRow])
+        let taskActionsRow = NSStackView(views: [continueButton, confirmButton])
+        taskActionsRow.orientation = .horizontal
+        taskActionsRow.alignment = .centerY
+        taskActionsRow.spacing = 8
+
+        let root = NSStackView(views: [historyHeaderRow, historyScroll, dialogView, taskStateLabel, taskActionsRow, inputRow])
         root.orientation = .vertical
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
@@ -227,6 +242,25 @@ final class ChatSidebarViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
+                self?.continueButton.isEnabled = !(sending || !(self?.viewModel.availableTaskActions.contains(.continueAction) ?? false))
+                self?.confirmButton.isEnabled = !(sending || !(self?.viewModel.availableTaskActions.contains(.confirm) ?? false))
+            }
+            .store(in: &cancellables)
+
+        viewModel.$taskProgressState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                self?.taskStateLabel.stringValue = "Этап: \(state.stage.rawValue), шаг: \(state.step), ожидание: \(state.expectedAction.rawValue)"
+            }
+            .store(in: &cancellables)
+
+        viewModel.$availableTaskActions
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] actions in
+                guard let self else { return }
+                let sending = self.viewModel.isSending
+                self.continueButton.isEnabled = !sending && actions.contains(.continueAction)
+                self.confirmButton.isEnabled = !sending && actions.contains(.confirm)
             }
             .store(in: &cancellables)
     }
@@ -241,6 +275,16 @@ final class ChatSidebarViewController: NSViewController {
     @objc
     private func createBranchTapped() {
         viewModel.createBranch()
+    }
+
+    @objc
+    private func continueTapped() {
+        viewModel.continueTaskFlow()
+    }
+
+    @objc
+    private func confirmTapped() {
+        viewModel.confirmTaskFlow()
     }
 
     private func expandAllNodes() {
