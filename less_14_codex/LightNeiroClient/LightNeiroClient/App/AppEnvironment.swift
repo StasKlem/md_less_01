@@ -82,6 +82,7 @@ struct AppEnvironment {
         let vacationOrchestrator = VacationPlanningOrchestrator(
             stateRepository: vacationStateRepository,
             planRepository: vacationPlanRepository,
+            settingsRepository: settingsRepository,
             reducer: vacationReducer,
             processUserAnswerUseCase: processUserAnswer,
             questionGenerationService: LLMQuestionGenerationService(llmClient: llmClient),

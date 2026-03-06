@@ -793,6 +793,7 @@ final class ProcessUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol {
         currentState: QuestionnaireState,
         currentSlots: VacationSlots,
         userText: String,
+        settings: LLMSettings,
         source: QuestionnaireAnswerSource
     ) async -> QuestionnaireProcessingResult {
         if source == .form {
@@ -809,7 +810,8 @@ final class ProcessUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol {
             extractionResult = try await answerExtractionService.extractFields(
                 userText: userText,
                 schema: schema,
-                currentState: currentState
+                currentState: currentState,
+                settings: settings
             )
         } catch {
             return fallbackResult(
@@ -1168,6 +1170,21 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         context.slots = result.updatedSlots
         context.lastValidationErrors = result.validationErrors
 
+        let invariantViolations = userInputInvariantViolations(for: context.slots)
+        if !invariantViolations.isEmpty {
+            let messages = invariantViolations.map(\.message)
+            context.lastValidationErrors = context.lastValidationErrors.mergingUnique(with: messages)
+            let warning = "Данные не прошли проверку инвариантов: \(messages.joined(separator: " ")). Уточните, пожалуйста, корректные значения."
+            return VacationPlanningTransitionResult(
+                nextState: .clarifyingMissingData,
+                nextContext: context,
+                effects: [
+                    .askQuestion(fieldID: invariantViolations[0].fieldID, warning: warning),
+                    .persistSnapshot,
+                ]
+            )
+        }
+
         switch result.action {
         case let .askNextQuestion(fieldID, warning):
             return VacationPlanningTransitionResult(
@@ -1302,6 +1319,23 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
             .map(\.id)
         return next
     }
+
+    private func userInputInvariantViolations(for slots: VacationSlots) -> [(fieldID: String, message: String)] {
+        var violations: [(fieldID: String, message: String)] = []
+        if let range = slots.dateRange, range.start > range.end {
+            violations.append((
+                fieldID: VacationQuestionnaireSchemaAdapter.datesFieldID,
+                message: "Дата начала поездки должна быть не позже даты окончания."
+            ))
+        }
+        if let budget = slots.budget, budget.total <= 0 {
+            violations.append((
+                fieldID: VacationQuestionnaireSchemaAdapter.budgetFieldID,
+                message: "Бюджет должен быть больше 0."
+            ))
+        }
+        return violations
+    }
 }
 
 final class StartVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol {
@@ -1405,6 +1439,7 @@ final class FinalizeVacationPlanUseCase: FinalizeVacationPlanUseCaseProtocol {
 final class VacationPlanningOrchestrator {
     private let stateRepository: VacationPlanningStateRepositoryProtocol
     private let planRepository: VacationPlanRepositoryProtocol
+    private let settingsRepository: SettingsRepositoryProtocol
     private let reducer: VacationPlannerReducerProtocol
     private let processUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol
     private let questionGenerationService: QuestionGenerationServiceProtocol
@@ -1416,6 +1451,7 @@ final class VacationPlanningOrchestrator {
     init(
         stateRepository: VacationPlanningStateRepositoryProtocol,
         planRepository: VacationPlanRepositoryProtocol,
+        settingsRepository: SettingsRepositoryProtocol,
         reducer: VacationPlannerReducerProtocol,
         processUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol,
         questionGenerationService: QuestionGenerationServiceProtocol,
@@ -1426,6 +1462,7 @@ final class VacationPlanningOrchestrator {
     ) {
         self.stateRepository = stateRepository
         self.planRepository = planRepository
+        self.settingsRepository = settingsRepository
         self.reducer = reducer
         self.processUserAnswerUseCase = processUserAnswerUseCase
         self.questionGenerationService = questionGenerationService
@@ -1441,6 +1478,7 @@ final class VacationPlanningOrchestrator {
         initialEvent: VacationPlanningEvent
     ) async throws -> VacationPlanningTurnResult {
         var snapshot = try await loadSnapshot(sessionID: sessionID, branchID: branchID)
+        let settings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
         var queue: [VacationPlanningEvent] = [initialEvent]
         var messages: [String] = []
 
@@ -1449,7 +1487,7 @@ final class VacationPlanningOrchestrator {
             let transition = reducer.reduce(snapshot: snapshot, event: event)
             snapshot = rebuildSnapshot(from: transition, previous: snapshot)
 
-            let execution = try await executeEffects(transition.effects, snapshot: snapshot)
+            let execution = try await executeEffects(transition.effects, snapshot: snapshot, settings: settings)
             messages.append(contentsOf: execution.messages)
             queue.append(contentsOf: execution.events)
 
@@ -1495,7 +1533,8 @@ final class VacationPlanningOrchestrator {
 
     private func executeEffects(
         _ effects: [VacationEffect],
-        snapshot: VacationPlanningSnapshot
+        snapshot: VacationPlanningSnapshot,
+        settings: LLMSettings
     ) async throws -> (events: [VacationPlanningEvent], messages: [String]) {
         var resultingEvents: [VacationPlanningEvent] = []
         var messages: [String] = []
@@ -1505,7 +1544,7 @@ final class VacationPlanningOrchestrator {
             case let .askUser(questionKey):
                 messages.append(questionText(for: questionKey))
             case let .askQuestion(fieldID, warning):
-                let prompt = await buildQuestionPrompt(fieldID: fieldID, snapshot: snapshot)
+                let prompt = await buildQuestionPrompt(fieldID: fieldID, snapshot: snapshot, settings: settings)
                 if let warning, !warning.isEmpty {
                     messages.append(warning)
                 }
@@ -1516,6 +1555,7 @@ final class VacationPlanningOrchestrator {
                     currentState: snapshot.context.questionnaireState,
                     currentSlots: snapshot.context.slots,
                     userText: text,
+                    settings: settings,
                     source: source
                 )
                 resultingEvents.append(.questionnaireProcessed(result))
@@ -1545,7 +1585,8 @@ final class VacationPlanningOrchestrator {
 
     private func buildQuestionPrompt(
         fieldID: String?,
-        snapshot: VacationPlanningSnapshot
+        snapshot: VacationPlanningSnapshot,
+        settings: LLMSettings
     ) async -> QuestionPrompt {
         let state = snapshot.context.questionnaireState
         let nextFieldID = fieldID ?? state.missingHard.first ?? state.missingSoft.first
@@ -1555,7 +1596,8 @@ final class VacationPlanningOrchestrator {
                 context: QuestionnaireQuestionContext(
                     schema: questionnaireSchema,
                     state: state,
-                    latestUserMessage: snapshot.context.lastUserMessage
+                    latestUserMessage: snapshot.context.lastUserMessage,
+                    settings: settings
                 ),
                 targetField: target,
                 toneHints: ["neutral", "short"]

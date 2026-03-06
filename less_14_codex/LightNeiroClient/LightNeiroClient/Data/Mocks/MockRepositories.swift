@@ -298,7 +298,8 @@ struct MockAnswerExtractionService: AnswerExtractionServiceProtocol {
     func extractFields(
         userText: String,
         schema _: QuestionnaireSchema,
-        currentState _: QuestionnaireState
+        currentState _: QuestionnaireState,
+        settings _: LLMSettings
     ) async throws -> QuestionnaireExtractionResult {
         let parsed = VacationUserInputParser.parse(userText: userText)
         var fields: [QuestionnaireFieldExtraction] = []

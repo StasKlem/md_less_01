@@ -243,14 +243,15 @@ final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
     func extractFields(
         userText: String,
         schema: QuestionnaireSchema,
-        currentState: QuestionnaireState
+        currentState: QuestionnaireState,
+        settings: LLMSettings
     ) async throws -> QuestionnaireExtractionResult {
         let request = LLMRequest(
-            systemPrompt: extractionSystemPrompt(schema: schema, state: currentState),
+            systemPrompt: extractionSystemPrompt(schema: schema, state: currentState, settings: settings),
             shortTermMessages: [ChatMessage(branchID: UUID(), role: .user, content: userText)],
             workingMemory: [],
             longTermMemory: [],
-            settings: .default
+            settings: settings
         )
 
         let response: LLMResponse
@@ -370,11 +371,16 @@ final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
         }
     }
 
-    private func extractionSystemPrompt(schema: QuestionnaireSchema, state: QuestionnaireState) -> String {
+    private func extractionSystemPrompt(
+        schema: QuestionnaireSchema,
+        state: QuestionnaireState,
+        settings: LLMSettings
+    ) -> String {
         let schemaLines = schema.fields.map { field in
             "- \(field.id) [\(field.type.rawValue)] required=\(field.requiredLevel.rawValue)"
         }.joined(separator: "\n")
         let unresolved = (state.missingHard + state.missingSoft).joined(separator: ", ")
+        let invariants = settings.plannerInvariants.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         return """
         Ты extraction-модуль. Извлеки данные поездки из свободного текста пользователя.
         Верни СТРОГО JSON без markdown и комментариев.
@@ -383,6 +389,9 @@ final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
         \(schemaLines)
 
         Missing now: \(unresolved)
+
+        Planner invariants:
+        \(invariants)
 
         Output format:
         {
@@ -468,7 +477,7 @@ final class LLMQuestionGenerationService: QuestionGenerationServiceProtocol {
                     shortTermMessages: [ChatMessage(branchID: UUID(), role: .user, content: context.latestUserMessage ?? "")],
                     workingMemory: [],
                     longTermMemory: [],
-                    settings: .default
+                    settings: context.settings
                 )
             )
         } catch {
@@ -504,10 +513,13 @@ final class LLMQuestionGenerationService: QuestionGenerationServiceProtocol {
 
     private func questionSystemPrompt(field: QuestionnaireFieldDefinition, context: QuestionnaireQuestionContext) -> String {
         let unresolved = (context.state.missingHard + context.state.missingSoft).joined(separator: ", ")
+        let invariants = context.settings.plannerInvariants.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         return """
         Ты формируешь короткий вопрос пользователю на русском.
         Нужное поле: \(field.id). Подсказка: \(field.promptHint)
         Пропущенные поля: \(unresolved)
+        Учитывай инварианты планировщика:
+        \(invariants)
         Верни строго JSON:
         {"question":"...","natural_example":"...","technical_example":"..."}
         natural_example — свободная фраза пользователя.

@@ -115,6 +115,7 @@ protocol ProcessUserAnswerUseCaseProtocol {
         currentState: QuestionnaireState,
         currentSlots: VacationSlots,
         userText: String,
+        settings: LLMSettings,
         source: QuestionnaireAnswerSource
     ) async -> QuestionnaireProcessingResult
 }

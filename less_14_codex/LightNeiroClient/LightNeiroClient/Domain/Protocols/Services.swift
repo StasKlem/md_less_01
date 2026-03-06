@@ -58,6 +58,7 @@ struct QuestionnaireQuestionContext {
     let schema: QuestionnaireSchema
     let state: QuestionnaireState
     let latestUserMessage: String?
+    let settings: LLMSettings
 }
 
 protocol QuestionGenerationServiceProtocol {
@@ -72,6 +73,7 @@ protocol AnswerExtractionServiceProtocol {
     func extractFields(
         userText: String,
         schema: QuestionnaireSchema,
-        currentState: QuestionnaireState
+        currentState: QuestionnaireState,
+        settings: LLMSettings
     ) async throws -> QuestionnaireExtractionResult
 }
