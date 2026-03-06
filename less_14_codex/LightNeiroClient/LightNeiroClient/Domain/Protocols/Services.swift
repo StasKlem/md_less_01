@@ -53,3 +53,25 @@ protocol VacationItineraryServiceProtocol {
 protocol VacationBudgetEstimatorProtocol {
     func estimateBudget(context: VacationPlanningContext) async throws -> VacationBudgetBreakdown
 }
+
+struct QuestionnaireQuestionContext {
+    let schema: QuestionnaireSchema
+    let state: QuestionnaireState
+    let latestUserMessage: String?
+}
+
+protocol QuestionGenerationServiceProtocol {
+    func generateQuestion(
+        context: QuestionnaireQuestionContext,
+        targetField: QuestionnaireFieldDefinition?,
+        toneHints: [String]
+    ) async throws -> QuestionPrompt
+}
+
+protocol AnswerExtractionServiceProtocol {
+    func extractFields(
+        userText: String,
+        schema: QuestionnaireSchema,
+        currentState: QuestionnaireState
+    ) async throws -> QuestionnaireExtractionResult
+}

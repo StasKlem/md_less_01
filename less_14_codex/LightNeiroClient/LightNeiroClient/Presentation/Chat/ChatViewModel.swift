@@ -12,6 +12,8 @@ final class ChatViewModel {
     @Published private(set) var isSending = false
     @Published private(set) var chatMode: ChatMode = .default
     @Published private(set) var plannerStepTitle: String?
+    @Published private(set) var questionnaireState: QuestionnaireState = .empty
+    @Published private(set) var questionnaireProgressText: String?
 
     var dialogPatchesPublisher: AnyPublisher<[DialogHistoryPatch], Never> {
         dialogPatchesSubject.eraseToAnyPublisher()
@@ -64,7 +66,7 @@ final class ChatViewModel {
         }
 
         if chatMode == .vacationPlanner {
-            sendToVacationPlanner(text: trimmed)
+            sendToVacationPlanner(text: trimmed, source: .chat)
             return
         }
 
@@ -126,6 +128,23 @@ final class ChatViewModel {
         }
     }
 
+    func submitQuestionnaireForm(values: [String: QuestionnaireValue]) {
+        guard chatMode == .vacationPlanner else { return }
+        let payload = FormSubmissionPayload(
+            fields: values.map { key, value in
+                FormSubmissionField(fieldID: key, value: value)
+            }
+        )
+        guard
+            let data = try? JSONEncoder().encode(payload),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            appendSystemMessage("Не удалось сериализовать данные формы.")
+            return
+        }
+        sendToVacationPlanner(text: json, source: .form)
+    }
+
     private func handlePlannerCommand(text: String) -> Bool {
         let command = text.lowercased()
         guard command.hasPrefix("/vacation") else { return false }
@@ -170,7 +189,7 @@ final class ChatViewModel {
         }
     }
 
-    private func sendToVacationPlanner(text: String) {
+    private func sendToVacationPlanner(text: String, source: QuestionnaireAnswerSource) {
         guard let useCase = handleVacationPlanningEventUseCase else {
             appendSystemMessage("Обработчик планировщика отпуска недоступен.")
             return
@@ -186,7 +205,8 @@ final class ChatViewModel {
                 let result = try await useCase.execute(
                     sessionID: self.session.id,
                     branchID: self.session.activeBranchID,
-                    userText: text
+                    userText: text,
+                    source: source
                 )
                 self.applyPlannerResult(result)
                 self.onDidSendMessage?()
@@ -198,6 +218,8 @@ final class ChatViewModel {
 
     private func applyPlannerResult(_ result: VacationPlanningTurnResult) {
         plannerStepTitle = result.snapshot.state.title
+        questionnaireState = result.snapshot.context.questionnaireState
+        questionnaireProgressText = progressText(for: result.snapshot.context.questionnaireState)
         if lastPlannerState != result.snapshot.state {
             appendSystemMessage(
                 "Состояние планировщика изменилось: \(result.snapshot.state.title)",
@@ -241,6 +263,8 @@ final class ChatViewModel {
             )
             plannerStepTitle = snapshot.state.title
             lastPlannerState = snapshot.state
+            questionnaireState = snapshot.context.questionnaireState
+            questionnaireProgressText = progressText(for: snapshot.context.questionnaireState)
             if snapshot.state != .idle {
                 chatMode = .vacationPlanner
             }
@@ -283,4 +307,23 @@ final class ChatViewModel {
             )
         )
     }
+
+    private func progressText(for state: QuestionnaireState) -> String {
+        if state.missingHard.isEmpty, state.missingSoft.isEmpty {
+            return "Анкета: hard complete, soft complete."
+        }
+        if state.missingHard.isEmpty {
+            return "Анкета: hard complete, soft missing: \(state.missingSoft.joined(separator: ", "))."
+        }
+        return "Анкета: hard missing: \(state.missingHard.joined(separator: ", "))."
+    }
+}
+
+private struct FormSubmissionPayload: Encodable {
+    let fields: [FormSubmissionField]
+}
+
+private struct FormSubmissionField: Encodable {
+    let fieldID: String
+    let value: QuestionnaireValue
 }

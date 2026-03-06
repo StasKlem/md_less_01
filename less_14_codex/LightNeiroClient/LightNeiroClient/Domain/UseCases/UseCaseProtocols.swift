@@ -81,8 +81,24 @@ protocol HandleVacationPlanningEventUseCaseProtocol {
     func execute(
         sessionID: UUID,
         branchID: UUID,
-        userText: String
+        userText: String,
+        source: QuestionnaireAnswerSource
     ) async throws -> VacationPlanningTurnResult
+}
+
+extension HandleVacationPlanningEventUseCaseProtocol {
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        userText: String
+    ) async throws -> VacationPlanningTurnResult {
+        try await execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            userText: userText,
+            source: .chat
+        )
+    }
 }
 
 protocol GetVacationPlanningStatusUseCaseProtocol {
@@ -91,4 +107,14 @@ protocol GetVacationPlanningStatusUseCaseProtocol {
 
 protocol FinalizeVacationPlanUseCaseProtocol {
     func execute(sessionID: UUID, branchID: UUID) async throws -> VacationPlan
+}
+
+protocol ProcessUserAnswerUseCaseProtocol {
+    func execute(
+        schema: QuestionnaireSchema,
+        currentState: QuestionnaireState,
+        currentSlots: VacationSlots,
+        userText: String,
+        source: QuestionnaireAnswerSource
+    ) async -> QuestionnaireProcessingResult
 }

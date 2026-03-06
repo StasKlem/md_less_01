@@ -74,11 +74,18 @@ struct AppEnvironment {
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
         let vacationReducer = VacationPlannerReducer()
+        let answerExtractionService = LLMAnswerExtractionService(llmClient: llmClient)
+        let processUserAnswer = ProcessUserAnswerUseCase(
+            answerExtractionService: answerExtractionService,
+            confidenceThreshold: 0.7
+        )
         let vacationOrchestrator = VacationPlanningOrchestrator(
             stateRepository: vacationStateRepository,
             planRepository: vacationPlanRepository,
             reducer: vacationReducer,
-            slotExtractionService: MockVacationSlotExtractionService(),
+            processUserAnswerUseCase: processUserAnswer,
+            questionGenerationService: LLMQuestionGenerationService(llmClient: llmClient),
+            questionnaireSchema: VacationQuestionnaireSchemaAdapter.schema,
             optionGenerationService: MockVacationOptionGenerationService(),
             itineraryService: MockVacationItineraryService(),
             budgetEstimator: MockVacationBudgetEstimator()

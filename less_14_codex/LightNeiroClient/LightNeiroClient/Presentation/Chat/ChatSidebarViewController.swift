@@ -46,6 +46,7 @@ final class ChatSidebarViewController: NSViewController {
     private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Отправить", target: nil, action: nil)
     private let startPlannerButton = NSButton(title: "Запустить отпуск", target: nil, action: nil)
+    private let plannerStatusLabel = NSTextField(labelWithString: "Планировщик: выключен")
 
     init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -85,7 +86,12 @@ final class ChatSidebarViewController: NSViewController {
         inputRow.alignment = .bottom
         inputRow.spacing = 8
 
-        let root = NSStackView(views: [dialogView, inputRow])
+        plannerStatusLabel.lineBreakMode = .byTruncatingTail
+        plannerStatusLabel.maximumNumberOfLines = 2
+        plannerStatusLabel.textColor = .secondaryLabelColor
+        plannerStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+
+        let root = NSStackView(views: [dialogView, plannerStatusLabel, inputRow])
         root.orientation = .vertical
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
@@ -162,6 +168,18 @@ final class ChatSidebarViewController: NSViewController {
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
                 self?.startPlannerButton.isEnabled = !sending
+            }
+            .store(in: &cancellables)
+
+        viewModel.$plannerStepTitle
+            .combineLatest(viewModel.$questionnaireProgressText)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] step, progress in
+                let stepText = step.map { "Шаг: \($0)." } ?? "Планировщик: выключен."
+                let progressText = progress ?? ""
+                self?.plannerStatusLabel.stringValue = [stepText, progressText]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
             }
             .store(in: &cancellables)
     }

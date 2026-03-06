@@ -231,3 +231,393 @@ private struct RouterAIAPIErrorEnvelope: Decodable {
     let error: APIError?
     let message: String?
 }
+
+final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
+    private let llmClient: LLMClientProtocol
+    private let decoder = JSONDecoder()
+
+    init(llmClient: LLMClientProtocol) {
+        self.llmClient = llmClient
+    }
+
+    func extractFields(
+        userText: String,
+        schema: QuestionnaireSchema,
+        currentState: QuestionnaireState
+    ) async throws -> QuestionnaireExtractionResult {
+        let request = LLMRequest(
+            systemPrompt: extractionSystemPrompt(schema: schema, state: currentState),
+            shortTermMessages: [ChatMessage(branchID: UUID(), role: .user, content: userText)],
+            workingMemory: [],
+            longTermMemory: [],
+            settings: .default
+        )
+
+        let response: LLMResponse
+        do {
+            response = try await llmClient.send(request: request)
+        } catch {
+            return QuestionnaireExtractionResult(
+                fields: [],
+                warnings: [
+                    QuestionnaireExtractionWarning(
+                        code: .llmError,
+                        fieldID: nil,
+                        message: "LLM extraction недоступен: \(error.localizedDescription)"
+                    ),
+                ]
+            )
+        }
+
+        guard let rawJSON = extractJSONObject(from: response.content),
+              let data = rawJSON.data(using: .utf8) else {
+            return QuestionnaireExtractionResult(
+                fields: [],
+                warnings: [
+                    QuestionnaireExtractionWarning(
+                        code: .invalidJSON,
+                        fieldID: nil,
+                        message: "LLM вернул невалидный JSON для extraction."
+                    ),
+                ]
+            )
+        }
+
+        let payload: LLMExtractionPayload
+        do {
+            payload = try decoder.decode(LLMExtractionPayload.self, from: data)
+        } catch {
+            return QuestionnaireExtractionResult(
+                fields: [],
+                warnings: [
+                    QuestionnaireExtractionWarning(
+                        code: .invalidJSON,
+                        fieldID: nil,
+                        message: "Не удалось декодировать JSON extraction: \(error.localizedDescription)"
+                    ),
+                ]
+            )
+        }
+
+        var fields: [QuestionnaireFieldExtraction] = []
+        var warnings = payload.warnings.map {
+            QuestionnaireExtractionWarning(
+                code: QuestionnaireWarningCode(rawValue: $0.code) ?? .llmError,
+                fieldID: $0.fieldID,
+                message: $0.message
+            )
+        }
+
+        for item in payload.fields {
+            guard let definition = schema.field(id: item.fieldID) else {
+                warnings.append(
+                    QuestionnaireExtractionWarning(
+                        code: .invalidType,
+                        fieldID: item.fieldID,
+                        message: "LLM вернул неизвестное поле \(item.fieldID)."
+                    )
+                )
+                continue
+            }
+            guard let value = mapToValue(item: item, expectedType: definition.type) else {
+                warnings.append(
+                    QuestionnaireExtractionWarning(
+                        code: .invalidType,
+                        fieldID: item.fieldID,
+                        message: "LLM вернул неверный тип значения для поля \(item.fieldID)."
+                    )
+                )
+                continue
+            }
+            fields.append(
+                QuestionnaireFieldExtraction(
+                    fieldID: item.fieldID,
+                    value: value,
+                    confidence: min(max(item.confidence, 0.0), 1.0),
+                    rationale: item.rationale
+                )
+            )
+        }
+
+        return QuestionnaireExtractionResult(fields: fields, warnings: warnings)
+    }
+
+    private func mapToValue(item: LLMExtractionField, expectedType: QuestionnaireFieldType) -> QuestionnaireValue? {
+        switch expectedType {
+        case .text:
+            guard let text = item.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+            return .text(text)
+        case .dateRange:
+            guard
+                let startRaw = item.startDate,
+                let endRaw = item.endDate,
+                let start = Self.date(fromISODate: startRaw),
+                let end = Self.date(fromISODate: endRaw)
+            else { return nil }
+            return .dateRange(VacationDateRange(start: start, end: end))
+        case .money:
+            guard let amount = item.amount, amount > 0 else { return nil }
+            let currency = (item.currency ?? "USD").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !currency.isEmpty else { return nil }
+            return .money(VacationBudgetInput(total: amount, currency: currency))
+        case .integer:
+            guard let number = item.integer else { return nil }
+            return .integer(number)
+        case .stringList:
+            guard let values = item.values?.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }).filter({ !$0.isEmpty }),
+                  !values.isEmpty else { return nil }
+            return .stringList(values)
+        }
+    }
+
+    private func extractionSystemPrompt(schema: QuestionnaireSchema, state: QuestionnaireState) -> String {
+        let schemaLines = schema.fields.map { field in
+            "- \(field.id) [\(field.type.rawValue)] required=\(field.requiredLevel.rawValue)"
+        }.joined(separator: "\n")
+        let unresolved = (state.missingHard + state.missingSoft).joined(separator: ", ")
+        return """
+        Ты extraction-модуль. Извлеки данные поездки из свободного текста пользователя.
+        Верни СТРОГО JSON без markdown и комментариев.
+
+        Schema fields:
+        \(schemaLines)
+
+        Missing now: \(unresolved)
+
+        Output format:
+        {
+          "fields": [
+            {
+              "field_id": "destination|dates|budget|travel_style|interests|constraints",
+              "confidence": 0.0,
+              "rationale": "short reason",
+              "text": "...",
+              "start_date": "YYYY-MM-DD",
+              "end_date": "YYYY-MM-DD",
+              "amount": 0,
+              "currency": "USD",
+              "integer": 1,
+              "values": ["..."]
+            }
+          ],
+          "warnings": [
+            {
+              "code": "ambiguous|not_extracted|invalid_type|out_of_range",
+              "field_id": "optional",
+              "message": "..."
+            }
+          ]
+        }
+        Если поле не найдено — не выдумывай. Если двусмысленно — добавь warning code=\"ambiguous\".
+        """
+    }
+
+    private func extractJSONObject(from text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.first == "{", trimmed.last == "}" {
+            return trimmed
+        }
+        if let fencedStart = trimmed.range(of: "```json"),
+           let fencedEnd = trimmed.range(of: "```", range: fencedStart.upperBound..<trimmed.endIndex) {
+            return String(trimmed[fencedStart.upperBound..<fencedEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}") else { return nil }
+        return String(trimmed[start...end])
+    }
+
+    private static func date(fromISODate value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)
+    }
+}
+
+final class LLMQuestionGenerationService: QuestionGenerationServiceProtocol {
+    private let llmClient: LLMClientProtocol
+    private let decoder = JSONDecoder()
+
+    init(llmClient: LLMClientProtocol) {
+        self.llmClient = llmClient
+    }
+
+    func generateQuestion(
+        context: QuestionnaireQuestionContext,
+        targetField: QuestionnaireFieldDefinition?,
+        toneHints _: [String]
+    ) async throws -> QuestionPrompt {
+        guard let targetField else {
+            return QuestionPrompt(
+                fieldID: nil,
+                text: "Опишите поездку в свободной форме: куда, когда и какой бюджет.",
+                suggestions: [
+                    "Например: Хочу в Японию в августе на 10 дней, бюджет около 3000 долларов.",
+                    "Альтернатива: destination: Japan; dates: 2026-08-10 to 2026-08-20; budget: 3000 USD",
+                ],
+                isFallback: true
+            )
+        }
+
+        let response: LLMResponse
+        do {
+            response = try await llmClient.send(
+                request: LLMRequest(
+                    systemPrompt: questionSystemPrompt(field: targetField, context: context),
+                    shortTermMessages: [ChatMessage(branchID: UUID(), role: .user, content: context.latestUserMessage ?? "")],
+                    workingMemory: [],
+                    longTermMemory: [],
+                    settings: .default
+                )
+            )
+        } catch {
+            return fallbackPrompt(for: targetField)
+        }
+
+        guard let json = extractJSONObject(from: response.content),
+              let data = json.data(using: .utf8),
+              let payload = try? decoder.decode(LLMQuestionPayload.self, from: data) else {
+            return fallbackPrompt(for: targetField)
+        }
+
+        let suggestions = [payload.naturalExample, payload.technicalExample]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return QuestionPrompt(
+            fieldID: targetField.id,
+            text: payload.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? targetField.fallbackQuestion : payload.question,
+            suggestions: suggestions.isEmpty ? fallbackPrompt(for: targetField).suggestions : suggestions,
+            isFallback: false
+        )
+    }
+
+    private func fallbackPrompt(for field: QuestionnaireFieldDefinition) -> QuestionPrompt {
+        QuestionPrompt(
+            fieldID: field.id,
+            text: field.fallbackQuestion,
+            suggestions: [naturalExample(for: field.id), technicalExample(for: field.id)],
+            isFallback: true
+        )
+    }
+
+    private func questionSystemPrompt(field: QuestionnaireFieldDefinition, context: QuestionnaireQuestionContext) -> String {
+        let unresolved = (context.state.missingHard + context.state.missingSoft).joined(separator: ", ")
+        return """
+        Ты формируешь короткий вопрос пользователю на русском.
+        Нужное поле: \(field.id). Подсказка: \(field.promptHint)
+        Пропущенные поля: \(unresolved)
+        Верни строго JSON:
+        {"question":"...","natural_example":"...","technical_example":"..."}
+        natural_example — свободная фраза пользователя.
+        technical_example — формат ключ: значение.
+        """
+    }
+
+    private func naturalExample(for fieldID: String) -> String {
+        switch fieldID {
+        case VacationQuestionnaireSchemaAdapter.destinationFieldID:
+            return "Например: Хочу в Италию, либо просто спокойный пляжный отдых."
+        case VacationQuestionnaireSchemaAdapter.datesFieldID:
+            return "Например: Планирую с 10 по 20 августа 2026."
+        case VacationQuestionnaireSchemaAdapter.budgetFieldID:
+            return "Например: Бюджет примерно 2500 евро."
+        case VacationQuestionnaireSchemaAdapter.styleFieldID:
+            return "Например: Нравится экскурсионный и активный отдых."
+        case VacationQuestionnaireSchemaAdapter.interestsFieldID:
+            return "Например: Интересуют музеи, кухня и природа."
+        case VacationQuestionnaireSchemaAdapter.constraintsFieldID:
+            return "Например: Без ночных перелетов и длительных пересадок."
+        default:
+            return "Например: Опишу детали поездки обычным текстом."
+        }
+    }
+
+    private func technicalExample(for fieldID: String) -> String {
+        switch fieldID {
+        case VacationQuestionnaireSchemaAdapter.destinationFieldID:
+            return "Альтернатива: destination: Italy"
+        case VacationQuestionnaireSchemaAdapter.datesFieldID:
+            return "Альтернатива: dates: 2026-08-10 to 2026-08-20"
+        case VacationQuestionnaireSchemaAdapter.budgetFieldID:
+            return "Альтернатива: budget: 2500 EUR"
+        case VacationQuestionnaireSchemaAdapter.styleFieldID:
+            return "Альтернатива: style: active sightseeing"
+        case VacationQuestionnaireSchemaAdapter.interestsFieldID:
+            return "Альтернатива: interests: food, museums, nature"
+        case VacationQuestionnaireSchemaAdapter.constraintsFieldID:
+            return "Альтернатива: constraints: no night flights, short transfers"
+        default:
+            return "Альтернатива: destination: Italy; dates: 2026-08-10 to 2026-08-20; budget: 2500 EUR"
+        }
+    }
+
+    private func extractJSONObject(from text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.first == "{", trimmed.last == "}" {
+            return trimmed
+        }
+        if let fencedStart = trimmed.range(of: "```json"),
+           let fencedEnd = trimmed.range(of: "```", range: fencedStart.upperBound..<trimmed.endIndex) {
+            return String(trimmed[fencedStart.upperBound..<fencedEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}") else { return nil }
+        return String(trimmed[start...end])
+    }
+}
+
+private struct LLMExtractionPayload: Decodable {
+    let fields: [LLMExtractionField]
+    let warnings: [LLMExtractionWarning]
+}
+
+private struct LLMExtractionField: Decodable {
+    let fieldID: String
+    let confidence: Double
+    let rationale: String?
+    let text: String?
+    let startDate: String?
+    let endDate: String?
+    let amount: Double?
+    let currency: String?
+    let integer: Int?
+    let values: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case fieldID = "field_id"
+        case confidence
+        case rationale
+        case text
+        case startDate = "start_date"
+        case endDate = "end_date"
+        case amount
+        case currency
+        case integer
+        case values
+    }
+}
+
+private struct LLMExtractionWarning: Decodable {
+    let code: String
+    let fieldID: String?
+    let message: String
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case fieldID = "field_id"
+        case message
+    }
+}
+
+private struct LLMQuestionPayload: Decodable {
+    let question: String
+    let naturalExample: String
+    let technicalExample: String
+
+    private enum CodingKeys: String, CodingKey {
+        case question
+        case naturalExample = "natural_example"
+        case technicalExample = "technical_example"
+    }
+}

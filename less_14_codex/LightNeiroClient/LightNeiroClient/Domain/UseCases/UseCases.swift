@@ -776,6 +776,276 @@ final class SaveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol {
     }
 }
 
+final class ProcessUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol {
+    private let answerExtractionService: AnswerExtractionServiceProtocol
+    private let confidenceThreshold: Double
+
+    init(
+        answerExtractionService: AnswerExtractionServiceProtocol,
+        confidenceThreshold: Double = 0.7
+    ) {
+        self.answerExtractionService = answerExtractionService
+        self.confidenceThreshold = confidenceThreshold
+    }
+
+    func execute(
+        schema: QuestionnaireSchema,
+        currentState: QuestionnaireState,
+        currentSlots: VacationSlots,
+        userText: String,
+        source: QuestionnaireAnswerSource
+    ) async -> QuestionnaireProcessingResult {
+        if source == .form {
+            return processFormInput(
+                schema: schema,
+                currentState: currentState,
+                currentSlots: currentSlots,
+                userText: userText
+            )
+        }
+
+        let extractionResult: QuestionnaireExtractionResult
+        do {
+            extractionResult = try await answerExtractionService.extractFields(
+                userText: userText,
+                schema: schema,
+                currentState: currentState
+            )
+        } catch {
+            return fallbackResult(
+                schema: schema,
+                state: refreshMissing(schema: schema, state: currentState),
+                slots: currentSlots,
+                warning: "Не удалось разобрать ответ автоматически. Уточним данные вручную.",
+                fieldID: nil
+            )
+        }
+
+        var nextState = currentState
+        var answerUpdates: [String: QuestionnaireFieldAnswer] = [:]
+        var validationErrors = extractionResult.warnings.map(\.message)
+        let now = Date()
+        var prioritizedFieldForClarification: String?
+
+        for field in extractionResult.fields {
+            guard let definition = schema.field(id: field.fieldID) else { continue }
+            let isAmbiguous = extractionResult.warnings.contains {
+                $0.fieldID == field.fieldID && $0.code == .ambiguous
+            }
+            if field.confidence < confidenceThreshold || isAmbiguous {
+                if prioritizedFieldForClarification == nil {
+                    prioritizedFieldForClarification = field.fieldID
+                }
+                validationErrors.append("Нужно уточнить поле \(field.fieldID): низкая уверенность.")
+                continue
+            }
+            if validate(value: field.value, for: definition).isEmpty {
+                answerUpdates[field.fieldID] = QuestionnaireFieldAnswer(
+                    value: field.value,
+                    confidence: field.confidence,
+                    source: .llmExtraction,
+                    updatedAt: now
+                )
+            } else {
+                validationErrors.append("Поле \(field.fieldID) не прошло валидацию.")
+                if prioritizedFieldForClarification == nil {
+                    prioritizedFieldForClarification = field.fieldID
+                }
+            }
+        }
+
+        for (fieldID, answer) in answerUpdates {
+            nextState.answers[fieldID] = answer
+        }
+
+        nextState = refreshMissing(schema: schema, state: nextState)
+        let mergedSlots = VacationQuestionnaireSchemaAdapter.mergeSlots(current: currentSlots, updates: answerUpdates)
+
+        if !nextState.missingHard.isEmpty {
+            let nextField = prioritizedFieldForClarification ?? nextState.missingHard[0]
+            return QuestionnaireProcessingResult(
+                state: nextState,
+                updatedSlots: mergedSlots,
+                validationErrors: validationErrors,
+                action: .askNextQuestion(
+                    fieldID: nextField,
+                    warning: validationErrors.isEmpty ? nil : validationErrors.joined(separator: " ")
+                )
+            )
+        }
+        if !nextState.missingSoft.isEmpty {
+            return QuestionnaireProcessingResult(
+                state: nextState,
+                updatedSlots: mergedSlots,
+                validationErrors: validationErrors,
+                action: .warnSoftMissing(
+                    message: "Критичные данные собраны. Можно продолжать, но полезно уточнить: \(nextState.missingSoft.joined(separator: ", ")).",
+                    suggestedFieldID: nextState.missingSoft[0]
+                )
+            )
+        }
+        return QuestionnaireProcessingResult(
+            state: nextState,
+            updatedSlots: mergedSlots,
+            validationErrors: validationErrors,
+            action: .proceed
+        )
+    }
+
+    private func fallbackResult(
+        schema: QuestionnaireSchema,
+        state: QuestionnaireState,
+        slots: VacationSlots,
+        warning: String,
+        fieldID: String?
+    ) -> QuestionnaireProcessingResult {
+        let action: QuestionnaireNextAction
+        if let fieldID = fieldID ?? state.missingHard.first ?? state.missingSoft.first {
+            action = .askNextQuestion(fieldID: fieldID, warning: warning)
+        } else {
+            action = .warnSoftMissing(message: warning, suggestedFieldID: nil)
+        }
+        return QuestionnaireProcessingResult(
+            state: state,
+            updatedSlots: slots,
+            validationErrors: [warning],
+            action: action
+        )
+    }
+
+    private func processFormInput(
+        schema: QuestionnaireSchema,
+        currentState: QuestionnaireState,
+        currentSlots: VacationSlots,
+        userText: String
+    ) -> QuestionnaireProcessingResult {
+        do {
+            let data = Data(userText.utf8)
+            let payload = try JSONDecoder().decode(FormInputPayload.self, from: data)
+            let now = Date()
+            var updates: [String: QuestionnaireFieldAnswer] = [:]
+            for field in payload.fields {
+                guard let definition = schema.field(id: field.fieldID) else { continue }
+                guard validate(value: field.value, for: definition).isEmpty else { continue }
+                updates[field.fieldID] = QuestionnaireFieldAnswer(
+                    value: field.value,
+                    confidence: 1.0,
+                    source: .form,
+                    updatedAt: now
+                )
+            }
+            var next = currentState
+            for (key, value) in updates {
+                next.answers[key] = value
+            }
+            next = refreshMissing(schema: schema, state: next)
+            let merged = VacationQuestionnaireSchemaAdapter.mergeSlots(current: currentSlots, updates: updates)
+            if !next.missingHard.isEmpty {
+                return QuestionnaireProcessingResult(
+                    state: next,
+                    updatedSlots: merged,
+                    validationErrors: [],
+                    action: .askNextQuestion(fieldID: next.missingHard[0], warning: nil)
+                )
+            }
+            if !next.missingSoft.isEmpty {
+                return QuestionnaireProcessingResult(
+                    state: next,
+                    updatedSlots: merged,
+                    validationErrors: [],
+                    action: .warnSoftMissing(
+                        message: "Критичные данные собраны. Можно продолжать, но полезно уточнить: \(next.missingSoft.joined(separator: ", ")).",
+                        suggestedFieldID: next.missingSoft[0]
+                    )
+                )
+            }
+            return QuestionnaireProcessingResult(
+                state: next,
+                updatedSlots: merged,
+                validationErrors: [],
+                action: .proceed
+            )
+        } catch {
+            return fallbackResult(
+                schema: schema,
+                state: refreshMissing(schema: schema, state: currentState),
+                slots: currentSlots,
+                warning: "Не удалось применить данные формы. Проверьте заполнение полей.",
+                fieldID: nil
+            )
+        }
+    }
+
+    private func refreshMissing(schema: QuestionnaireSchema, state: QuestionnaireState) -> QuestionnaireState {
+        var next = state
+        next.missingHard = schema.fields
+            .filter { $0.requiredLevel == .hard && next.answers[$0.id] == nil }
+            .map(\.id)
+        next.missingSoft = schema.fields
+            .filter { $0.requiredLevel == .soft && next.answers[$0.id] == nil }
+            .map(\.id)
+        return next
+    }
+
+    private func validate(value: QuestionnaireValue, for field: QuestionnaireFieldDefinition) -> [String] {
+        var errors: [String] = []
+        for rule in field.validators {
+            switch rule {
+            case .nonEmptyText:
+                if case let .text(text) = value {
+                    if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        errors.append(field.id)
+                    }
+                } else {
+                    errors.append(field.id)
+                }
+            case .validDateRange:
+                if case let .dateRange(range) = value {
+                    if range.start > range.end {
+                        errors.append(field.id)
+                    }
+                } else {
+                    errors.append(field.id)
+                }
+            case .positiveMoneyAmount:
+                if case let .money(money) = value {
+                    if money.total <= 0 {
+                        errors.append(field.id)
+                    }
+                } else {
+                    errors.append(field.id)
+                }
+            case .positiveInteger:
+                if case let .integer(number) = value {
+                    if number < 1 {
+                        errors.append(field.id)
+                    }
+                } else {
+                    errors.append(field.id)
+                }
+            case .nonEmptyList:
+                if case let .stringList(values) = value {
+                    if values.isEmpty {
+                        errors.append(field.id)
+                    }
+                } else {
+                    errors.append(field.id)
+                }
+            }
+        }
+        return errors
+    }
+}
+
+private struct FormInputPayload: Decodable {
+    let fields: [FormInputField]
+}
+
+private struct FormInputField: Decodable {
+    let fieldID: String
+    let value: QuestionnaireValue
+}
+
 final class VacationPlannerReducer: VacationPlannerReducerProtocol {
     func reduce(
         snapshot: VacationPlanningSnapshot,
@@ -798,19 +1068,19 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         case (.idle, .started), (.failed, .started):
             var context = snapshot.context
             context.lastValidationErrors = []
+            context.questionnaireState = refreshQuestionnaireState(context.questionnaireState, slots: context.slots)
             transition = VacationPlanningTransitionResult(
                 nextState: .collectingRequirements,
                 nextContext: context,
-                effects: [.askUser(questionKey: .provideBasics), .persistSnapshot]
+                effects: [.askQuestion(fieldID: nil, warning: nil), .persistSnapshot]
             )
         case (_, let .errorOccurred(error)):
             transition = failedTransition(context: snapshot.context, reason: error.failureReason)
-        case (_, let .userMessage(text)):
-            transition = userMessageTransition(snapshot: snapshot, text: text)
-        case (.collectingRequirements, .slotsExtracted(let extracted)), (.clarifyingMissingData, .slotsExtracted(let extracted)):
-            transition = slotsExtractedTransition(snapshot: snapshot, extracted: extracted)
-        case (.collectingRequirements, .slotsValidationFailed(let errors)), (.clarifyingMissingData, .slotsValidationFailed(let errors)):
-            transition = clarificationTransition(context: snapshot.context, errors: errors)
+        case (_, let .userMessage(text, source)):
+            transition = userMessageTransition(snapshot: snapshot, text: text, source: source)
+        case (.collectingRequirements, .questionnaireProcessed(let result)),
+             (.clarifyingMissingData, .questionnaireProcessed(let result)):
+            transition = questionnaireProcessedTransition(snapshot: snapshot, result: result)
         case (.generatingOptions, .optionsGenerated(let options)):
             transition = optionsGeneratedTransition(snapshot: snapshot, options: options)
         case (.buildingItinerary, .itineraryGenerated(let itinerary)):
@@ -868,7 +1138,8 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
 
     private func userMessageTransition(
         snapshot: VacationPlanningSnapshot,
-        text: String
+        text: String,
+        source: QuestionnaireAnswerSource
     ) -> VacationPlanningTransitionResult {
         var context = snapshot.context
         context.lastUserMessage = text
@@ -884,53 +1155,43 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         return VacationPlanningTransitionResult(
             nextState: state,
             nextContext: context,
-            effects: [.extractSlotsFromUserText(text), .persistSnapshot]
+            effects: [.processUserAnswer(text, source), .persistSnapshot]
         )
     }
 
-    private func slotsExtractedTransition(
+    private func questionnaireProcessedTransition(
         snapshot: VacationPlanningSnapshot,
-        extracted: VacationSlots
+        result: QuestionnaireProcessingResult
     ) -> VacationPlanningTransitionResult {
         var context = snapshot.context
-        context.slots = mergeSlots(current: context.slots, incoming: extracted)
+        context.questionnaireState = result.state
+        context.slots = result.updatedSlots
+        context.lastValidationErrors = result.validationErrors
 
-        let missing = missingRequiredFields(for: context.slots)
-        if !missing.isEmpty {
-            return clarificationTransition(context: context, errors: missing)
+        switch result.action {
+        case let .askNextQuestion(fieldID, warning):
+            return VacationPlanningTransitionResult(
+                nextState: .clarifyingMissingData,
+                nextContext: context,
+                effects: [.askQuestion(fieldID: fieldID, warning: warning), .persistSnapshot]
+            )
+        case let .warnSoftMissing(message, suggestedFieldID):
+            return VacationPlanningTransitionResult(
+                nextState: .generatingOptions,
+                nextContext: context,
+                effects: [
+                    .askQuestion(fieldID: suggestedFieldID, warning: message),
+                    .generateDestinationOptions,
+                    .persistSnapshot,
+                ]
+            )
+        case .proceed:
+            return VacationPlanningTransitionResult(
+                nextState: .generatingOptions,
+                nextContext: context,
+                effects: [.generateDestinationOptions, .persistSnapshot]
+            )
         }
-
-        context.lastValidationErrors = []
-        return VacationPlanningTransitionResult(
-            nextState: .generatingOptions,
-            nextContext: context,
-            effects: [.generateDestinationOptions, .persistSnapshot]
-        )
-    }
-
-    private func clarificationTransition(
-        context: VacationPlanningContext,
-        errors: [String]
-    ) -> VacationPlanningTransitionResult {
-        var next = context
-        next.lastValidationErrors = errors
-        let question: VacationQuestionKey = {
-            if errors.contains("destination") {
-                return .missingDestination
-            }
-            if errors.contains("dates") {
-                return .missingDates
-            }
-            if errors.contains("budget") {
-                return .missingBudget
-            }
-            return .provideBasics
-        }()
-        return VacationPlanningTransitionResult(
-            nextState: .clarifyingMissingData,
-            nextContext: next,
-            effects: [.askUser(questionKey: question), .persistSnapshot]
-        )
     }
 
     private func optionsGeneratedTransition(
@@ -941,7 +1202,17 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         context.options = options
         context.selectedOption = options.first
         if options.isEmpty {
-            return clarificationTransition(context: context, errors: ["destination"])
+            return VacationPlanningTransitionResult(
+                nextState: .clarifyingMissingData,
+                nextContext: context,
+                effects: [
+                    .askQuestion(
+                        fieldID: VacationQuestionnaireSchemaAdapter.destinationFieldID,
+                        warning: "Не удалось подобрать варианты. Уточните направление."
+                    ),
+                    .persistSnapshot,
+                ]
+            )
         }
         return VacationPlanningTransitionResult(
             nextState: .buildingItinerary,
@@ -1000,7 +1271,7 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         return VacationPlanningTransitionResult(
             nextState: .collectingRequirements,
             nextContext: next,
-            effects: [.askUser(questionKey: .provideBasics), .persistSnapshot]
+            effects: [.askQuestion(fieldID: nil, warning: nil), .persistSnapshot]
         )
     }
 
@@ -1015,30 +1286,21 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         )
     }
 
-    private func mergeSlots(current: VacationSlots, incoming: VacationSlots) -> VacationSlots {
-        VacationSlots(
-            destination: incoming.destination ?? current.destination,
-            dateRange: incoming.dateRange ?? current.dateRange,
-            budget: incoming.budget ?? current.budget,
-            travelerCount: max(current.travelerCount, incoming.travelerCount),
-            travelStyle: incoming.travelStyle ?? current.travelStyle,
-            interests: current.interests.mergingUnique(with: incoming.interests),
-            constraints: current.constraints.mergingUnique(with: incoming.constraints)
-        )
-    }
-
-    private func missingRequiredFields(for slots: VacationSlots) -> [String] {
-        var missing: [String] = []
-        if slots.destination == nil && slots.travelStyle == nil {
-            missing.append("destination")
+    private func refreshQuestionnaireState(
+        _ current: QuestionnaireState,
+        slots: VacationSlots
+    ) -> QuestionnaireState {
+        var next = current
+        if next.answers.isEmpty {
+            next = VacationQuestionnaireSchemaAdapter.makeInitialState(from: slots)
         }
-        if slots.dateRange == nil {
-            missing.append("dates")
-        }
-        if slots.budget == nil {
-            missing.append("budget")
-        }
-        return missing
+        next.missingHard = VacationQuestionnaireSchemaAdapter.schema.fields
+            .filter { $0.requiredLevel == .hard && next.answers[$0.id] == nil }
+            .map(\.id)
+        next.missingSoft = VacationQuestionnaireSchemaAdapter.schema.fields
+            .filter { $0.requiredLevel == .soft && next.answers[$0.id] == nil }
+            .map(\.id)
+        return next
     }
 }
 
@@ -1068,7 +1330,8 @@ final class HandleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCa
     func execute(
         sessionID: UUID,
         branchID: UUID,
-        userText: String
+        userText: String,
+        source: QuestionnaireAnswerSource
     ) async throws -> VacationPlanningTurnResult {
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.lowercased() == "approve" {
@@ -1085,7 +1348,7 @@ final class HandleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCa
         return try await orchestrator.process(
             sessionID: sessionID,
             branchID: branchID,
-            initialEvent: .userMessage(text: userText)
+            initialEvent: .userMessage(text: userText, source: source)
         )
     }
 }
@@ -1143,7 +1406,9 @@ final class VacationPlanningOrchestrator {
     private let stateRepository: VacationPlanningStateRepositoryProtocol
     private let planRepository: VacationPlanRepositoryProtocol
     private let reducer: VacationPlannerReducerProtocol
-    private let slotExtractionService: VacationSlotExtractionServiceProtocol
+    private let processUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol
+    private let questionGenerationService: QuestionGenerationServiceProtocol
+    private let questionnaireSchema: QuestionnaireSchema
     private let optionGenerationService: VacationOptionGenerationServiceProtocol
     private let itineraryService: VacationItineraryServiceProtocol
     private let budgetEstimator: VacationBudgetEstimatorProtocol
@@ -1152,7 +1417,9 @@ final class VacationPlanningOrchestrator {
         stateRepository: VacationPlanningStateRepositoryProtocol,
         planRepository: VacationPlanRepositoryProtocol,
         reducer: VacationPlannerReducerProtocol,
-        slotExtractionService: VacationSlotExtractionServiceProtocol,
+        processUserAnswerUseCase: ProcessUserAnswerUseCaseProtocol,
+        questionGenerationService: QuestionGenerationServiceProtocol,
+        questionnaireSchema: QuestionnaireSchema,
         optionGenerationService: VacationOptionGenerationServiceProtocol,
         itineraryService: VacationItineraryServiceProtocol,
         budgetEstimator: VacationBudgetEstimatorProtocol
@@ -1160,7 +1427,9 @@ final class VacationPlanningOrchestrator {
         self.stateRepository = stateRepository
         self.planRepository = planRepository
         self.reducer = reducer
-        self.slotExtractionService = slotExtractionService
+        self.processUserAnswerUseCase = processUserAnswerUseCase
+        self.questionGenerationService = questionGenerationService
+        self.questionnaireSchema = questionnaireSchema
         self.optionGenerationService = optionGenerationService
         self.itineraryService = itineraryService
         self.budgetEstimator = budgetEstimator
@@ -1235,12 +1504,21 @@ final class VacationPlanningOrchestrator {
             switch effect {
             case let .askUser(questionKey):
                 messages.append(questionText(for: questionKey))
-            case let .extractSlotsFromUserText(text):
-                let extraction = try await slotExtractionService.extractSlots(from: text, current: snapshot.context.slots)
-                if !extraction.validationErrors.isEmpty {
-                    resultingEvents.append(.slotsValidationFailed(errors: extraction.validationErrors))
+            case let .askQuestion(fieldID, warning):
+                let prompt = await buildQuestionPrompt(fieldID: fieldID, snapshot: snapshot)
+                if let warning, !warning.isEmpty {
+                    messages.append(warning)
                 }
-                resultingEvents.append(.slotsExtracted(extraction.slots))
+                messages.append(prompt.text)
+            case let .processUserAnswer(text, source):
+                let result = await processUserAnswerUseCase.execute(
+                    schema: questionnaireSchema,
+                    currentState: snapshot.context.questionnaireState,
+                    currentSlots: snapshot.context.slots,
+                    userText: text,
+                    source: source
+                )
+                resultingEvents.append(.questionnaireProcessed(result))
             case .generateDestinationOptions:
                 let options = try await optionGenerationService.generateOptions(context: snapshot.context)
                 resultingEvents.append(.optionsGenerated(options))
@@ -1263,6 +1541,33 @@ final class VacationPlanningOrchestrator {
         }
 
         return (resultingEvents, messages)
+    }
+
+    private func buildQuestionPrompt(
+        fieldID: String?,
+        snapshot: VacationPlanningSnapshot
+    ) async -> QuestionPrompt {
+        let state = snapshot.context.questionnaireState
+        let nextFieldID = fieldID ?? state.missingHard.first ?? state.missingSoft.first
+        let target = nextFieldID.flatMap { questionnaireSchema.field(id: $0) }
+        do {
+            return try await questionGenerationService.generateQuestion(
+                context: QuestionnaireQuestionContext(
+                    schema: questionnaireSchema,
+                    state: state,
+                    latestUserMessage: snapshot.context.lastUserMessage
+                ),
+                targetField: target,
+                toneHints: ["neutral", "short"]
+            )
+        } catch {
+            return QuestionPrompt(
+                fieldID: target?.id,
+                text: target?.fallbackQuestion ?? "Уточните, пожалуйста, недостающие детали поездки.",
+                suggestions: [],
+                isFallback: true
+            )
+        }
     }
 
     private func questionText(for key: VacationQuestionKey) -> String {
@@ -1307,10 +1612,8 @@ private extension VacationPlanningEvent {
             return "запуск"
         case .userMessage:
             return "сообщениеПользователя"
-        case .slotsExtracted:
-            return "слотыИзвлечены"
-        case .slotsValidationFailed:
-            return "валидацияСлотовПровалена"
+        case .questionnaireProcessed:
+            return "анкетаОбработана"
         case .optionsGenerated:
             return "вариантыСгенерированы"
         case .itineraryGenerated:
@@ -1337,20 +1640,5 @@ private extension VacationPlanningError {
         case let .serviceFailure(message):
             return message
         }
-    }
-}
-
-private extension Array where Element == String {
-    func mergingUnique(with other: [String]) -> [String] {
-        var result: [String] = []
-        var seen = Set<String>()
-        for value in self + other {
-            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalized.isEmpty else { continue }
-            if seen.insert(normalized.lowercased()).inserted {
-                result.append(normalized)
-            }
-        }
-        return result
     }
 }
