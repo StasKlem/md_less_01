@@ -195,6 +195,14 @@ final class ChatViewModel {
             return
         }
 
+        if lastPlannerState == .destinationRequest {
+            appendSystemMessage(
+                stateListMessage(current: .validatingDestination),
+                tone: .stateTransition
+            )
+            lastPlannerState = .validatingDestination
+            plannerStepTitle = VacationPlanningState.validatingDestination.title
+        }
         dialogItems.append(DialogHistoryItemViewState(kind: .user, text: text, status: .sent))
         isSending = true
 
@@ -323,7 +331,6 @@ final class ChatViewModel {
         let ordered: [VacationPlanningState] = [
             .idle,
             .destinationRequest,
-            .awaitingDestination,
             .validatingDestination,
             .awaitingPlanApproval,
             .generateResult,
@@ -345,7 +352,7 @@ final class ChatViewModel {
     private func resumeHint(for snapshot: VacationPlanningSnapshot) -> String {
         let action: String
         switch snapshot.state {
-        case .destinationRequest, .awaitingDestination:
+        case .destinationRequest:
             action = "Укажите место назначения."
         case .validatingDestination:
             action = "Проверяется ответ по месту назначения."

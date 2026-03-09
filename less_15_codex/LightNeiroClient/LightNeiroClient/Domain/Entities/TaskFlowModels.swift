@@ -3,7 +3,6 @@ import Foundation
 enum VacationPlanningState: Equatable, Codable {
     case idle
     case destinationRequest
-    case awaitingDestination
     case validatingDestination
     case awaitingPlanApproval
     case generateResult
@@ -15,8 +14,6 @@ enum VacationPlanningState: Equatable, Codable {
             return "Ожидание"
         case .destinationRequest:
             return "Запрос места назначения"
-        case .awaitingDestination:
-            return "Ожидание уточнения места"
         case .validatingDestination:
             return "Проверка места назначения"
         case .awaitingPlanApproval:
@@ -62,7 +59,7 @@ enum VacationPlanningState: Equatable, Codable {
         case .destinationRequest:
             self = .destinationRequest
         case .awaitingDestination:
-            self = .awaitingDestination
+            self = .destinationRequest
         case .validatingDestination:
             self = .validatingDestination
         case .awaitingPlanApproval:
@@ -89,8 +86,6 @@ enum VacationPlanningState: Equatable, Codable {
             try container.encode(Kind.idle, forKey: .kind)
         case .destinationRequest:
             try container.encode(Kind.destinationRequest, forKey: .kind)
-        case .awaitingDestination:
-            try container.encode(Kind.awaitingDestination, forKey: .kind)
         case .validatingDestination:
             try container.encode(Kind.validatingDestination, forKey: .kind)
         case .awaitingPlanApproval:

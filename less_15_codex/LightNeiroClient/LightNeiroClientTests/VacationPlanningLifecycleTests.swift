@@ -56,6 +56,20 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         XCTAssertTrue(containsNotifyUserEffect(in: transition.effects))
     }
 
+    func testFirstUserMessageFromIdleRequestsDestinationBeforeValidation() {
+        let reducer = VacationPlannerReducer()
+        let snapshot = makeSnapshot(state: .idle, context: makeContext(destination: nil))
+
+        let transition = reducer.reduce(
+            snapshot: snapshot,
+            event: .userMessage(text: "Хочу в Италию", source: .chat)
+        )
+
+        XCTAssertEqual(transition.nextState, .destinationRequest)
+        XCTAssertTrue(containsAskDestinationQuestionEffect(in: transition.effects))
+        XCTAssertFalse(containsProcessUserAnswerEffect(in: transition.effects))
+    }
+
     func testValidationFailureReturnsToDestinationRequest() {
         let reducer = VacationPlannerReducer()
         let snapshot = makeSnapshot(
@@ -79,6 +93,34 @@ final class VacationPlanningLifecycleTests: XCTestCase {
 
         XCTAssertEqual(transition.nextState, .destinationRequest)
         XCTAssertNil(transition.nextContext.slots.destination)
+    }
+
+    func testInvariantViolationsAreNotCheckedOutsideValidatingDestination() {
+        let reducer = VacationPlannerReducer()
+        let snapshot = makeSnapshot(
+            state: .idle,
+            context: makeContext(destination: nil, travelerCount: 0)
+        )
+
+        let transition = reducer.reduce(snapshot: snapshot, event: .started)
+
+        XCTAssertEqual(transition.nextState, .destinationRequest)
+    }
+
+    func testInvariantViolationsAreCheckedOnValidatingDestination() {
+        let reducer = VacationPlannerReducer()
+        let snapshot = makeSnapshot(
+            state: .validatingDestination,
+            context: makeContext(destination: "Italy", travelerCount: 0)
+        )
+
+        let transition = reducer.reduce(snapshot: snapshot, event: .questionnaireProcessed(validDestinationResult))
+
+        guard case let .failed(reason) = transition.nextState else {
+            XCTFail("Expected failed state on invariant violation")
+            return
+        }
+        XCTAssertTrue(reason.contains("Количество путешественников"))
     }
 
     func testPauseResumeKeepsLifecycleAndAllowsContinuation() async throws {
@@ -106,6 +148,38 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         )
         XCTAssertEqual(approved.snapshot.state, .idle)
         XCTAssertNotNil(approved.snapshot.context.finalPlan)
+        XCTAssertTrue(approved.agentMessages.contains(where: { $0.contains("Финальный план отпуска:") }))
+    }
+
+    func testApprovalMessageContainsCollectedUserData() async throws {
+        let stateRepository = MockVacationPlanningStateRepository()
+        let planRepository = MockVacationPlanRepository()
+        let settingsRepository = MockSettingsRepository()
+
+        let validatingSnapshot = makeSnapshot(
+            state: .validatingDestination,
+            context: makeContext(destination: nil)
+        )
+        try await stateRepository.saveSnapshot(validatingSnapshot)
+
+        let orchestrator = makeOrchestrator(
+            stateRepository: stateRepository,
+            planRepository: planRepository,
+            settingsRepository: settingsRepository
+        )
+
+        let result = try await orchestrator.process(
+            sessionID: sessionID,
+            branchID: branchID,
+            initialEvent: .questionnaireProcessed(validDestinationResult)
+        )
+
+        XCTAssertEqual(result.snapshot.state, .awaitingPlanApproval)
+        let approvalMessage = result.agentMessages.last(where: { $0.contains("Подтвердите план:") })
+        XCTAssertNotNil(approvalMessage)
+        XCTAssertTrue(approvalMessage?.contains("destination: Italy") == true)
+        XCTAssertTrue(approvalMessage?.contains("budget: 1000.0 USD") == true)
+        XCTAssertTrue(approvalMessage?.contains("travelers: 2") == true)
     }
 
     func testFinalizeUseCaseRejectsWhenFinalPlanNotLocked() async throws {
@@ -212,6 +286,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
 
     private func makeContext(
         destination: String? = "Barcelona",
+        travelerCount: Int = 2,
         itinerary: VacationItinerary? = nil,
         itineraryBuiltAt: Date? = nil,
         budgetBreakdown: VacationBudgetBreakdown? = nil,
@@ -227,7 +302,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
                 destination: destination,
                 dateRange: VacationDateRange(start: Date(), end: Date().addingTimeInterval(86_400)),
                 budget: VacationBudgetInput(total: 1000, currency: "USD"),
-                travelerCount: 2,
+                travelerCount: travelerCount,
                 travelStyle: "city",
                 interests: ["food"],
                 constraints: []
@@ -255,6 +330,22 @@ final class VacationPlanningLifecycleTests: XCTestCase {
     private func containsNotifyUserEffect(in effects: [VacationEffect]) -> Bool {
         effects.contains { effect in
             if case .notifyUser = effect {
+                return true
+            }
+            return false
+        }
+    }
+
+    private func containsAskDestinationQuestionEffect(in effects: [VacationEffect]) -> Bool {
+        effects.contains { effect in
+            guard case let .askQuestion(fieldID, _) = effect else { return false }
+            return fieldID == VacationQuestionnaireSchemaAdapter.destinationFieldID
+        }
+    }
+
+    private func containsProcessUserAnswerEffect(in effects: [VacationEffect]) -> Bool {
+        effects.contains { effect in
+            if case .processUserAnswer = effect {
                 return true
             }
             return false

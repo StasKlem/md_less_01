@@ -1053,27 +1053,30 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         snapshot: VacationPlanningSnapshot,
         event: VacationPlanningEvent
     ) -> VacationPlanningTransitionResult {
-        let preViolations = VacationPlanningInvariantValidator.validate(
-            state: snapshot.state,
-            context: snapshot.context,
-            snapshotUpdatedAt: snapshot.updatedAt
-        )
-        if !preViolations.isEmpty {
-            return failedTransition(
+        let shouldValidateInvariants = snapshot.state == .validatingDestination
+        if shouldValidateInvariants {
+            let preViolations = VacationPlanningInvariantValidator.validate(
+                state: snapshot.state,
                 context: snapshot.context,
-                reason: "Нарушение инварианта: \(preViolations.map(\.message).joined(separator: ", "))"
+                snapshotUpdatedAt: snapshot.updatedAt
             )
+            if !preViolations.isEmpty {
+                return failedTransition(
+                    context: snapshot.context,
+                    reason: "Нарушение инварианта: \(preViolations.map(\.message).joined(separator: ", "))"
+                )
+            }
         }
 
         let transition: VacationPlanningTransitionResult
         switch (snapshot.state, event) {
         case (.idle, .started), (.failed, .started):
             transition = startTransition(snapshot: snapshot)
+        case (.idle, .userMessage):
+            transition = startTransition(snapshot: snapshot)
         case (_, let .errorOccurred(error)):
             transition = failedTransition(context: snapshot.context, reason: error.failureReason)
-        case (.idle, let .userMessage(text, source)),
-             (.destinationRequest, let .userMessage(text, source)),
-             (.awaitingDestination, let .userMessage(text, source)),
+        case (.destinationRequest, let .userMessage(text, source)),
              (.failed, let .userMessage(text, source)):
             transition = userMessageTransition(snapshot: snapshot, text: text, source: source)
         case (.validatingDestination, .questionnaireProcessed(let result)):
@@ -1105,16 +1108,18 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         let now = Date()
         var validatedContext = transition.nextContext
         validatedContext.updatedAt = now
-        let postViolations = VacationPlanningInvariantValidator.validate(
-            state: transition.nextState,
-            context: validatedContext,
-            snapshotUpdatedAt: now
-        )
-        if !postViolations.isEmpty {
-            return failedTransition(
+        if shouldValidateInvariants {
+            let postViolations = VacationPlanningInvariantValidator.validate(
+                state: transition.nextState,
                 context: validatedContext,
-                reason: "Нарушение инварианта: \(postViolations.map(\.message).joined(separator: ", "))"
+                snapshotUpdatedAt: now
             )
+            if !postViolations.isEmpty {
+                return failedTransition(
+                    context: validatedContext,
+                    reason: "Нарушение инварианта: \(postViolations.map(\.message).joined(separator: ", "))"
+                )
+            }
         }
 
         return VacationPlanningTransitionResult(
@@ -1298,7 +1303,7 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
     ) -> VacationPlanningTransitionResult {
         let guidance: VacationQuestionKey
         switch snapshot.state {
-        case .destinationRequest, .awaitingDestination, .validatingDestination:
+        case .destinationRequest, .validatingDestination:
             guidance = .missingDestination
         case .awaitingPlanApproval:
             guidance = .approval
@@ -1587,7 +1592,11 @@ final class VacationPlanningOrchestrator {
             case let .notifyUser(message):
                 messages.append(message)
             case let .askUser(questionKey):
-                messages.append(questionText(for: questionKey))
+                if questionKey == .approval {
+                    messages.append(approvalQuestionText(context: snapshot.context))
+                } else {
+                    messages.append(questionText(for: questionKey))
+                }
             case let .askQuestion(fieldID, warning):
                 let prompt = await buildQuestionPrompt(fieldID: fieldID, snapshot: snapshot, settings: settings)
                 if let warning, !warning.isEmpty {
@@ -1619,6 +1628,7 @@ final class VacationPlanningOrchestrator {
                 if let plan = snapshot.context.finalPlan {
                     try await planRepository.saveFinalPlan(plan)
                     messages.append("План отпуска готов и сохранен.")
+                    messages.append(finalPlanMessage(plan))
                 } else {
                     throw VacationPlanningError.serviceFailure("Невозможно опубликовать итоговый план без завершенного контекста.")
                 }
@@ -1678,6 +1688,70 @@ final class VacationPlanningOrchestrator {
         case .retryAfterError:
             return "Этот шаг недоступен в текущем состоянии. Следуйте допустимым переходам FSM."
         }
+    }
+
+    private func approvalQuestionText(context: VacationPlanningContext) -> String {
+        var lines: [String] = ["Проверьте собранные данные перед подтверждением плана:"]
+
+        if let destination = context.slots.destination?.trimmingCharacters(in: .whitespacesAndNewlines), !destination.isEmpty {
+            lines.append("- destination: \(destination)")
+        }
+        if let range = context.slots.dateRange {
+            lines.append("- dates: \(format(date: range.start)) — \(format(date: range.end))")
+        }
+        if let budget = context.slots.budget {
+            lines.append("- budget: \(budget.total) \(budget.currency)")
+        }
+
+        lines.append("- travelers: \(context.slots.travelerCount)")
+
+        if let travelStyle = context.slots.travelStyle?.trimmingCharacters(in: .whitespacesAndNewlines), !travelStyle.isEmpty {
+            lines.append("- travel_style: \(travelStyle)")
+        }
+        if !context.slots.interests.isEmpty {
+            lines.append("- interests: \(context.slots.interests.joined(separator: ", "))")
+        }
+        if !context.slots.constraints.isEmpty {
+            lines.append("- constraints: \(context.slots.constraints.joined(separator: ", "))")
+        }
+
+        lines.append("Подтвердите план: `approve` или запросите изменение `revise: ...`.")
+        return lines.joined(separator: "\n")
+    }
+
+    private func format(date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func finalPlanMessage(_ plan: VacationPlan) -> String {
+        var lines: [String] = ["Финальный план отпуска:"]
+
+        if let destination = plan.slots.destination?.trimmingCharacters(in: .whitespacesAndNewlines), !destination.isEmpty {
+            lines.append("- destination: \(destination)")
+        }
+        if let range = plan.slots.dateRange {
+            lines.append("- dates: \(format(date: range.start)) — \(format(date: range.end))")
+        }
+        if let selectedOption = plan.selectedOption {
+            lines.append("- option: \(selectedOption.title)")
+        }
+        lines.append("- budget total: \(plan.budget.total) \(plan.budget.currency)")
+
+        if !plan.itinerary.days.isEmpty {
+            lines.append("Маршрут:")
+            for day in plan.itinerary.days {
+                let activities = day.activities.joined(separator: ", ")
+                lines.append("  День \(day.dayIndex): \(day.title) (\(activities))")
+            }
+        }
+        if !plan.itinerary.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Заметки: \(plan.itinerary.notes)")
+        }
+
+        return lines.joined(separator: "\n")
     }
 }
 
