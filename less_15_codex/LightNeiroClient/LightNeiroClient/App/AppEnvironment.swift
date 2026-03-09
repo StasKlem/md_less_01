@@ -118,7 +118,8 @@ struct AppEnvironment {
 
         try? await sessionRepository.saveSession(rootSession)
         try? await branchRepository.saveBranch(rootBranch)
-        try? await settingsRepository.saveSettings(sessionID: sessionID, settings: .default)
+        let initialSettings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
+        try? await settingsRepository.saveSettings(sessionID: sessionID, settings: initialSettings)
 
         return AppEnvironment(
             session: rootSession,
