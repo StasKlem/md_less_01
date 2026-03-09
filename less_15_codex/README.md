@@ -1,117 +1,118 @@
 # LightNeiroClient
 
-macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом и встроенным отпускным планировщиком.
+macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом, memory layers и встроенным Vacation Planner.
 
-## Что делает приложение
-- отправляет сообщения в LLM;
-- хранит историю сообщений одной активной ветки;
-- собирает краткосрочную/рабочую/долговременную память для запроса;
-- позволяет настроить модель, temperature, window size и API-ключ;
-- показывает базовые метрики сессии (токены, количество запросов, latency);
-- поддерживает Vacation Planner (state-machine + сохранение снапшотов/финального плана);
-- собирает данные для планировщика в свободной форме через LLM-first extraction;
-- учитывает инварианты планировщика из окна настроек (`plannerInvariants`) при извлечении и формулировке вопросов;
-- при нарушении инвариантов (например, некорректные даты/бюджет) сообщает об ошибке и повторно запрашивает корректные данные.
+## Конечный автомат (FSM): этапы и переходы
+
+### Состояния (этапы)
+- `idle`: планировщик не выполняет активный шаг.
+- `destinationRequest`: запрос/уточнение направления поездки (`destination`).
+- `validatingDestination`: извлечение и валидация пользовательского ответа.
+- `awaitingPlanApproval`: ожидание подтверждения (`approve`) или правки (`revise: ...`).
+- `generateResult`: генерация опций, маршрута, бюджета и финального плана.
+- `failed(reason)`: ошибка перехода/инварианта/сервиса.
+
+### Разрешённые переходы
+1. `idle` + `started` -> `destinationRequest`
+2. `idle` + `userMessage` -> `destinationRequest`
+3. `destinationRequest` + `userMessage` -> `validatingDestination`
+4. `validatingDestination` + `questionnaireProcessed` (destination невалиден) -> `destinationRequest`
+5. `validatingDestination` + `questionnaireProcessed` (destination валиден) -> `awaitingPlanApproval`
+6. `awaitingPlanApproval` + `planApproved` -> `generateResult`
+7. `awaitingPlanApproval` + `revisionRequested` -> `destinationRequest`
+8. `generateResult` + `optionsGenerated` -> `generateResult`
+9. `generateResult` + `itineraryGenerated` -> `generateResult`
+10. `generateResult` + `budgetCalculated` -> `idle` (финальный план сформирован и зафиксирован)
+11. `failed(reason)` + `started` -> `destinationRequest`
+12. `failed(reason)` + `userMessage` -> `validatingDestination`
+13. Любое состояние + `errorOccurred` -> `failed(reason)`
+
+### Невозможные переходы (запрещены редьюсером)
+- Из `idle` запрещены: `planApproved`, `revisionRequested`, `questionnaireProcessed`, `optionsGenerated`, `itineraryGenerated`, `budgetCalculated`, `executionCompleted`, `validationPassed`, `validationFailed`, `finalizeRequested`.
+- Из `destinationRequest` запрещены все события, кроме `userMessage` и глобального `errorOccurred`.
+- Из `validatingDestination` запрещены все события, кроме `questionnaireProcessed` и глобального `errorOccurred`.
+- Из `awaitingPlanApproval` запрещены все события, кроме `planApproved`, `revisionRequested` и глобального `errorOccurred`.
+- Из `generateResult` запрещены все события, кроме `optionsGenerated`, `itineraryGenerated`, `budgetCalculated` и глобального `errorOccurred`.
+- Из `failed(reason)` запрещены все события, кроме `started`, `userMessage` и глобального `errorOccurred`.
+
+### Важно про неподдержанные события
+- События `executionCompleted`, `validationPassed`, `validationFailed`, `finalizeRequested` объявлены в модели, но в текущей версии FSM не имеют разрешённых переходов и всегда блокируются.
+
+## Возможности
+- чат с LLM;
+- настройка модели, `temperature`, `windowSize`, API-ключа и `plannerInvariants`;
+- краткосрочная, рабочая и долговременная память для контекста;
+- сохранение истории сообщений в активной ветке;
+- экран метрик сессии (токены, запросы, задержка);
+- Vacation Planner на базе конечного автомата (FSM) с сохранением snapshot и финального плана.
 
 ## Архитектура
-- `Presentation`: контроллеры и view-model экрана чата, настроек и метрик.
-- `Domain`: сущности, протоколы и use cases бизнес-логики, включая vacation state-machine и questionnaire pipeline.
-- `Data`: репозитории (in-memory/file/Keychain/network) и LLM adapters для extraction/question generation.
+- `Presentation`: AppKit контроллеры и `ViewModel`.
+- `Domain`: сущности, протоколы и use case'ы (бизнес-логика и FSM).
+- `Data`: реализации репозиториев, Keychain, file storage и LLM-клиенты.
 
-## Машина состояний Vacation Planner
+Зависимости направлены внутрь: outer layers зависят от доменных абстракций, а не наоборот.
 
-### Базовые состояния
-- `idle`: планировщик не активен.
-- `collectingRequirements`: первичный сбор обязательных данных.
-- `clarifyingMissingData`: уточнение отсутствующих или невалидных полей.
-- `generatingOptions`: генерация вариантов поездки.
-- `buildingItinerary`: построение маршрута.
-- `budgetReview`: расчет и проверка бюджета.
-- `awaitingPlanApproval`: ожидание утверждения плана (`approve`) или правок (`revise: ...`).
-- `approvedForExecution`: план утвержден, ожидается завершение реализации (`execute`).
-- `validatingResult`: этап валидации результата (`validate` / `validate: fail`), перед финалом.
-- `completed`: финальный план сформирован и сохранен только после `finalize`.
-- `failed(reason)`: критическая ошибка перехода/инварианта.
+## Быстрый старт
 
-### Как идет обработка шага
-1. `VacationPlanningOrchestrator` загружает текущий `snapshot`.
-2. Входное событие (`started`, `userMessage`, `planApproved`, `executionCompleted`, `validationPassed`, `finalizeRequested`, `revisionRequested`) передается в `VacationPlannerReducer`.
-3. Reducer возвращает `VacationPlanningTransitionResult`:
-- `nextState`
-- `nextContext`
-- список `effects`
-4. Orchestrator выполняет `effects` по очереди (`askQuestion`, `processUserAnswer`, `generateDestinationOptions`, `generateItinerary`, `calculateBudget`, `persistSnapshot`, `emitFinalPlan`).
-5. Эффекты могут порождать новые события; они добавляются в очередь и обрабатываются в том же цикле.
-6. Итоговый `snapshot` сохраняется в репозитории состояния.
+### Запуск из Xcode
+1. Откройте проект: `LightNeiroClient/LightNeiroClient.xcodeproj`.
+2. Выберите схему `LightNeiroClient`.
+3. Запустите приложение (`Run`).
 
-### Команды пользователя в режиме планировщика
-- `approve` -> утверждение плана, переход к `approvedForExecution`.
-- `execute` -> отметка завершения реализации, переход к `validatingResult`.
-- `validate` -> успешная валидация результата (после этого доступен `finalize`).
-- `validate: fail` -> валидация не пройдена, возврат к `approvedForExecution`.
-- `finalize` -> финальный переход к `completed` и сохранение итогового плана.
-- `revise: ...` -> запрос правки, возврат к перерасчету или повторному сбору требований.
-- любое другое сообщение -> `userMessage`, запускается извлечение данных и уточнение.
+### Сборка из терминала
+```bash
+xcodebuild -project LightNeiroClient/LightNeiroClient.xcodeproj -scheme LightNeiroClient -configuration Debug build
+```
 
-## Валидация ответов пользователя
+### Тесты
+```bash
+xcodebuild -project LightNeiroClient/LightNeiroClient.xcodeproj -scheme LightNeiroClient -destination 'platform=macOS' test
+```
 
-### Канал ввода
-- Чат и форма идут в один и тот же pipeline.
-- Для чата `source = .chat`.
-- Для формы `source = .form`, значения считаются высокодоверенными (`confidence = 1.0`).
+## Vacation Planner: актуальная FSM
 
-### Extraction и нормализация
-- `ProcessUserAnswerUseCase` вызывает `AnswerExtractionServiceProtocol`.
-- Текущая стратегия: `LLM-first` extraction в структурированный JSON по полям:
-- `destination`, `dates`, `budget`, `travel_style`, `interests`, `constraints`.
-- При невалидном JSON/типах/ошибке LLM:
-- система не падает;
-- возвращаются `warnings`;
-- пользователю задается уточняющий вопрос.
+### Состояния
+- `idle`: ожидание.
+- `destinationRequest`: запрос/уточнение destination.
+- `validatingDestination`: обработка и валидация ответа пользователя.
+- `awaitingPlanApproval`: ожидание команды `approve` или `revise: ...`.
+- `generateResult`: генерация опций, маршрута и бюджета.
+- `failed(reason)`: состояние ошибки.
 
-### Проверка confidence и ambiguous-ответов
-- У `ProcessUserAnswerUseCase` есть `confidenceThreshold` (сейчас `0.7`).
-- Если извлеченное поле имеет confidence ниже порога или помечено `ambiguous`, поле не записывается в `answers`.
-- Пользователь получает сообщение с причиной и уточняющий вопрос по проблемному полю.
+### Ключевые переходы
+1. `started` (или первое сообщение из `idle`) -> `destinationRequest`.
+2. Сообщение пользователя в `destinationRequest` -> `validatingDestination` + `processUserAnswer`.
+3. `questionnaireProcessed`:
+- destination невалиден -> `destinationRequest` + повторный вопрос;
+- destination валиден -> `awaitingPlanApproval`.
+4. `planApproved` -> `generateResult`.
+5. В `generateResult` оркестратор последовательно вызывает:
+- `generateDestinationOptions`;
+- `generateItinerary`;
+- `calculateBudget`.
+6. После `budgetCalculated` формируется `finalPlan`, план блокируется (`isFinalPlanLocked = true`), FSM возвращается в `idle`.
+7. `revisionRequested(comment)` из `awaitingPlanApproval` сбрасывает утверждение/результаты, очищает `destination` и возвращает в `destinationRequest`.
 
-### Полевая валидация
-- Перед записью значения проходят доменные валидаторы (`QuestionnaireValidationRule`):
-- `nonEmptyText`
-- `validDateRange`
-- `positiveMoneyAmount`
-- `positiveInteger`
-- `nonEmptyList`
-- Невалидные значения не применяются к `QuestionnaireState` и `VacationSlots`.
+### Команды пользователя
+- `approve`: подтвердить собранные данные и запустить генерацию финального результата.
+- `revise: <комментарий>`: откатиться к повторному выбору направления с учетом комментария.
+- любое другое сообщение: обработать как пользовательский ввод анкеты (`userMessage`).
 
-### Логика продолжения после валидации
-- Если есть незаполненные `hard`-поля -> состояние `clarifyingMissingData`, задается следующий вопрос.
-- Если `hard` заполнены, но есть `soft`-поля -> можно продолжать, но с предупреждением.
-- Если все поля валидны -> переход к генерации вариантов.
+## Валидация и инварианты
+- `ProcessUserAnswerUseCase` извлекает структурированные поля из свободного ввода (LLM-first), применяет валидаторы и confidence threshold.
+- При неуспешном извлечении/валидации пользователь получает уточняющий вопрос, FSM не падает.
+- `VacationPlanningInvariantValidator` проверяет доменные инварианты (даты, бюджет, количество путешественников, корректность переходов).
+- Для обратной совместимости старые сохраненные состояния автоматически маппятся в новую FSM при декодировании snapshot.
 
-## Проверка инвариантов
-
-### 1) Доменные инварианты state-machine (pre/post перехода)
-- На каждом редьюсе вызывается `VacationPlanningInvariantValidator.validate(...)`:
-- до расчета перехода (`pre`)
-- после расчета перехода (`post`)
-- Эти проверки защищают целостность модели состояний (например, порядок дат, положительный бюджет, корректность обязательных артефактов для завершения и т.д.).
-
-### 2) Инварианты пользовательского ввода во время сбора данных
-- После применения результата extraction в `questionnaireProcessedTransition` выполняется дополнительная проверка пользовательских инвариантов для `slots`.
-- Если нарушение найдено (например, `startDate > endDate` или `budget <= 0`):
-- состояние не переводится в `failed`;
-- пользователю отправляется понятное сообщение об ошибке;
-- задается повторный вопрос по проблемному полю;
-- flow остается в `clarifyingMissingData` до корректного ответа.
-
-### 3) Инварианты из окна настроек (`plannerInvariants`)
-- Пользовательские инварианты из Settings подгружаются из `SettingsRepository`.
-- Они передаются в LLM extraction и question generation как часть `systemPrompt`.
-- Это влияет на формулировку вопросов и интерпретацию свободного ввода LLM.
-- Критичные доменные ограничения при этом дополнительно контролируются локальными проверками в reducer/use case (без зависимости от LLM).
+## Структура проекта
+- `LightNeiroClient/LightNeiroClient/App`: сборка зависимостей и окружения.
+- `LightNeiroClient/LightNeiroClient/Presentation`: экраны чата, настроек, метрик.
+- `LightNeiroClient/LightNeiroClient/Domain`: модели, протоколы, use case'ы.
+- `LightNeiroClient/LightNeiroClient/Data`: network/storage/security/mocks.
+- `LightNeiroClient/LightNeiroClientTests`: unit-тесты, включая жизненный цикл Vacation Planner.
 
 ## Ограничения текущей версии
-- нет переключения веток и создания веток;
-- нет profile-системы для пользовательских префиксов;
-- extraction и question generation зависят от доступности LLM/API-ключа;
-- нет отдельного визуального экрана анкеты (форма отправляет данные в тот же pipeline, что и чат).
+- одна активная ветка диалога без UI для полноценного branch management;
+- генерация вопросов/извлечение полей зависят от доступности LLM и валидного API-ключа;
+- анкета и чат используют единый pipeline (отдельной формы сценария планировщика нет).
