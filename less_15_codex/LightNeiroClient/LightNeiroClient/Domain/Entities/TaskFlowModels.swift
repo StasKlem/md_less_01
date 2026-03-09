@@ -7,7 +7,9 @@ enum VacationPlanningState: Equatable, Codable {
     case generatingOptions
     case buildingItinerary
     case budgetReview
-    case awaitingApproval
+    case awaitingPlanApproval
+    case approvedForExecution
+    case validatingResult
     case completed
     case failed(reason: String)
 
@@ -25,8 +27,12 @@ enum VacationPlanningState: Equatable, Codable {
             return "Составление маршрута"
         case .budgetReview:
             return "Проверка бюджета"
-        case .awaitingApproval:
-            return "Ожидание подтверждения"
+        case .awaitingPlanApproval:
+            return "Ожидание утверждения плана"
+        case .approvedForExecution:
+            return "План утвержден, выполнение"
+        case .validatingResult:
+            return "Валидация результата"
         case .completed:
             return "Завершено"
         case let .failed(reason):
@@ -46,6 +52,10 @@ enum VacationPlanningState: Equatable, Codable {
         case generatingOptions
         case buildingItinerary
         case budgetReview
+        case awaitingPlanApproval
+        case approvedForExecution
+        case validatingResult
+        // Backward compatibility for persisted snapshots of schema v1.
         case awaitingApproval
         case completed
         case failed
@@ -67,8 +77,14 @@ enum VacationPlanningState: Equatable, Codable {
             self = .buildingItinerary
         case .budgetReview:
             self = .budgetReview
+        case .awaitingPlanApproval:
+            self = .awaitingPlanApproval
+        case .approvedForExecution:
+            self = .approvedForExecution
+        case .validatingResult:
+            self = .validatingResult
         case .awaitingApproval:
-            self = .awaitingApproval
+            self = .awaitingPlanApproval
         case .completed:
             self = .completed
         case .failed:
@@ -91,8 +107,12 @@ enum VacationPlanningState: Equatable, Codable {
             try container.encode(Kind.buildingItinerary, forKey: .kind)
         case .budgetReview:
             try container.encode(Kind.budgetReview, forKey: .kind)
-        case .awaitingApproval:
-            try container.encode(Kind.awaitingApproval, forKey: .kind)
+        case .awaitingPlanApproval:
+            try container.encode(Kind.awaitingPlanApproval, forKey: .kind)
+        case .approvedForExecution:
+            try container.encode(Kind.approvedForExecution, forKey: .kind)
+        case .validatingResult:
+            try container.encode(Kind.validatingResult, forKey: .kind)
         case .completed:
             try container.encode(Kind.completed, forKey: .kind)
         case let .failed(reason):
@@ -524,6 +544,9 @@ struct VacationPlanningContext: Codable, Equatable {
     var revisionCount: Int
     var itineraryBuiltAt: Date?
     var budgetReviewedAt: Date?
+    var planApprovedAt: Date?
+    var executionCompletedAt: Date?
+    var validationPassedAt: Date?
     var lastValidationErrors: [String]
     var lastUserMessage: String?
     var finalPlan: VacationPlan?
@@ -541,6 +564,9 @@ struct VacationPlanningContext: Codable, Equatable {
         revisionCount: Int,
         itineraryBuiltAt: Date?,
         budgetReviewedAt: Date?,
+        planApprovedAt: Date?,
+        executionCompletedAt: Date?,
+        validationPassedAt: Date?,
         lastValidationErrors: [String],
         lastUserMessage: String?,
         finalPlan: VacationPlan?,
@@ -557,6 +583,9 @@ struct VacationPlanningContext: Codable, Equatable {
         self.revisionCount = revisionCount
         self.itineraryBuiltAt = itineraryBuiltAt
         self.budgetReviewedAt = budgetReviewedAt
+        self.planApprovedAt = planApprovedAt
+        self.executionCompletedAt = executionCompletedAt
+        self.validationPassedAt = validationPassedAt
         self.lastValidationErrors = lastValidationErrors
         self.lastUserMessage = lastUserMessage
         self.finalPlan = finalPlan
@@ -575,6 +604,9 @@ struct VacationPlanningContext: Codable, Equatable {
         revisionCount: 0,
         itineraryBuiltAt: nil,
         budgetReviewedAt: nil,
+        planApprovedAt: nil,
+        executionCompletedAt: nil,
+        validationPassedAt: nil,
         lastValidationErrors: [],
         lastUserMessage: nil,
         finalPlan: nil,
@@ -593,6 +625,9 @@ struct VacationPlanningContext: Codable, Equatable {
         case revisionCount
         case itineraryBuiltAt
         case budgetReviewedAt
+        case planApprovedAt
+        case executionCompletedAt
+        case validationPassedAt
         case lastValidationErrors
         case lastUserMessage
         case finalPlan
@@ -612,6 +647,9 @@ struct VacationPlanningContext: Codable, Equatable {
         revisionCount = try container.decode(Int.self, forKey: .revisionCount)
         itineraryBuiltAt = try container.decodeIfPresent(Date.self, forKey: .itineraryBuiltAt)
         budgetReviewedAt = try container.decodeIfPresent(Date.self, forKey: .budgetReviewedAt)
+        planApprovedAt = try container.decodeIfPresent(Date.self, forKey: .planApprovedAt)
+        executionCompletedAt = try container.decodeIfPresent(Date.self, forKey: .executionCompletedAt)
+        validationPassedAt = try container.decodeIfPresent(Date.self, forKey: .validationPassedAt)
         lastValidationErrors = try container.decode([String].self, forKey: .lastValidationErrors)
         lastUserMessage = try container.decodeIfPresent(String.self, forKey: .lastUserMessage)
         finalPlan = try container.decodeIfPresent(VacationPlan.self, forKey: .finalPlan)
@@ -631,6 +669,9 @@ struct VacationPlanningContext: Codable, Equatable {
         try container.encode(revisionCount, forKey: .revisionCount)
         try container.encodeIfPresent(itineraryBuiltAt, forKey: .itineraryBuiltAt)
         try container.encodeIfPresent(budgetReviewedAt, forKey: .budgetReviewedAt)
+        try container.encodeIfPresent(planApprovedAt, forKey: .planApprovedAt)
+        try container.encodeIfPresent(executionCompletedAt, forKey: .executionCompletedAt)
+        try container.encodeIfPresent(validationPassedAt, forKey: .validationPassedAt)
         try container.encode(lastValidationErrors, forKey: .lastValidationErrors)
         try container.encodeIfPresent(lastUserMessage, forKey: .lastUserMessage)
         try container.encodeIfPresent(finalPlan, forKey: .finalPlan)
@@ -648,7 +689,7 @@ struct VacationPlanningSnapshot: Codable, Equatable {
     let context: VacationPlanningContext
     let updatedAt: Date
 
-    static let schemaVersionCurrent = 1
+    static let schemaVersionCurrent = 2
 }
 
 enum VacationPlanningEvent {
@@ -658,7 +699,11 @@ enum VacationPlanningEvent {
     case optionsGenerated([VacationOption])
     case itineraryGenerated(VacationItinerary)
     case budgetCalculated(VacationBudgetBreakdown)
-    case approved
+    case planApproved
+    case executionCompleted
+    case validationPassed
+    case validationFailed(reason: String)
+    case finalizeRequested
     case revisionRequested(comment: String)
     case errorOccurred(VacationPlanningError)
 }
@@ -669,10 +714,14 @@ enum VacationQuestionKey: String {
     case missingDates
     case missingBudget
     case approval
+    case executeApprovedPlan
+    case validateBeforeFinal
+    case finalizeReady
     case retryAfterError
 }
 
 enum VacationEffect {
+    case notifyUser(String)
     case askUser(questionKey: VacationQuestionKey)
     case askQuestion(fieldID: String?, warning: String?)
     case processUserAnswer(String, QuestionnaireAnswerSource)
@@ -706,7 +755,10 @@ enum VacationPlanningInvariant: String, CaseIterable, Equatable, Codable {
     case positiveTravelerCount
     case nonNegativeRevision
     case completedRequiresArtifacts
-    case awaitingApprovalRequiresCompletedSteps
+    case awaitingPlanApprovalRequiresCompletedSteps
+    case approvedForExecutionRequiresPlanApproval
+    case validatingResultRequiresExecution
+    case completedRequiresValidation
     case buildingRequiresMinimumInput
     case generatingRequiresMinimumInput
     case failedRequiresReason
@@ -767,11 +819,27 @@ enum VacationPlanningInvariantValidator {
                 )
             )
         }
-        if case .awaitingApproval = state, (context.itineraryBuiltAt == nil || context.budgetReviewedAt == nil) {
+        if case .awaitingPlanApproval = state, (context.itineraryBuiltAt == nil || context.budgetReviewedAt == nil) {
             violations.append(
                 InvariantViolation(
-                    invariant: .awaitingApprovalRequiresCompletedSteps,
-                    message: "Перед подтверждением должны быть готовы маршрут и проверка бюджета."
+                    invariant: .awaitingPlanApprovalRequiresCompletedSteps,
+                    message: "Перед утверждением плана должны быть готовы маршрут и проверка бюджета."
+                )
+            )
+        }
+        if case .approvedForExecution = state, context.planApprovedAt == nil {
+            violations.append(
+                InvariantViolation(
+                    invariant: .approvedForExecutionRequiresPlanApproval,
+                    message: "Выполнение возможно только после утвержденного плана."
+                )
+            )
+        }
+        if case .validatingResult = state, context.executionCompletedAt == nil {
+            violations.append(
+                InvariantViolation(
+                    invariant: .validatingResultRequiresExecution,
+                    message: "Валидация результата возможна только после выполнения."
                 )
             )
         }
@@ -804,6 +872,14 @@ enum VacationPlanningInvariantValidator {
                 InvariantViolation(
                     invariant: .finalPlanImmutableWhenCompleted,
                     message: "В завершенном состоянии итоговый план должен быть сохранен и заблокирован."
+                )
+            )
+        }
+        if case .completed = state, context.validationPassedAt == nil {
+            violations.append(
+                InvariantViolation(
+                    invariant: .completedRequiresValidation,
+                    message: "Завершение возможно только после успешной валидации."
                 )
             )
         }

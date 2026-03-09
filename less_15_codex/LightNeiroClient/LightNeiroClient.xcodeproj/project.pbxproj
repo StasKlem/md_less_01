@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		AE9A01322F52F81800ACC179 /* LightNeiroClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LightNeiroClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1A100012F60000100ABCDEF /* LightNeiroClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LightNeiroClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +17,22 @@
 			path = LightNeiroClient;
 			sourceTree = "<group>";
 		};
+		B1A100022F60000100ABCDEF /* LightNeiroClientTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LightNeiroClientTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AE9A012F2F52F81800ACC179 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B1A100032F60000100ABCDEF /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +46,7 @@
 			isa = PBXGroup;
 			children = (
 				AE9A01342F52F81800ACC179 /* LightNeiroClient */,
+				B1A100022F60000100ABCDEF /* LightNeiroClientTests */,
 				AE9A01332F52F81800ACC179 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +55,7 @@
 			isa = PBXGroup;
 			children = (
 				AE9A01322F52F81800ACC179 /* LightNeiroClient.app */,
+				B1A100012F60000100ABCDEF /* LightNeiroClientTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +85,29 @@
 			productReference = AE9A01322F52F81800ACC179 /* LightNeiroClient.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B1A100062F60000100ABCDEF /* LightNeiroClientTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1A1000B2F60000100ABCDEF /* Build configuration list for PBXNativeTarget "LightNeiroClientTests" */;
+			buildPhases = (
+				B1A100052F60000100ABCDEF /* Sources */,
+				B1A100032F60000100ABCDEF /* Frameworks */,
+				B1A100042F60000100ABCDEF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B1A100082F60000100ABCDEF /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B1A100022F60000100ABCDEF /* LightNeiroClientTests */,
+			);
+			name = LightNeiroClientTests;
+			packageProductDependencies = (
+			);
+			productName = LightNeiroClientTests;
+			productReference = B1A100012F60000100ABCDEF /* LightNeiroClientTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +120,10 @@
 				TargetAttributes = {
 					AE9A01312F52F81800ACC179 = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					B1A100062F60000100ABCDEF = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = AE9A01312F52F81800ACC179;
 					};
 				};
 			};
@@ -100,12 +142,20 @@
 			projectRoot = "";
 			targets = (
 				AE9A01312F52F81800ACC179 /* LightNeiroClient */,
+				B1A100062F60000100ABCDEF /* LightNeiroClientTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		AE9A01302F52F81800ACC179 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B1A100042F60000100ABCDEF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +172,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B1A100052F60000100ABCDEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		B1A100072F60000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AE9A012A2F52F81800ACC179 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AE9A01312F52F81800ACC179;
+			remoteInfo = LightNeiroClient;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		B1A100082F60000100ABCDEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AE9A01312F52F81800ACC179 /* LightNeiroClient */;
+			targetProxy = B1A100072F60000100ABCDEF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AE9A013E2F52F81900ACC179 /* Debug */ = {
@@ -311,6 +386,52 @@
 			};
 			name = Release;
 		};
+		B1A100092F60000100ABCDEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R48NAQ3X5H;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)/LightNeiroClient.app/Contents/MacOS/LightNeiroClient.debug.dylib",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../../../LightNeiroClient.app/Contents/MacOS",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = StasKlem.LightNeiroClientTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B1A1000A2F60000100ABCDEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R48NAQ3X5H;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)/LightNeiroClient.app/Contents/MacOS/LightNeiroClient.debug.dylib",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../../../LightNeiroClient.app/Contents/MacOS",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = StasKlem.LightNeiroClientTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -328,6 +449,15 @@
 			buildConfigurations = (
 				AE9A01412F52F81900ACC179 /* Debug */,
 				AE9A01422F52F81900ACC179 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B1A1000B2F60000100ABCDEF /* Build configuration list for PBXNativeTarget "LightNeiroClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1A100092F60000100ABCDEF /* Debug */,
+				B1A1000A2F60000100ABCDEF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

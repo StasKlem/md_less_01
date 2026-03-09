@@ -27,13 +27,15 @@ macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом и вст�
 - `generatingOptions`: генерация вариантов поездки.
 - `buildingItinerary`: построение маршрута.
 - `budgetReview`: расчет и проверка бюджета.
-- `awaitingApproval`: ожидание подтверждения (`approve`) или правок (`revise: ...`).
-- `completed`: финальный план сформирован и сохранен.
+- `awaitingPlanApproval`: ожидание утверждения плана (`approve`) или правок (`revise: ...`).
+- `approvedForExecution`: план утвержден, ожидается завершение реализации (`execute`).
+- `validatingResult`: этап валидации результата (`validate` / `validate: fail`), перед финалом.
+- `completed`: финальный план сформирован и сохранен только после `finalize`.
 - `failed(reason)`: критическая ошибка перехода/инварианта.
 
 ### Как идет обработка шага
 1. `VacationPlanningOrchestrator` загружает текущий `snapshot`.
-2. Входное событие (`started`, `userMessage`, `approved`, `revisionRequested`) передается в `VacationPlannerReducer`.
+2. Входное событие (`started`, `userMessage`, `planApproved`, `executionCompleted`, `validationPassed`, `finalizeRequested`, `revisionRequested`) передается в `VacationPlannerReducer`.
 3. Reducer возвращает `VacationPlanningTransitionResult`:
 - `nextState`
 - `nextContext`
@@ -43,7 +45,11 @@ macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом и вст�
 6. Итоговый `snapshot` сохраняется в репозитории состояния.
 
 ### Команды пользователя в режиме планировщика
-- `approve` -> событие подтверждения, переход к `completed`.
+- `approve` -> утверждение плана, переход к `approvedForExecution`.
+- `execute` -> отметка завершения реализации, переход к `validatingResult`.
+- `validate` -> успешная валидация результата (после этого доступен `finalize`).
+- `validate: fail` -> валидация не пройдена, возврат к `approvedForExecution`.
+- `finalize` -> финальный переход к `completed` и сохранение итогового плана.
 - `revise: ...` -> запрос правки, возврат к перерасчету или повторному сбору требований.
 - любое другое сообщение -> `userMessage`, запускается извлечение данных и уточнение.
 

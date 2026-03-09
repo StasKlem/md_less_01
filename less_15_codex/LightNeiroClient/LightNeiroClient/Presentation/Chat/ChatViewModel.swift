@@ -267,6 +267,7 @@ final class ChatViewModel {
             questionnaireProgressText = progressText(for: snapshot.context.questionnaireState)
             if snapshot.state != .idle {
                 chatMode = .vacationPlanner
+                appendSystemMessage(resumeHint(for: snapshot))
             }
         } catch {
             appendSystemMessage("Не удалось загрузить состояние планировщика: \(error.localizedDescription)")
@@ -316,6 +317,27 @@ final class ChatViewModel {
             return "Анкета: hard complete, soft missing: \(state.missingSoft.joined(separator: ", "))."
         }
         return "Анкета: hard missing: \(state.missingHard.joined(separator: ", "))."
+    }
+
+    private func resumeHint(for snapshot: VacationPlanningSnapshot) -> String {
+        let action: String
+        switch snapshot.state {
+        case .awaitingPlanApproval:
+            action = "Ожидается команда `approve` или `revise: ...`."
+        case .approvedForExecution:
+            action = "После выполнения отправьте `execute`."
+        case .validatingResult:
+            action = snapshot.context.validationPassedAt == nil
+                ? "После проверки отправьте `validate` (или `validate: fail`)."
+                : "Валидация успешна. Отправьте `finalize`."
+        case .completed:
+            action = "Задача завершена. Для изменений отправьте `revise: ...`."
+        case .failed:
+            action = "Отправьте `revise: ...`, чтобы продолжить."
+        default:
+            action = "Продолжайте отвечать на уточняющие вопросы."
+        }
+        return "Возобновлен планировщик: \(snapshot.state.title). \(action)"
     }
 }
 

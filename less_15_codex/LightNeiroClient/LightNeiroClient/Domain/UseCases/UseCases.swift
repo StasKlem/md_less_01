@@ -1070,6 +1070,9 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         case (.idle, .started), (.failed, .started):
             var context = snapshot.context
             context.lastValidationErrors = []
+            context.planApprovedAt = nil
+            context.executionCompletedAt = nil
+            context.validationPassedAt = nil
             context.questionnaireState = refreshQuestionnaireState(context.questionnaireState, slots: context.slots)
             transition = VacationPlanningTransitionResult(
                 nextState: .collectingRequirements,
@@ -1078,7 +1081,13 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
             )
         case (_, let .errorOccurred(error)):
             transition = failedTransition(context: snapshot.context, reason: error.failureReason)
-        case (_, let .userMessage(text, source)):
+        case (.idle, let .userMessage(text, source)),
+             (.collectingRequirements, let .userMessage(text, source)),
+             (.clarifyingMissingData, let .userMessage(text, source)),
+             (.generatingOptions, let .userMessage(text, source)),
+             (.buildingItinerary, let .userMessage(text, source)),
+             (.budgetReview, let .userMessage(text, source)),
+             (.failed, let .userMessage(text, source)):
             transition = userMessageTransition(snapshot: snapshot, text: text, source: source)
         case (.collectingRequirements, .questionnaireProcessed(let result)),
              (.clarifyingMissingData, .questionnaireProcessed(let result)):
@@ -1099,20 +1108,28 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
             context.budgetBreakdown = budget
             context.budgetReviewedAt = Date()
             transition = VacationPlanningTransitionResult(
-                nextState: .awaitingApproval,
+                nextState: .awaitingPlanApproval,
                 nextContext: context,
                 effects: [.askUser(questionKey: .approval), .persistSnapshot]
             )
-        case (.awaitingApproval, .approved):
-            transition = approveTransition(snapshot: snapshot)
-        case (.awaitingApproval, .revisionRequested(let comment)), (.completed, .revisionRequested(let comment)):
+        case (.awaitingPlanApproval, .planApproved):
+            transition = planApprovalTransition(snapshot: snapshot)
+        case (.approvedForExecution, .executionCompleted):
+            transition = executionCompletedTransition(snapshot: snapshot)
+        case (.validatingResult, .validationPassed):
+            transition = validationPassedTransition(snapshot: snapshot)
+        case (.validatingResult, .validationFailed(let reason)):
+            transition = validationFailedTransition(snapshot: snapshot, reason: reason)
+        case (.validatingResult, .finalizeRequested):
+            transition = finalizeTransition(snapshot: snapshot)
+        case (.awaitingPlanApproval, .revisionRequested(let comment)), (.completed, .revisionRequested(let comment)):
             transition = revisionTransition(context: snapshot.context, comment: comment)
         case (.failed, .revisionRequested(let comment)):
             transition = revisionTransition(context: snapshot.context, comment: comment)
         default:
-            transition = failedTransition(
-                context: snapshot.context,
-                reason: "Недопустимый переход из состояния «\(snapshot.state.title)» на событие «\(event.debugName)»"
+            transition = blockedTransition(
+                snapshot: snapshot,
+                reason: "Переход запрещен: из состояния «\(snapshot.state.title)» нельзя выполнить «\(event.debugName)»."
             )
         }
 
@@ -1147,9 +1164,9 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         context.lastUserMessage = text
 
         if case .completed = snapshot.state {
-            return failedTransition(
-                context: context,
-                reason: "Завершенный план неизменяем. Отправьте запрос на правку, чтобы продолжить."
+            return blockedTransition(
+                snapshot: snapshot,
+                reason: "Завершенный план неизменяем. Отправьте `revise: ...`, чтобы продолжить."
             )
         }
 
@@ -1238,18 +1255,98 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         )
     }
 
-    private func approveTransition(snapshot: VacationPlanningSnapshot) -> VacationPlanningTransitionResult {
+    private func planApprovalTransition(snapshot: VacationPlanningSnapshot) -> VacationPlanningTransitionResult {
         var context = snapshot.context
+        guard
+            context.itinerary != nil,
+            context.budgetBreakdown != nil
+        else {
+            return blockedTransition(
+                snapshot: snapshot,
+                reason: "Нельзя утвердить план без маршрута и бюджета."
+            )
+        }
+        context.planApprovedAt = Date()
+        context.executionCompletedAt = nil
+        context.validationPassedAt = nil
+        context.finalPlan = nil
+        context.isFinalPlanLocked = false
+        return VacationPlanningTransitionResult(
+            nextState: .approvedForExecution,
+            nextContext: context,
+            effects: [.askUser(questionKey: .executeApprovedPlan), .persistSnapshot]
+        )
+    }
+
+    private func executionCompletedTransition(snapshot: VacationPlanningSnapshot) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        guard context.planApprovedAt != nil else {
+            return blockedTransition(
+                snapshot: snapshot,
+                reason: "Нельзя завершить выполнение без утвержденного плана."
+            )
+        }
+        context.executionCompletedAt = Date()
+        context.validationPassedAt = nil
+        return VacationPlanningTransitionResult(
+            nextState: .validatingResult,
+            nextContext: context,
+            effects: [.askUser(questionKey: .validateBeforeFinal), .persistSnapshot]
+        )
+    }
+
+    private func validationPassedTransition(snapshot: VacationPlanningSnapshot) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        guard context.executionCompletedAt != nil else {
+            return blockedTransition(
+                snapshot: snapshot,
+                reason: "Нельзя подтверждать валидацию до завершения выполнения."
+            )
+        }
+        context.validationPassedAt = Date()
+        return VacationPlanningTransitionResult(
+            nextState: .validatingResult,
+            nextContext: context,
+            effects: [.askUser(questionKey: .finalizeReady), .persistSnapshot]
+        )
+    }
+
+    private func validationFailedTransition(
+        snapshot: VacationPlanningSnapshot,
+        reason: String
+    ) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        context.validationPassedAt = nil
+        let message = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !message.isEmpty {
+            context.lastValidationErrors = context.lastValidationErrors.mergingUnique(with: [message])
+        }
+        return VacationPlanningTransitionResult(
+            nextState: .approvedForExecution,
+            nextContext: context,
+            effects: [.askUser(questionKey: .executeApprovedPlan), .persistSnapshot]
+        )
+    }
+
+    private func finalizeTransition(snapshot: VacationPlanningSnapshot) -> VacationPlanningTransitionResult {
+        var context = snapshot.context
+        guard context.validationPassedAt != nil else {
+            return blockedTransition(
+                snapshot: snapshot,
+                reason: "Нельзя финализировать без успешной валидации. Сначала выполните `validate`."
+            )
+        }
         guard
             let itinerary = context.itinerary,
             let budget = context.budgetBreakdown
         else {
             return failedTransition(
                 context: context,
-                reason: "Нельзя подтвердить план без маршрута и бюджета."
+                reason: "Нельзя финализировать план без маршрута и бюджета."
             )
         }
-        let plan = VacationPlan(
+
+        context.finalPlan = VacationPlan(
             sessionID: snapshot.sessionID,
             branchID: snapshot.branchID,
             slots: context.slots,
@@ -1258,7 +1355,6 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
             budget: budget,
             createdAt: Date()
         )
-        context.finalPlan = plan
         context.isFinalPlanLocked = true
         return VacationPlanningTransitionResult(
             nextState: .completed,
@@ -1275,6 +1371,9 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
         next.revisionCount += 1
         next.isFinalPlanLocked = false
         next.finalPlan = nil
+        next.planApprovedAt = nil
+        next.executionCompletedAt = nil
+        next.validationPassedAt = nil
         if !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             next.constraintsAppend(comment)
         }
@@ -1300,6 +1399,28 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
             nextState: .failed(reason: reason),
             nextContext: context,
             effects: [.askUser(questionKey: .retryAfterError), .persistSnapshot]
+        )
+    }
+
+    private func blockedTransition(
+        snapshot: VacationPlanningSnapshot,
+        reason: String
+    ) -> VacationPlanningTransitionResult {
+        let guidance: VacationQuestionKey
+        switch snapshot.state {
+        case .awaitingPlanApproval:
+            guidance = .approval
+        case .approvedForExecution:
+            guidance = .executeApprovedPlan
+        case .validatingResult:
+            guidance = (snapshot.context.validationPassedAt == nil) ? .validateBeforeFinal : .finalizeReady
+        default:
+            guidance = .retryAfterError
+        }
+        return VacationPlanningTransitionResult(
+            nextState: snapshot.state,
+            nextContext: snapshot.context,
+            effects: [.notifyUser(reason), .askUser(questionKey: guidance), .persistSnapshot]
         )
     }
 
@@ -1369,7 +1490,26 @@ final class HandleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCa
     ) async throws -> VacationPlanningTurnResult {
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.lowercased() == "approve" {
-            return try await orchestrator.process(sessionID: sessionID, branchID: branchID, initialEvent: .approved)
+            return try await orchestrator.process(sessionID: sessionID, branchID: branchID, initialEvent: .planApproved)
+        }
+        if trimmed.lowercased() == "execute" {
+            return try await orchestrator.process(sessionID: sessionID, branchID: branchID, initialEvent: .executionCompleted)
+        }
+        if trimmed.lowercased() == "validate" {
+            return try await orchestrator.process(sessionID: sessionID, branchID: branchID, initialEvent: .validationPassed)
+        }
+        if trimmed.lowercased().hasPrefix("validate:") {
+            let suffix = String(trimmed.dropFirst("validate:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if suffix.lowercased() == "fail" {
+                return try await orchestrator.process(
+                    sessionID: sessionID,
+                    branchID: branchID,
+                    initialEvent: .validationFailed(reason: "Пользователь указал, что валидация не пройдена.")
+                )
+            }
+        }
+        if trimmed.lowercased() == "finalize" {
+            return try await orchestrator.process(sessionID: sessionID, branchID: branchID, initialEvent: .finalizeRequested)
         }
         if trimmed.lowercased().hasPrefix("revise:") {
             let comment = String(trimmed.dropFirst("revise:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1428,8 +1568,10 @@ final class FinalizeVacationPlanUseCase: FinalizeVacationPlanUseCaseProtocol {
         guard let snapshot = try await stateRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID) else {
             throw VacationPlanningError.serviceFailure("Снимок планирования отсутствует.")
         }
-        guard case .completed = snapshot.state, let plan = snapshot.context.finalPlan else {
-            throw VacationPlanningError.invalidTransition("Нельзя финализировать план до завершения.")
+        guard case .completed = snapshot.state,
+              snapshot.context.validationPassedAt != nil,
+              let plan = snapshot.context.finalPlan else {
+            throw VacationPlanningError.invalidTransition("Нельзя финализировать план до успешной валидации и завершения.")
         }
         try await planRepository.saveFinalPlan(plan)
         return plan
@@ -1541,6 +1683,8 @@ final class VacationPlanningOrchestrator {
 
         for effect in effects {
             switch effect {
+            case let .notifyUser(message):
+                messages.append(message)
             case let .askUser(questionKey):
                 messages.append(questionText(for: questionKey))
             case let .askQuestion(fieldID, warning):
@@ -1623,9 +1767,15 @@ final class VacationPlanningOrchestrator {
         case .missingBudget:
             return "Укажите бюджет поездки и валюту."
         case .approval:
-            return "План готов. Напишите `approve` для подтверждения или `revise: ...` для правок."
+            return "План готов. Напишите `approve` для утверждения плана или `revise: ...` для правок."
+        case .executeApprovedPlan:
+            return "План утвержден. Когда реализация завершена, напишите `execute`."
+        case .validateBeforeFinal:
+            return "Реализация завершена. Проведите проверку и напишите `validate` (или `validate: fail`)."
+        case .finalizeReady:
+            return "Валидация успешна. Напишите `finalize` для финального завершения."
         case .retryAfterError:
-            return "Планировщик столкнулся с ошибкой инварианта/перехода. Напишите `revise: ...`, чтобы продолжить."
+            return "Планировщик не может выполнить этот шаг в текущем состоянии. Выполните следующий допустимый шаг или отправьте `revise: ...`."
         }
     }
 }
@@ -1662,8 +1812,16 @@ private extension VacationPlanningEvent {
             return "маршрутСгенерирован"
         case .budgetCalculated:
             return "бюджетРассчитан"
-        case .approved:
-            return "подтверждено"
+        case .planApproved:
+            return "планУтвержден"
+        case .executionCompleted:
+            return "реализацияЗавершена"
+        case .validationPassed:
+            return "валидацияУспешна"
+        case .validationFailed:
+            return "валидацияПровалена"
+        case .finalizeRequested:
+            return "финализацияЗапрошена"
         case .revisionRequested:
             return "запрошенаПравка"
         case .errorOccurred:
