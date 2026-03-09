@@ -222,7 +222,7 @@ final class ChatViewModel {
         questionnaireProgressText = progressText(for: result.snapshot.context.questionnaireState)
         if lastPlannerState != result.snapshot.state {
             appendSystemMessage(
-                "Состояние планировщика изменилось: \(result.snapshot.state.title)",
+                stateListMessage(current: result.snapshot.state),
                 tone: .stateTransition
             )
         }
@@ -319,23 +319,44 @@ final class ChatViewModel {
         return "Анкета: hard missing: \(state.missingHard.joined(separator: ", "))."
     }
 
+    private func stateListMessage(current: VacationPlanningState) -> String {
+        let ordered: [VacationPlanningState] = [
+            .idle,
+            .destinationRequest,
+            .awaitingDestination,
+            .validatingDestination,
+            .awaitingPlanApproval,
+            .generateResult,
+        ]
+
+        var lines: [String] = ["Состояния агента (текущее отмечено [x]):"]
+        for state in ordered {
+            let marker = (state == current) ? "[x]" : "[ ]"
+            lines.append("\(marker) \(state.title)")
+        }
+
+        if case let .failed(reason) = current {
+            lines.append("[x] Ошибка: \(reason)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     private func resumeHint(for snapshot: VacationPlanningSnapshot) -> String {
         let action: String
         switch snapshot.state {
+        case .destinationRequest, .awaitingDestination:
+            action = "Укажите место назначения."
+        case .validatingDestination:
+            action = "Проверяется ответ по месту назначения."
         case .awaitingPlanApproval:
             action = "Ожидается команда `approve` или `revise: ...`."
-        case .approvedForExecution:
-            action = "После выполнения отправьте `execute`."
-        case .validatingResult:
-            action = snapshot.context.validationPassedAt == nil
-                ? "После проверки отправьте `validate` (или `validate: fail`)."
-                : "Валидация успешна. Отправьте `finalize`."
-        case .completed:
-            action = "Задача завершена. Для изменений отправьте `revise: ...`."
+        case .generateResult:
+            action = "Генерируется итоговый план отдыха."
         case .failed:
             action = "Отправьте `revise: ...`, чтобы продолжить."
         default:
-            action = "Продолжайте отвечать на уточняющие вопросы."
+            action = "Агент не активен."
         }
         return "Возобновлен планировщик: \(snapshot.state.title). \(action)"
     }

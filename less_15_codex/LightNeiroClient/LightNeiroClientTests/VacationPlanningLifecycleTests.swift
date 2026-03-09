@@ -5,91 +5,80 @@ final class VacationPlanningLifecycleTests: XCTestCase {
     private let sessionID = UUID()
     private let branchID = UUID()
 
-    func testAllowedLifecycleTransitionsAreStrictlySequential() {
+    func testAllowedLifecycleTransitionsFollowDestinationFSM() {
         let reducer = VacationPlannerReducer()
+        let idle = makeSnapshot(state: .idle, context: makeContext(destination: nil))
 
-        let budget = VacationBudgetBreakdown(
-            transport: 300,
-            accommodation: 300,
-            food: 200,
-            activities: 150,
-            buffer: 50,
-            total: 1000,
-            currency: "USD"
+        let requested = reducer.reduce(snapshot: idle, event: .started)
+        XCTAssertEqual(requested.nextState, .destinationRequest)
+
+        let requestingSnapshot = makeSnapshot(state: requested.nextState, context: requested.nextContext)
+        let validating = reducer.reduce(
+            snapshot: requestingSnapshot,
+            event: .userMessage(text: "Хочу в Италию", source: .chat)
         )
+        XCTAssertEqual(validating.nextState, .validatingDestination)
 
-        let initial = makeSnapshot(
-            state: .budgetReview,
-            context: makeContext(
-                itinerary: sampleItinerary,
-                itineraryBuiltAt: Date(),
-                budgetBreakdown: nil,
-                budgetReviewedAt: nil
-            )
+        let validatingSnapshot = makeSnapshot(state: validating.nextState, context: validating.nextContext)
+        let validated = reducer.reduce(
+            snapshot: validatingSnapshot,
+            event: .questionnaireProcessed(validDestinationResult)
         )
+        XCTAssertEqual(validated.nextState, .awaitingPlanApproval)
 
-        let awaiting = reducer.reduce(snapshot: initial, event: .budgetCalculated(budget))
-        XCTAssertEqual(awaiting.nextState, .awaitingPlanApproval)
+        let approvalSnapshot = makeSnapshot(state: validated.nextState, context: validated.nextContext)
+        let generating = reducer.reduce(snapshot: approvalSnapshot, event: .planApproved)
+        XCTAssertEqual(generating.nextState, .generateResult)
+        XCTAssertNotNil(generating.nextContext.planApprovedAt)
 
-        let approvedSnapshot = makeSnapshot(state: awaiting.nextState, context: awaiting.nextContext)
-        let approved = reducer.reduce(snapshot: approvedSnapshot, event: .planApproved)
-        XCTAssertEqual(approved.nextState, .approvedForExecution)
-        XCTAssertNotNil(approved.nextContext.planApprovedAt)
+        let optionsSnapshot = makeSnapshot(state: generating.nextState, context: generating.nextContext)
+        let optionsProcessed = reducer.reduce(snapshot: optionsSnapshot, event: .optionsGenerated([sampleOption]))
+        XCTAssertEqual(optionsProcessed.nextState, .generateResult)
 
-        let executedSnapshot = makeSnapshot(state: approved.nextState, context: approved.nextContext)
-        let executed = reducer.reduce(snapshot: executedSnapshot, event: .executionCompleted)
-        XCTAssertEqual(executed.nextState, .validatingResult)
-        XCTAssertNotNil(executed.nextContext.executionCompletedAt)
+        let itinerarySnapshot = makeSnapshot(state: optionsProcessed.nextState, context: optionsProcessed.nextContext)
+        let itineraryProcessed = reducer.reduce(snapshot: itinerarySnapshot, event: .itineraryGenerated(sampleItinerary))
+        XCTAssertEqual(itineraryProcessed.nextState, .generateResult)
 
-        let validatingSnapshot = makeSnapshot(state: executed.nextState, context: executed.nextContext)
-        let validated = reducer.reduce(snapshot: validatingSnapshot, event: .validationPassed)
-        XCTAssertEqual(validated.nextState, .validatingResult)
-        XCTAssertNotNil(validated.nextContext.validationPassedAt)
-
-        let finalizingSnapshot = makeSnapshot(state: validated.nextState, context: validated.nextContext)
-        let finalized = reducer.reduce(snapshot: finalizingSnapshot, event: .finalizeRequested)
-        XCTAssertEqual(finalized.nextState, .completed)
+        let budgetSnapshot = makeSnapshot(state: itineraryProcessed.nextState, context: itineraryProcessed.nextContext)
+        let finalized = reducer.reduce(snapshot: budgetSnapshot, event: .budgetCalculated(sampleBudget))
+        XCTAssertEqual(finalized.nextState, .idle)
         XCTAssertNotNil(finalized.nextContext.finalPlan)
         XCTAssertTrue(finalized.nextContext.isFinalPlanLocked)
     }
 
-    func testExecutionBeforePlanApprovalIsBlockedAndStateDoesNotChange() {
+    func testInvalidTransitionFromIdleIsBlockedAndStateDoesNotChange() {
         let reducer = VacationPlannerReducer()
-        let snapshot = makeSnapshot(
-            state: .awaitingPlanApproval,
-            context: makeContext(
-                itinerary: sampleItinerary,
-                itineraryBuiltAt: Date(),
-                budgetBreakdown: sampleBudget,
-                budgetReviewedAt: Date()
-            )
-        )
+        let snapshot = makeSnapshot(state: .idle, context: makeContext(destination: nil))
 
-        let transition = reducer.reduce(snapshot: snapshot, event: .executionCompleted)
+        let transition = reducer.reduce(snapshot: snapshot, event: .planApproved)
 
-        XCTAssertEqual(transition.nextState, .awaitingPlanApproval)
+        XCTAssertEqual(transition.nextState, .idle)
         XCTAssertTrue(containsNotifyUserEffect(in: transition.effects))
     }
 
-    func testFinalizeBeforeValidationIsBlockedAndStateDoesNotChange() {
+    func testValidationFailureReturnsToDestinationRequest() {
         let reducer = VacationPlannerReducer()
         let snapshot = makeSnapshot(
-            state: .validatingResult,
-            context: makeContext(
-                itinerary: sampleItinerary,
-                itineraryBuiltAt: Date(),
-                budgetBreakdown: sampleBudget,
-                budgetReviewedAt: Date(),
-                planApprovedAt: Date(),
-                executionCompletedAt: Date(),
-                validationPassedAt: nil
-            )
+            state: .validatingDestination,
+            context: makeContext(destination: nil)
         )
 
-        let transition = reducer.reduce(snapshot: snapshot, event: .finalizeRequested)
+        let transition = reducer.reduce(snapshot: snapshot, event: .questionnaireProcessed(invalidDestinationResult))
 
-        XCTAssertEqual(transition.nextState, .validatingResult)
-        XCTAssertTrue(containsNotifyUserEffect(in: transition.effects))
+        XCTAssertEqual(transition.nextState, .destinationRequest)
+    }
+
+    func testRevisionFromAwaitingApprovalReturnsToDestinationRequest() {
+        let reducer = VacationPlannerReducer()
+        let snapshot = makeSnapshot(
+            state: .awaitingPlanApproval,
+            context: makeContext(destination: "Italy")
+        )
+
+        let transition = reducer.reduce(snapshot: snapshot, event: .revisionRequested(comment: "Хочу другое направление"))
+
+        XCTAssertEqual(transition.nextState, .destinationRequest)
+        XCTAssertNil(transition.nextContext.slots.destination)
     }
 
     func testPauseResumeKeepsLifecycleAndAllowsContinuation() async throws {
@@ -100,10 +89,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         let seededSnapshot = makeSnapshot(
             state: .awaitingPlanApproval,
             context: makeContext(
-                itinerary: sampleItinerary,
-                itineraryBuiltAt: Date(),
-                budgetBreakdown: sampleBudget,
-                budgetReviewedAt: Date()
+                destination: "Barcelona"
             )
         )
         try await stateRepository.saveSnapshot(seededSnapshot)
@@ -118,36 +104,25 @@ final class VacationPlanningLifecycleTests: XCTestCase {
             branchID: branchID,
             initialEvent: .planApproved
         )
-        XCTAssertEqual(approved.snapshot.state, .approvedForExecution)
-
-        let resumedOrchestrator = makeOrchestrator(
-            stateRepository: stateRepository,
-            planRepository: planRepository,
-            settingsRepository: settingsRepository
-        )
-        let resumed = try await resumedOrchestrator.process(
-            sessionID: sessionID,
-            branchID: branchID,
-            initialEvent: .executionCompleted
-        )
-        XCTAssertEqual(resumed.snapshot.state, .validatingResult)
+        XCTAssertEqual(approved.snapshot.state, .idle)
+        XCTAssertNotNil(approved.snapshot.context.finalPlan)
     }
 
-    func testFinalizeUseCaseRejectsWhenValidationNotPassed() async throws {
+    func testFinalizeUseCaseRejectsWhenFinalPlanNotLocked() async throws {
         let stateRepository = MockVacationPlanningStateRepository()
         let planRepository = MockVacationPlanRepository()
         let useCase = FinalizeVacationPlanUseCase(stateRepository: stateRepository, planRepository: planRepository)
 
         let snapshot = makeSnapshot(
-            state: .validatingResult,
+            state: .generateResult,
             context: makeContext(
+                destination: "Barcelona",
                 itinerary: sampleItinerary,
                 itineraryBuiltAt: Date(),
                 budgetBreakdown: sampleBudget,
                 budgetReviewedAt: Date(),
                 planApprovedAt: Date(),
-                executionCompletedAt: Date(),
-                validationPassedAt: nil
+                isFinalPlanLocked: false
             )
         )
         try await stateRepository.saveSnapshot(snapshot)
@@ -163,7 +138,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         }
     }
 
-    func testFinalizeUseCaseSucceedsAfterCompletedWithValidation() async throws {
+    func testFinalizeUseCaseSucceedsAfterGenerateResultCompleted() async throws {
         let stateRepository = MockVacationPlanningStateRepository()
         let planRepository = MockVacationPlanRepository()
         let useCase = FinalizeVacationPlanUseCase(stateRepository: stateRepository, planRepository: planRepository)
@@ -184,15 +159,14 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         )
 
         let snapshot = makeSnapshot(
-            state: .completed,
+            state: .idle,
             context: makeContext(
+                destination: "Barcelona",
                 itinerary: sampleItinerary,
                 itineraryBuiltAt: now,
                 budgetBreakdown: sampleBudget,
                 budgetReviewedAt: now,
                 planApprovedAt: now,
-                executionCompletedAt: now,
-                validationPassedAt: now,
                 finalPlan: finalPlan,
                 isFinalPlanLocked: true
             )
@@ -237,6 +211,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
     }
 
     private func makeContext(
+        destination: String? = "Barcelona",
         itinerary: VacationItinerary? = nil,
         itineraryBuiltAt: Date? = nil,
         budgetBreakdown: VacationBudgetBreakdown? = nil,
@@ -249,7 +224,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
     ) -> VacationPlanningContext {
         VacationPlanningContext(
             slots: VacationSlots(
-                destination: "Barcelona",
+                destination: destination,
                 dateRange: VacationDateRange(start: Date(), end: Date().addingTimeInterval(86_400)),
                 budget: VacationBudgetInput(total: 1000, currency: "USD"),
                 travelerCount: 2,
@@ -302,6 +277,48 @@ final class VacationPlanningLifecycleTests: XCTestCase {
             buffer: 50,
             total: 1000,
             currency: "USD"
+        )
+    }
+
+    private var sampleOption: VacationOption {
+        VacationOption(
+            title: "Barcelona Comfort",
+            summary: "Базовый вариант отдыха",
+            estimatedCost: 1200
+        )
+    }
+
+    private var validDestinationResult: QuestionnaireProcessingResult {
+        QuestionnaireProcessingResult(
+            state: .empty,
+            updatedSlots: VacationSlots(
+                destination: "Italy",
+                dateRange: VacationDateRange(start: Date(), end: Date().addingTimeInterval(86_400)),
+                budget: VacationBudgetInput(total: 1000, currency: "USD"),
+                travelerCount: 2,
+                travelStyle: "city",
+                interests: ["food"],
+                constraints: []
+            ),
+            validationErrors: [],
+            action: .proceed
+        )
+    }
+
+    private var invalidDestinationResult: QuestionnaireProcessingResult {
+        QuestionnaireProcessingResult(
+            state: .empty,
+            updatedSlots: VacationSlots(
+                destination: nil,
+                dateRange: VacationDateRange(start: Date(), end: Date().addingTimeInterval(86_400)),
+                budget: VacationBudgetInput(total: 1000, currency: "USD"),
+                travelerCount: 2,
+                travelStyle: "city",
+                interests: ["food"],
+                constraints: []
+            ),
+            validationErrors: ["destination missing"],
+            action: .askNextQuestion(fieldID: VacationQuestionnaireSchemaAdapter.destinationFieldID, warning: "Уточните destination")
         )
     }
 }

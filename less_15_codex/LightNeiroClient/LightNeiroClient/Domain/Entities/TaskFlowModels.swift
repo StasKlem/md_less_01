@@ -2,39 +2,27 @@ import Foundation
 
 enum VacationPlanningState: Equatable, Codable {
     case idle
-    case collectingRequirements
-    case clarifyingMissingData
-    case generatingOptions
-    case buildingItinerary
-    case budgetReview
+    case destinationRequest
+    case awaitingDestination
+    case validatingDestination
     case awaitingPlanApproval
-    case approvedForExecution
-    case validatingResult
-    case completed
+    case generateResult
     case failed(reason: String)
 
     var title: String {
         switch self {
         case .idle:
             return "Ожидание"
-        case .collectingRequirements:
-            return "Сбор требований"
-        case .clarifyingMissingData:
-            return "Уточнение недостающих данных"
-        case .generatingOptions:
-            return "Генерация вариантов"
-        case .buildingItinerary:
-            return "Составление маршрута"
-        case .budgetReview:
-            return "Проверка бюджета"
+        case .destinationRequest:
+            return "Запрос места назначения"
+        case .awaitingDestination:
+            return "Ожидание уточнения места"
+        case .validatingDestination:
+            return "Проверка места назначения"
         case .awaitingPlanApproval:
             return "Ожидание утверждения плана"
-        case .approvedForExecution:
-            return "План утвержден, выполнение"
-        case .validatingResult:
-            return "Валидация результата"
-        case .completed:
-            return "Завершено"
+        case .generateResult:
+            return "Генерация финального плана"
         case let .failed(reason):
             return "Ошибка: \(reason)"
         }
@@ -47,15 +35,19 @@ enum VacationPlanningState: Equatable, Codable {
 
     private enum Kind: String, Codable {
         case idle
+        case destinationRequest
+        case awaitingDestination
+        case validatingDestination
+        case awaitingPlanApproval
+        case generateResult
+        // Backward compatibility for persisted snapshots.
         case collectingRequirements
         case clarifyingMissingData
         case generatingOptions
         case buildingItinerary
         case budgetReview
-        case awaitingPlanApproval
         case approvedForExecution
         case validatingResult
-        // Backward compatibility for persisted snapshots of schema v1.
         case awaitingApproval
         case completed
         case failed
@@ -67,26 +59,24 @@ enum VacationPlanningState: Equatable, Codable {
         switch kind {
         case .idle:
             self = .idle
-        case .collectingRequirements:
-            self = .collectingRequirements
-        case .clarifyingMissingData:
-            self = .clarifyingMissingData
-        case .generatingOptions:
-            self = .generatingOptions
-        case .buildingItinerary:
-            self = .buildingItinerary
-        case .budgetReview:
-            self = .budgetReview
+        case .destinationRequest:
+            self = .destinationRequest
+        case .awaitingDestination:
+            self = .awaitingDestination
+        case .validatingDestination:
+            self = .validatingDestination
         case .awaitingPlanApproval:
             self = .awaitingPlanApproval
-        case .approvedForExecution:
-            self = .approvedForExecution
-        case .validatingResult:
-            self = .validatingResult
+        case .generateResult:
+            self = .generateResult
+        case .collectingRequirements, .clarifyingMissingData, .generatingOptions, .buildingItinerary, .budgetReview:
+            self = .destinationRequest
+        case .approvedForExecution, .validatingResult:
+            self = .awaitingPlanApproval
         case .awaitingApproval:
             self = .awaitingPlanApproval
         case .completed:
-            self = .completed
+            self = .idle
         case .failed:
             self = .failed(reason: try container.decode(String.self, forKey: .reason))
         }
@@ -97,24 +87,16 @@ enum VacationPlanningState: Equatable, Codable {
         switch self {
         case .idle:
             try container.encode(Kind.idle, forKey: .kind)
-        case .collectingRequirements:
-            try container.encode(Kind.collectingRequirements, forKey: .kind)
-        case .clarifyingMissingData:
-            try container.encode(Kind.clarifyingMissingData, forKey: .kind)
-        case .generatingOptions:
-            try container.encode(Kind.generatingOptions, forKey: .kind)
-        case .buildingItinerary:
-            try container.encode(Kind.buildingItinerary, forKey: .kind)
-        case .budgetReview:
-            try container.encode(Kind.budgetReview, forKey: .kind)
+        case .destinationRequest:
+            try container.encode(Kind.destinationRequest, forKey: .kind)
+        case .awaitingDestination:
+            try container.encode(Kind.awaitingDestination, forKey: .kind)
+        case .validatingDestination:
+            try container.encode(Kind.validatingDestination, forKey: .kind)
         case .awaitingPlanApproval:
             try container.encode(Kind.awaitingPlanApproval, forKey: .kind)
-        case .approvedForExecution:
-            try container.encode(Kind.approvedForExecution, forKey: .kind)
-        case .validatingResult:
-            try container.encode(Kind.validatingResult, forKey: .kind)
-        case .completed:
-            try container.encode(Kind.completed, forKey: .kind)
+        case .generateResult:
+            try container.encode(Kind.generateResult, forKey: .kind)
         case let .failed(reason):
             try container.encode(Kind.failed, forKey: .kind)
             try container.encode(reason, forKey: .reason)
@@ -754,15 +736,9 @@ enum VacationPlanningInvariant: String, CaseIterable, Equatable, Codable {
     case positiveBudget
     case positiveTravelerCount
     case nonNegativeRevision
-    case completedRequiresArtifacts
-    case awaitingPlanApprovalRequiresCompletedSteps
-    case approvedForExecutionRequiresPlanApproval
-    case validatingResultRequiresExecution
-    case completedRequiresValidation
-    case buildingRequiresMinimumInput
-    case generatingRequiresMinimumInput
+    case awaitingPlanApprovalRequiresDestination
+    case generateResultRequiresPlanApproval
     case failedRequiresReason
-    case finalPlanImmutableWhenCompleted
     case snapshotTimestampConsistency
 }
 
@@ -811,51 +787,19 @@ enum VacationPlanningInvariantValidator {
                 )
             )
         }
-        if case .completed = state, (context.itinerary == nil || context.budgetBreakdown == nil) {
+        if case .awaitingPlanApproval = state, context.slots.destination == nil {
             violations.append(
                 InvariantViolation(
-                    invariant: .completedRequiresArtifacts,
-                    message: "Для завершения нужны маршрут и бюджет."
+                    invariant: .awaitingPlanApprovalRequiresDestination,
+                    message: "Перед подтверждением нужен валидный destination."
                 )
             )
         }
-        if case .awaitingPlanApproval = state, (context.itineraryBuiltAt == nil || context.budgetReviewedAt == nil) {
+        if case .generateResult = state, context.planApprovedAt == nil {
             violations.append(
                 InvariantViolation(
-                    invariant: .awaitingPlanApprovalRequiresCompletedSteps,
-                    message: "Перед утверждением плана должны быть готовы маршрут и проверка бюджета."
-                )
-            )
-        }
-        if case .approvedForExecution = state, context.planApprovedAt == nil {
-            violations.append(
-                InvariantViolation(
-                    invariant: .approvedForExecutionRequiresPlanApproval,
-                    message: "Выполнение возможно только после утвержденного плана."
-                )
-            )
-        }
-        if case .validatingResult = state, context.executionCompletedAt == nil {
-            violations.append(
-                InvariantViolation(
-                    invariant: .validatingResultRequiresExecution,
-                    message: "Валидация результата возможна только после выполнения."
-                )
-            )
-        }
-        if case .buildingItinerary = state, !context.slots.hasMinimumInput {
-            violations.append(
-                InvariantViolation(
-                    invariant: .buildingRequiresMinimumInput,
-                    message: "Для составления маршрута нужны направление/стиль, даты и бюджет."
-                )
-            )
-        }
-        if case .generatingOptions = state, !context.slots.hasMinimumInput {
-            violations.append(
-                InvariantViolation(
-                    invariant: .generatingRequiresMinimumInput,
-                    message: "Для генерации вариантов нужны направление/стиль, даты и бюджет."
+                    invariant: .generateResultRequiresPlanApproval,
+                    message: "Генерация финального плана возможна только после подтверждения пользователем."
                 )
             )
         }
@@ -864,22 +808,6 @@ enum VacationPlanningInvariantValidator {
                 InvariantViolation(
                     invariant: .failedRequiresReason,
                     message: "Состояние ошибки должно содержать непустую причину."
-                )
-            )
-        }
-        if case .completed = state, (!context.isFinalPlanLocked || context.finalPlan == nil) {
-            violations.append(
-                InvariantViolation(
-                    invariant: .finalPlanImmutableWhenCompleted,
-                    message: "В завершенном состоянии итоговый план должен быть сохранен и заблокирован."
-                )
-            )
-        }
-        if case .completed = state, context.validationPassedAt == nil {
-            violations.append(
-                InvariantViolation(
-                    invariant: .completedRequiresValidation,
-                    message: "Завершение возможно только после успешной валидации."
                 )
             )
         }
