@@ -23,6 +23,7 @@ final class MainSplitViewController: NSSplitViewController {
         
         let rightItem = NSSplitViewItem(viewController: rightVC)
         rightItem.collapseBehavior = .useConstraints
+        rightItem.minimumThickness = 420
         rightItem.maximumThickness = 420
 
 
