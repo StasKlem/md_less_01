@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import Logging
 
-final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol {
+final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol {
     private let clientFactory: @Sendable () -> Client
 
     init(clientFactory: @escaping @Sendable () -> Client = {
@@ -22,6 +22,49 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol {
             return result.tools
                 .map { MCPToolSummary(name: $0.name, description: $0.description) }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
+    func fetchCurrentWeather(
+        serverURL: URL,
+        city: String,
+        units: String = "metric",
+        language: String? = nil
+    ) async throws -> String {
+        let normalizedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCity.isEmpty else {
+            throw MCPDiscoveryError.toolCall("City is required for weather request.")
+        }
+
+        let client = clientFactory()
+        let transport = try makeTransport(serverURL: serverURL)
+
+        var arguments: [String: Value] = [
+            "city": .string(normalizedCity),
+            "units": .string(units)
+        ]
+        if let language = language?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !language.isEmpty
+        {
+            arguments["lang"] = .string(language)
+        }
+
+        do {
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(name: "weather_get_current", arguments: arguments)
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP weather_get_current returned an error." : text)
+            }
+            guard !text.isEmpty else {
+                throw MCPDiscoveryError.toolCall("MCP weather_get_current returned empty response.")
+            }
+            return text
         } catch {
             await client.disconnect()
             throw error
@@ -107,6 +150,15 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol {
         }
         return nil
     }
+}
+
+private func extractText(from content: [Tool.Content]) -> String {
+    content.compactMap {
+        guard case .text(let text) = $0 else { return nil }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    .filter { !$0.isEmpty }
+    .joined(separator: "\n")
 }
 
 private actor ProcessStdioMCPTransport: Transport {
@@ -260,10 +312,11 @@ private actor ProcessStdioMCPTransport: Transport {
 private enum MCPDiscoveryError: LocalizedError {
     case configuration(String)
     case transport(String)
+    case toolCall(String)
 
     var errorDescription: String? {
         switch self {
-        case .configuration(let message), .transport(let message):
+        case .configuration(let message), .transport(let message), .toolCall(let message):
             return message
         }
     }

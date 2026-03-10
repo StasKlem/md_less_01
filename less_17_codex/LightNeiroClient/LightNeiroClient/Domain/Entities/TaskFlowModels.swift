@@ -508,6 +508,7 @@ struct VacationPlan: Codable, Equatable {
     let selectedOption: VacationOption?
     let itinerary: VacationItinerary
     let budget: VacationBudgetBreakdown
+    let weatherSummary: String?
     let createdAt: Date
 }
 

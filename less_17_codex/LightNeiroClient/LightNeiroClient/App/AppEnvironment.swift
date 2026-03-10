@@ -91,7 +91,8 @@ struct AppEnvironment {
             questionnaireSchema: VacationQuestionnaireSchemaAdapter.schema,
             optionGenerationService: MockVacationOptionGenerationService(),
             itineraryService: MockVacationItineraryService(),
-            budgetEstimator: MockVacationBudgetEstimator()
+            budgetEstimator: MockVacationBudgetEstimator(),
+            mcpWeatherService: mcpToolDiscoveryService
         )
         let startVacationPlanning = StartVacationPlanningUseCase(orchestrator: vacationOrchestrator)
         let handleVacationPlanningEvent = HandleVacationPlanningEventUseCase(orchestrator: vacationOrchestrator)

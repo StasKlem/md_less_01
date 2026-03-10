@@ -148,7 +148,9 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         )
         XCTAssertEqual(approved.snapshot.state, .idle)
         XCTAssertNotNil(approved.snapshot.context.finalPlan)
+        XCTAssertTrue(approved.agentMessages.contains(where: { $0.contains("MCP open-weather: запрашиваю актуальную погоду") }))
         XCTAssertTrue(approved.agentMessages.contains(where: { $0.contains("Финальный план отпуска:") }))
+        XCTAssertTrue(approved.agentMessages.contains(where: { $0.contains("Погода (MCP):") }))
     }
 
     func testApprovalMessageContainsCollectedUserData() async throws {
@@ -229,6 +231,7 @@ final class VacationPlanningLifecycleTests: XCTestCase {
             selectedOption: nil,
             itinerary: sampleItinerary,
             budget: sampleBudget,
+            weatherSummary: nil,
             createdAt: now
         )
 
@@ -266,7 +269,8 @@ final class VacationPlanningLifecycleTests: XCTestCase {
             questionnaireSchema: VacationQuestionnaireSchemaAdapter.schema,
             optionGenerationService: MockVacationOptionGenerationService(),
             itineraryService: MockVacationItineraryService(),
-            budgetEstimator: MockVacationBudgetEstimator()
+            budgetEstimator: MockVacationBudgetEstimator(),
+            mcpWeatherService: StubMCPWeatherService()
         )
     }
 
@@ -411,5 +415,16 @@ final class VacationPlanningLifecycleTests: XCTestCase {
             validationErrors: ["destination missing"],
             action: .askNextQuestion(fieldID: VacationQuestionnaireSchemaAdapter.destinationFieldID, warning: "Уточните destination")
         )
+    }
+
+    private struct StubMCPWeatherService: MCPWeatherServiceProtocol {
+        func fetchCurrentWeather(
+            serverURL _: URL,
+            city: String,
+            units _: String,
+            language _: String?
+        ) async throws -> String {
+            "Current weather for \(city), ES:\n- Conditions: clear sky (Clear)\n- Temperature: 22.5°C"
+        }
     }
 }

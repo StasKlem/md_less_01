@@ -1291,6 +1291,7 @@ final class VacationPlannerReducer: VacationPlannerReducerProtocol {
             selectedOption: context.selectedOption,
             itinerary: itinerary,
             budget: budget,
+            weatherSummary: nil,
             createdAt: Date()
         )
         context.isFinalPlanLocked = true
@@ -1540,6 +1541,8 @@ final class VacationPlanningOrchestrator {
     private let optionGenerationService: VacationOptionGenerationServiceProtocol
     private let itineraryService: VacationItineraryServiceProtocol
     private let budgetEstimator: VacationBudgetEstimatorProtocol
+    private let mcpWeatherService: MCPWeatherServiceProtocol?
+    private let mcpWeatherEndpointURL: URL
 
     init(
         stateRepository: VacationPlanningStateRepositoryProtocol,
@@ -1551,7 +1554,9 @@ final class VacationPlanningOrchestrator {
         questionnaireSchema: QuestionnaireSchema,
         optionGenerationService: VacationOptionGenerationServiceProtocol,
         itineraryService: VacationItineraryServiceProtocol,
-        budgetEstimator: VacationBudgetEstimatorProtocol
+        budgetEstimator: VacationBudgetEstimatorProtocol,
+        mcpWeatherService: MCPWeatherServiceProtocol? = nil,
+        mcpWeatherEndpointURL: URL = URL(string: "stdio://open-weather")!
     ) {
         self.stateRepository = stateRepository
         self.planRepository = planRepository
@@ -1563,6 +1568,8 @@ final class VacationPlanningOrchestrator {
         self.optionGenerationService = optionGenerationService
         self.itineraryService = itineraryService
         self.budgetEstimator = budgetEstimator
+        self.mcpWeatherService = mcpWeatherService
+        self.mcpWeatherEndpointURL = mcpWeatherEndpointURL
     }
 
     func process(
@@ -1671,9 +1678,13 @@ final class VacationPlanningOrchestrator {
                 try await stateRepository.saveSnapshot(snapshot)
             case .emitFinalPlan:
                 if let plan = snapshot.context.finalPlan {
-                    try await planRepository.saveFinalPlan(plan)
+                    if let weatherRequestMessage = mcpWeatherRequestMessage(for: plan) {
+                        messages.append(weatherRequestMessage)
+                    }
+                    let weatherEnrichedPlan = await enrichPlanWithWeather(plan)
+                    try await planRepository.saveFinalPlan(weatherEnrichedPlan)
                     messages.append("План отпуска готов и сохранен.")
-                    messages.append(finalPlanMessage(plan))
+                    messages.append(finalPlanMessage(weatherEnrichedPlan))
                 } else {
                     throw VacationPlanningError.serviceFailure("Невозможно опубликовать итоговый план без завершенного контекста.")
                 }
@@ -1785,6 +1796,16 @@ final class VacationPlanningOrchestrator {
         }
         lines.append("- budget total: \(plan.budget.total) \(plan.budget.currency)")
 
+        if let weatherSummary = plan.weatherSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !weatherSummary.isEmpty
+        {
+            lines.append("Погода (MCP):")
+            weatherSummary
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map(String.init)
+                .forEach { lines.append("  \($0)") }
+        }
+
         if !plan.itinerary.days.isEmpty {
             lines.append("Маршрут:")
             for day in plan.itinerary.days {
@@ -1797,6 +1818,49 @@ final class VacationPlanningOrchestrator {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    private func enrichPlanWithWeather(_ plan: VacationPlan) async -> VacationPlan {
+        guard let service = mcpWeatherService,
+              let destination = plan.slots.destination?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !destination.isEmpty else {
+            return plan
+        }
+
+        let weatherSummary: String
+        do {
+            weatherSummary = try await service.fetchCurrentWeather(
+                serverURL: mcpWeatherEndpointURL,
+                city: destination,
+                units: "metric",
+                language: "ru"
+            )
+        } catch {
+            weatherSummary = "Не удалось получить погоду через MCP (\(error.localizedDescription))."
+        }
+
+        let normalizedSummary = weatherSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSummary.isEmpty else { return plan }
+
+        return VacationPlan(
+            sessionID: plan.sessionID,
+            branchID: plan.branchID,
+            slots: plan.slots,
+            selectedOption: plan.selectedOption,
+            itinerary: plan.itinerary,
+            budget: plan.budget,
+            weatherSummary: normalizedSummary,
+            createdAt: plan.createdAt
+        )
+    }
+
+    private func mcpWeatherRequestMessage(for plan: VacationPlan) -> String? {
+        guard mcpWeatherService != nil,
+              let destination = plan.slots.destination?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !destination.isEmpty else {
+            return nil
+        }
+        return "MCP open-weather: запрашиваю актуальную погоду для \(destination)."
     }
 }
 

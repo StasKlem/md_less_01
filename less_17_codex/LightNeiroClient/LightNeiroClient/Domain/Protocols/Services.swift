@@ -86,3 +86,12 @@ struct MCPToolSummary: Equatable {
 protocol MCPToolDiscoveryServiceProtocol {
     func fetchTools(serverURL: URL) async throws -> [MCPToolSummary]
 }
+
+protocol MCPWeatherServiceProtocol {
+    func fetchCurrentWeather(
+        serverURL: URL,
+        city: String,
+        units: String,
+        language: String?
+    ) async throws -> String
+}
