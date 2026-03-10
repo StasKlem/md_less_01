@@ -119,3 +119,7 @@ protocol ProcessUserAnswerUseCaseProtocol {
         source: QuestionnaireAnswerSource
     ) async -> QuestionnaireProcessingResult
 }
+
+protocol FetchVacationPlannerMCPToolsUseCaseProtocol {
+    func execute() async -> String
+}

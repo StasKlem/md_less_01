@@ -14,6 +14,7 @@ struct AppEnvironment {
     let handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol
     let getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol
     let finalizeVacationPlanUseCase: FinalizeVacationPlanUseCaseProtocol
+    let fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -27,6 +28,7 @@ struct AppEnvironment {
         let metricsRepository = MockMetricsRepository()
         let vacationStateRepository = FileVacationPlanningStateRepository()
         let vacationPlanRepository = FileVacationPlanRepository()
+        let mcpToolDiscoveryService = MCPToolDiscoveryService()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -98,6 +100,9 @@ struct AppEnvironment {
             stateRepository: vacationStateRepository,
             planRepository: vacationPlanRepository
         )
+        let fetchVacationPlannerMCPTools = FetchVacationPlannerMCPToolsUseCase(
+            toolDiscoveryService: mcpToolDiscoveryService
+        )
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -133,7 +138,8 @@ struct AppEnvironment {
             startVacationPlanningUseCase: startVacationPlanning,
             handleVacationPlanningEventUseCase: handleVacationPlanningEvent,
             getVacationPlanningStatusUseCase: getVacationPlanningStatus,
-            finalizeVacationPlanUseCase: finalizeVacationPlan
+            finalizeVacationPlanUseCase: finalizeVacationPlan,
+            fetchVacationPlannerMCPToolsUseCase: fetchVacationPlannerMCPTools
         )
     }
 }

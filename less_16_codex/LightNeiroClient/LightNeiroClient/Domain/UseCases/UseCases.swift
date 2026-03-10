@@ -96,6 +96,51 @@ final class FetchMessagesUseCase: FetchMessagesUseCaseProtocol {
     }
 }
 
+final class FetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol {
+    private let toolDiscoveryService: MCPToolDiscoveryServiceProtocol
+    private let endpointURL: URL
+
+    init(
+        toolDiscoveryService: MCPToolDiscoveryServiceProtocol,
+        endpointURL: URL = URL(string: "https://mcp.open-mcp.org/api/server/open-weather@latest/mcp")!
+    ) {
+        self.toolDiscoveryService = toolDiscoveryService
+        self.endpointURL = endpointURL
+    }
+
+    func execute() async -> String {
+        do {
+            let tools = try await toolDiscoveryService.fetchTools(serverURL: endpointURL)
+            return formatToolsMessage(tools)
+        } catch {
+            return "MCP open-weather: не удалось получить tools (\(error.localizedDescription))."
+        }
+    }
+
+    private func formatToolsMessage(_ tools: [MCPToolSummary]) -> String {
+        var lines: [String] = [
+            "MCP open-weather подключен.",
+            "Доступные tools:"
+        ]
+
+        if tools.isEmpty {
+            lines.append("- список пуст")
+            return lines.joined(separator: "\n")
+        }
+
+        for tool in tools {
+            let description = tool.description?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if description.isEmpty {
+                lines.append("- \(tool.name)")
+            } else {
+                lines.append("- \(tool.name): \(description)")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 final class UpdateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol {
     private let messageRepository: MessageRepositoryProtocol
     private let shortTermRepository: ShortTermMemoryRepositoryProtocol

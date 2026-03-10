@@ -58,7 +58,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,
                 startVacationPlanningUseCase: environment.startVacationPlanningUseCase,
                 handleVacationPlanningEventUseCase: environment.handleVacationPlanningEventUseCase,
-                getVacationPlanningStatusUseCase: environment.getVacationPlanningStatusUseCase
+                getVacationPlanningStatusUseCase: environment.getVacationPlanningStatusUseCase,
+                fetchVacationPlannerMCPToolsUseCase: environment.fetchVacationPlannerMCPToolsUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 session: environment.session,

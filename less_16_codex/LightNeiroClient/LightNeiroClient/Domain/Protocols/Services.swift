@@ -77,3 +77,12 @@ protocol AnswerExtractionServiceProtocol {
         settings: LLMSettings
     ) async throws -> QuestionnaireExtractionResult
 }
+
+struct MCPToolSummary: Equatable {
+    let name: String
+    let description: String?
+}
+
+protocol MCPToolDiscoveryServiceProtocol {
+    func fetchTools(serverURL: URL) async throws -> [MCPToolSummary]
+}

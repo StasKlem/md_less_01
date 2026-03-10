@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C1A200012F70000100A1B2C3 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = C1A200022F70000100A1B2C3 /* MCP */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		AE9A01322F52F81800ACC179 /* LightNeiroClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LightNeiroClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1A100012F60000100ABCDEF /* LightNeiroClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LightNeiroClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -29,6 +33,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C1A200012F70000100A1B2C3 /* MCP in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,6 +85,7 @@
 			);
 			name = LightNeiroClient;
 			packageProductDependencies = (
+				C1A200022F70000100A1B2C3 /* MCP */,
 			);
 			productName = LightNeiroClient;
 			productReference = AE9A01322F52F81800ACC179 /* LightNeiroClient.app */;
@@ -140,6 +146,9 @@
 			productRefGroup = AE9A01332F52F81800ACC179 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */,
+			);
 			targets = (
 				AE9A01312F52F81800ACC179 /* LightNeiroClient */,
 				B1A100062F60000100ABCDEF /* LightNeiroClientTests */,
@@ -198,6 +207,25 @@
 			targetProxy = B1A100072F60000100ABCDEF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/msventurini/swift-mcp-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.10.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C1A200022F70000100A1B2C3 /* MCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */;
+			productName = MCP;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AE9A013E2F52F81900ACC179 /* Debug */ = {

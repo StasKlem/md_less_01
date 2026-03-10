@@ -27,6 +27,7 @@ final class ChatViewModel {
     private let startVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol?
     private let handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol?
     private let getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol?
+    private let fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol?
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
@@ -38,7 +39,8 @@ final class ChatViewModel {
         fetchMessagesUseCase: FetchMessagesUseCaseProtocol,
         startVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol? = nil,
         handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol? = nil,
-        getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol? = nil
+        getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol? = nil,
+        fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol? = nil
     ) {
         self.session = session
         self.sendMessageUseCase = sendMessageUseCase
@@ -46,6 +48,7 @@ final class ChatViewModel {
         self.startVacationPlanningUseCase = startVacationPlanningUseCase
         self.handleVacationPlanningEventUseCase = handleVacationPlanningEventUseCase
         self.getVacationPlanningStatusUseCase = getVacationPlanningStatusUseCase
+        self.fetchVacationPlannerMCPToolsUseCase = fetchVacationPlannerMCPToolsUseCase
 
         Task { [weak self] in
             await self?.loadInitialState()
@@ -178,6 +181,10 @@ final class ChatViewModel {
             guard let self else { return }
             defer { self.isSending = false }
             do {
+                if let mcpToolsUseCase = self.fetchVacationPlannerMCPToolsUseCase {
+                    let mcpToolsMessage = await mcpToolsUseCase.execute()
+                    self.appendSystemMessage(mcpToolsMessage)
+                }
                 let result = try await useCase.execute(
                     sessionID: self.session.id,
                     branchID: self.session.activeBranchID
