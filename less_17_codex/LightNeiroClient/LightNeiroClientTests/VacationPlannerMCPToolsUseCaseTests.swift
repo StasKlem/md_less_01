@@ -1,7 +1,18 @@
 import XCTest
 @testable import LightNeiroClient
 
+@MainActor
 final class VacationPlannerMCPToolsUseCaseTests: XCTestCase {
+    func testExecuteUsesStdioEndpointByDefault() async {
+        let service = RecordingMCPToolDiscoveryService(result: .success([]))
+        let useCase = FetchVacationPlannerMCPToolsUseCase(toolDiscoveryService: service)
+
+        _ = await useCase.execute()
+
+        let capturedURL = await service.capturedURL
+        XCTAssertEqual(capturedURL?.scheme, "stdio")
+    }
+
     func testExecuteReturnsFormattedToolList() async {
         let service = StubMCPToolDiscoveryService(
             result: .success([
@@ -45,5 +56,19 @@ private struct StubMCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol {
 
     func fetchTools(serverURL: URL) async throws -> [MCPToolSummary] {
         try result.get()
+    }
+}
+
+private actor RecordingMCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol {
+    private(set) var capturedURL: URL?
+    let result: Result<[MCPToolSummary], Error>
+
+    init(result: Result<[MCPToolSummary], Error>) {
+        self.result = result
+    }
+
+    func fetchTools(serverURL: URL) async throws -> [MCPToolSummary] {
+        capturedURL = serverURL
+        return try result.get()
     }
 }

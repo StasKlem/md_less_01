@@ -102,7 +102,7 @@ final class FetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUse
 
     init(
         toolDiscoveryService: MCPToolDiscoveryServiceProtocol,
-        endpointURL: URL = URL(string: "https://mcp.open-mcp.org/api/server/open-weather@latest/mcp")!
+        endpointURL: URL = URL(string: "stdio://open-weather")!
     ) {
         self.toolDiscoveryService = toolDiscoveryService
         self.endpointURL = endpointURL

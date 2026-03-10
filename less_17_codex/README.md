@@ -49,7 +49,8 @@ macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом, memory la
 
 ## MCP интеграция (open-weather)
 - Пакет: `https://github.com/msventurini/swift-mcp-sdk.git` (SPM продукт `MCP`).
-- Endpoint: `https://mcp.open-mcp.org/api/server/open-weather@latest/mcp`.
+- Endpoint: `stdio://open-weather` (по умолчанию клиент запускает локальный `OpenWeatherMCPServer` как subprocess через stdio).
+- Для явного пути к исполняемому серверу используйте env: `OPENWEATHER_MCP_SERVER_PATH=/abs/path/to/OpenWeatherMCPServer`.
 - Точка запуска: при команде `/vacation start` перед запуском FSM.
 - Что видит пользователь: системное сообщение вида:
   - `MCP open-weather подключен.`
