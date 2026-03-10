@@ -12,6 +12,7 @@ final class ChatViewModel {
     @Published private(set) var isSending = false
     @Published private(set) var chatMode: ChatMode = .default
     @Published private(set) var plannerStepTitle: String?
+    @Published private(set) var canApprovePlan = false
     @Published private(set) var questionnaireState: QuestionnaireState = .empty
     @Published private(set) var questionnaireProgressText: String?
 
@@ -148,6 +149,11 @@ final class ChatViewModel {
         sendToVacationPlanner(text: json, source: .form)
     }
 
+    func approvePlan() {
+        guard chatMode == .vacationPlanner, lastPlannerState == .awaitingPlanApproval else { return }
+        send(text: "approve")
+    }
+
     private func handlePlannerCommand(text: String) -> Bool {
         let command = text.lowercased()
         guard command.hasPrefix("/vacation") else { return false }
@@ -155,6 +161,7 @@ final class ChatViewModel {
         if command == "/vacation stop" {
             chatMode = .default
             plannerStepTitle = nil
+            updateApproveAvailability()
             appendSystemMessage("Планировщик отпуска отключен.")
             return true
         }
@@ -176,6 +183,7 @@ final class ChatViewModel {
         guard !isSending else { return }
         isSending = true
         chatMode = .vacationPlanner
+        updateApproveAvailability()
 
         Task { [weak self] in
             guard let self else { return }
@@ -242,6 +250,7 @@ final class ChatViewModel {
             )
         }
         lastPlannerState = result.snapshot.state
+        updateApproveAvailability()
         if case let .failed(reason) = result.snapshot.state {
             appendSystemMessage("Ошибка инварианта/перехода планировщика: \(reason)")
         }
@@ -284,9 +293,14 @@ final class ChatViewModel {
                 chatMode = .vacationPlanner
                 appendSystemMessage(resumeHint(for: snapshot))
             }
+            updateApproveAvailability()
         } catch {
             appendSystemMessage("Не удалось загрузить состояние планировщика: \(error.localizedDescription)")
         }
+    }
+
+    private func updateApproveAvailability() {
+        canApprovePlan = chatMode == .vacationPlanner && lastPlannerState == .awaitingPlanApproval
     }
 
     private func loadDialog() async throws {

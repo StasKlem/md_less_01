@@ -45,6 +45,7 @@ final class ChatSidebarViewController: NSViewController {
     private let inputTextView = ChatInputTextView()
     private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Отправить", target: nil, action: nil)
+    private let approvePlanButton = NSButton(title: "Approve", target: nil, action: nil)
     private let startPlannerButton = NSButton(title: "Запустить отпуск", target: nil, action: nil)
     private let plannerStatusLabel = NSTextField(labelWithString: "Планировщик: выключен")
 
@@ -73,6 +74,9 @@ final class ChatSidebarViewController: NSViewController {
     private func setupUI() {
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
+        approvePlanButton.target = self
+        approvePlanButton.action = #selector(approvePlanTapped)
+        approvePlanButton.isEnabled = false
         startPlannerButton.target = self
         startPlannerButton.action = #selector(startPlannerTapped)
         configureInputTextView()
@@ -81,7 +85,7 @@ final class ChatSidebarViewController: NSViewController {
         let dialogView = dialogHistoryViewController.view
         dialogView.translatesAutoresizingMaskIntoConstraints = false
 
-        let inputRow = NSStackView(views: [inputScrollView, startPlannerButton, sendButton])
+        let inputRow = NSStackView(views: [inputScrollView, startPlannerButton, approvePlanButton, sendButton])
         inputRow.orientation = .horizontal
         inputRow.alignment = .bottom
         inputRow.spacing = 8
@@ -103,6 +107,7 @@ final class ChatSidebarViewController: NSViewController {
             root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
             startPlannerButton.widthAnchor.constraint(equalToConstant: 120),
+            approvePlanButton.widthAnchor.constraint(equalToConstant: 88),
             sendButton.widthAnchor.constraint(equalToConstant: 88),
             inputScrollView.heightAnchor.constraint(equalToConstant: inputHeightForThreeLines()),
         ])
@@ -168,6 +173,15 @@ final class ChatSidebarViewController: NSViewController {
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
                 self?.startPlannerButton.isEnabled = !sending
+                self?.approvePlanButton.isEnabled = !sending && (self?.viewModel.canApprovePlan ?? false)
+            }
+            .store(in: &cancellables)
+
+        viewModel.$canApprovePlan
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] canApprove in
+                guard let self else { return }
+                self.approvePlanButton.isEnabled = canApprove && !self.viewModel.isSending
             }
             .store(in: &cancellables)
 
@@ -194,5 +208,10 @@ final class ChatSidebarViewController: NSViewController {
     @objc
     private func startPlannerTapped() {
         viewModel.send(text: "/vacation start")
+    }
+
+    @objc
+    private func approvePlanTapped() {
+        viewModel.approvePlan()
     }
 }
