@@ -44,7 +44,19 @@ macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом, memory la
 - краткосрочная, рабочая и долговременная память для контекста;
 - сохранение истории сообщений в активной ветке;
 - экран метрик сессии (токены, запросы, задержка);
-- Vacation Planner на базе конечного автомата (FSM) с сохранением snapshot и финального плана.
+- Vacation Planner на базе конечного автомата (FSM) с сохранением snapshot и финального плана;
+- интеграция с MCP: при старте планировщика выполняется подключение к `open-weather` серверу и выводится системное сообщение со списком доступных `tools`.
+
+## MCP интеграция (open-weather)
+- Пакет: `https://github.com/msventurini/swift-mcp-sdk.git` (SPM продукт `MCP`).
+- Endpoint: `https://mcp.open-mcp.org/api/server/open-weather@latest/mcp`.
+- Точка запуска: при команде `/vacation start` перед запуском FSM.
+- Что видит пользователь: системное сообщение вида:
+  - `MCP open-weather подключен.`
+  - `Доступные tools:`
+  - `- <tool_name>: <description>` (или `- <tool_name>`, если описание отсутствует)
+- При ошибке подключения или `tools/list` выводится системное сообщение:
+  - `MCP open-weather: не удалось получить tools (<error>).`
 
 ## Архитектура
 - `Presentation`: AppKit контроллеры и `ViewModel`.
@@ -95,6 +107,8 @@ xcodebuild -project LightNeiroClient/LightNeiroClient.xcodeproj -scheme LightNei
 7. `revisionRequested(comment)` из `awaitingPlanApproval` сбрасывает утверждение/результаты, очищает `destination` и возвращает в `destinationRequest`.
 
 ### Команды пользователя
+- `/vacation start` или `/vacation`: запускает сценарий планировщика. Перед стартом FSM выполняется попытка подключения к MCP `open-weather` и публикация списка `tools`.
+- `/vacation stop`: останавливает режим планировщика и возвращает обычный чат.
 - `approve`: подтвердить собранные данные и запустить генерацию финального результата.
 - `revise: <комментарий>`: откатиться к повторному выбору направления с учетом комментария.
 - любое другое сообщение: обработать как пользовательский ввод анкеты (`userMessage`).
