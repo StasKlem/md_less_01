@@ -1,133 +1,126 @@
-# LightNeiroClient
+# LightNeiroClient Monorepo
 
-macOS клиент на `AppKit` (MVVM, без SwiftUI) с чатом, memory layers и встроенным Vacation Planner.
+Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальным MCP-сервером `OpenWeatherMCPServer`.
 
-## Конечный автомат (FSM): этапы и переходы
+## Что внутри
 
-### Состояния (этапы)
-- `idle`: планировщик не выполняет активный шаг.
-- `destinationRequest`: запрос/уточнение направления поездки (`destination`).
-- `validatingDestination`: извлечение и валидация пользовательского ответа.
-- `awaitingPlanApproval`: ожидание подтверждения (`approve`) или правки (`revise: ...`).
-- `generateResult`: генерация опций, маршрута, бюджета и финального плана.
-- `failed(reason)`: ошибка перехода/инварианта/сервиса.
+- `LightNeiroClient`: чат-клиент на `AppKit` с memory layers, метриками сессии и сценарным Vacation Planner.
+- `OpenWeatherMCPServer`: MCP сервер (`stdio`) с инструментами погоды OpenWeather.
 
-### Разрешённые переходы
-1. `idle` + `started` -> `destinationRequest`
-2. `idle` + `userMessage` -> `destinationRequest`
-3. `destinationRequest` + `userMessage` -> `validatingDestination`
-4. `validatingDestination` + `questionnaireProcessed` (destination невалиден) -> `destinationRequest`
-5. `validatingDestination` + `questionnaireProcessed` (destination валиден) -> `awaitingPlanApproval`
-6. `awaitingPlanApproval` + `planApproved` -> `generateResult`
-7. `awaitingPlanApproval` + `revisionRequested` -> `destinationRequest`
-8. `generateResult` + `optionsGenerated` -> `generateResult`
-9. `generateResult` + `itineraryGenerated` -> `generateResult`
-10. `generateResult` + `budgetCalculated` -> `idle` (финальный план сформирован и зафиксирован)
-11. `failed(reason)` + `started` -> `destinationRequest`
-12. `failed(reason)` + `userMessage` -> `validatingDestination`
-13. Любое состояние + `errorOccurred` -> `failed(reason)`
+## Ключевые возможности LightNeiroClient
 
-### Невозможные переходы (запрещены редьюсером)
-- Из `idle` запрещены: `planApproved`, `revisionRequested`, `questionnaireProcessed`, `optionsGenerated`, `itineraryGenerated`, `budgetCalculated`, `executionCompleted`, `validationPassed`, `validationFailed`, `finalizeRequested`.
-- Из `destinationRequest` запрещены все события, кроме `userMessage` и глобального `errorOccurred`.
-- Из `validatingDestination` запрещены все события, кроме `questionnaireProcessed` и глобального `errorOccurred`.
-- Из `awaitingPlanApproval` запрещены все события, кроме `planApproved`, `revisionRequested` и глобального `errorOccurred`.
-- Из `generateResult` запрещены все события, кроме `optionsGenerated`, `itineraryGenerated`, `budgetCalculated` и глобального `errorOccurred`.
-- Из `failed(reason)` запрещены все события, кроме `started`, `userMessage` и глобального `errorOccurred`.
-
-### Важно про неподдержанные события
-- События `executionCompleted`, `validationPassed`, `validationFailed`, `finalizeRequested` объявлены в модели, но в текущей версии FSM не имеют разрешённых переходов и всегда блокируются.
-
-## Возможности
 - чат с LLM;
-- настройка модели, `temperature`, `windowSize`, API-ключа и `plannerInvariants`;
-- краткосрочная, рабочая и долговременная память для контекста;
-- сохранение истории сообщений в активной ветке;
+- настройки модели (`model`, `temperature`, `windowSize`, API key, `plannerInvariants`);
+- память контекста (short-term / working / long-term);
 - экран метрик сессии (токены, запросы, задержка);
-- Vacation Planner на базе конечного автомата (FSM) с сохранением snapshot и финального плана;
-- интеграция с MCP: при старте планировщика выполняется подключение к `open-weather` серверу и выводится системное сообщение со списком доступных `tools`.
+- Vacation Planner на базе конечного автомата (FSM);
+- MCP интеграция: получение списка `tools` и погодных данных через `open-weather`.
 
-## MCP интеграция (open-weather)
-- Пакет: `https://github.com/msventurini/swift-mcp-sdk.git` (SPM продукт `MCP`).
-- Endpoint: `stdio://open-weather` (по умолчанию клиент запускает локальный `OpenWeatherMCPServer` как subprocess через stdio).
-- Для явного пути к исполняемому серверу используйте env: `OPENWEATHER_MCP_SERVER_PATH=/abs/path/to/OpenWeatherMCPServer`.
-- Точка запуска: при команде `/vacation start` перед запуском FSM.
-- Что видит пользователь: системное сообщение вида:
-  - `MCP open-weather подключен.`
-  - `Доступные tools:`
-  - `- <tool_name>: <description>` (или `- <tool_name>`, если описание отсутствует)
-- При ошибке подключения или `tools/list` выводится системное сообщение:
-  - `MCP open-weather: не удалось получить tools (<error>).`
+## Vacation Planner FSM (актуально)
+
+### Состояния
+
+- `idle`
+- `destinationRequest`
+- `validatingDestination`
+- `awaitingPlanApproval`
+- `generateResult`
+- `failed(reason)`
+
+### Разрешенные переходы
+
+1. `idle` + `started|userMessage` -> `destinationRequest`
+2. `destinationRequest` + `userMessage` -> `validatingDestination`
+3. `validatingDestination` + `questionnaireProcessed` (invalid) -> `destinationRequest`
+4. `validatingDestination` + `questionnaireProcessed` (valid) -> `awaitingPlanApproval`
+5. `awaitingPlanApproval` + `planApproved` -> `generateResult`
+6. `awaitingPlanApproval` + `revisionRequested` -> `destinationRequest`
+7. `generateResult` + `optionsGenerated|itineraryGenerated` -> `generateResult`
+8. `generateResult` + `budgetCalculated` -> `idle`
+9. `failed(reason)` + `started` -> `destinationRequest`
+10. `failed(reason)` + `userMessage` -> `validatingDestination`
+11. Любое состояние + `errorOccurred` -> `failed(reason)`
+
+### Важно
+
+- События `executionCompleted`, `validationPassed`, `validationFailed`, `finalizeRequested` есть в модели, но не имеют разрешенных переходов в текущем FSM.
+- После `budgetCalculated` формируется `finalPlan`, блокируется редактирование результата и состояние возвращается в `idle`.
+
+## Команды пользователя в чате
+
+- `/vacation start` или `/vacation` - запуск сценария планировщика.
+- `/vacation stop` - выход из режима планировщика.
+- `approve` - подтверждение плана и запуск генерации результата.
+- `revise: <комментарий>` - возврат к уточнению направления поездки.
+
+## MCP интеграция (`open-weather`)
+
+- Клиент использует endpoint `stdio://open-weather`.
+- По умолчанию запускается локальный `OpenWeatherMCPServer` как subprocess.
+- Для явного пути к серверу:
+  - `OPENWEATHER_MCP_SERVER_PATH=/abs/path/to/OpenWeatherMCPServer`
+- При старте Vacation Planner клиент:
+  - подключается к MCP;
+  - получает `tools/list`;
+  - публикует системное сообщение со списком доступных инструментов.
 
 ## Архитектура
-- `Presentation`: AppKit контроллеры и `ViewModel`.
-- `Domain`: сущности, протоколы и use case'ы (бизнес-логика и FSM).
-- `Data`: реализации репозиториев, Keychain, file storage и LLM-клиенты.
 
-Зависимости направлены внутрь: outer layers зависят от доменных абстракций, а не наоборот.
+`LightNeiroClient` следует Clean Architecture:
+
+- `Presentation`: AppKit контроллеры и ViewModel.
+- `Domain`: сущности, контракты и use cases (включая FSM).
+- `Data`: реализации сервисов/репозиториев (LLM, storage, keychain, MCP).
+
+Зависимости направлены внутрь: outer layers зависят от абстракций `Domain`.
 
 ## Быстрый старт
 
-### Запуск из Xcode
-1. Откройте проект: `LightNeiroClient/LightNeiroClient.xcodeproj`.
-2. Выберите схему `LightNeiroClient`.
-3. Запустите приложение (`Run`).
+### Требования
 
-### Сборка из терминала
+- macOS
+- Xcode 15+ (для клиента)
+- Swift 5.9+ (для MCP сервера)
+
+### Запуск LightNeiroClient (Xcode)
+
+1. Откройте `LightNeiroClient/LightNeiroClient.xcodeproj`.
+2. Выберите схему `LightNeiroClient`.
+3. Выполните `Run`.
+
+### Сборка LightNeiroClient (CLI)
+
 ```bash
 xcodebuild -project LightNeiroClient/LightNeiroClient.xcodeproj -scheme LightNeiroClient -configuration Debug build
 ```
 
-### Тесты
+### Тесты LightNeiroClient
+
 ```bash
 xcodebuild -project LightNeiroClient/LightNeiroClient.xcodeproj -scheme LightNeiroClient -destination 'platform=macOS' test
 ```
 
-## Vacation Planner: актуальная FSM
+### Запуск OpenWeatherMCPServer
 
-### Состояния
-- `idle`: ожидание.
-- `destinationRequest`: запрос/уточнение destination.
-- `validatingDestination`: обработка и валидация ответа пользователя.
-- `awaitingPlanApproval`: ожидание команды `approve` или `revise: ...`.
-- `generateResult`: генерация опций, маршрута и бюджета.
-- `failed(reason)`: состояние ошибки.
+```bash
+cd OpenWeatherMCPServer
+OPENWEATHER_API_KEY=your_key swift run OpenWeatherMCPServer
+```
 
-### Ключевые переходы
-1. `started` (или первое сообщение из `idle`) -> `destinationRequest`.
-2. Сообщение пользователя в `destinationRequest` -> `validatingDestination` + `processUserAnswer`.
-3. `questionnaireProcessed`:
-- destination невалиден -> `destinationRequest` + повторный вопрос;
-- destination валиден -> `awaitingPlanApproval`.
-4. `planApproved` -> `generateResult`.
-5. В `generateResult` оркестратор последовательно вызывает:
-- `generateDestinationOptions`;
-- `generateItinerary`;
-- `calculateBudget`.
-6. После `budgetCalculated` формируется `finalPlan`, план блокируется (`isFinalPlanLocked = true`), FSM возвращается в `idle`.
-7. `revisionRequested(comment)` из `awaitingPlanApproval` сбрасывает утверждение/результаты, очищает `destination` и возвращает в `destinationRequest`.
+## Переменные окружения OpenWeatherMCPServer
 
-### Команды пользователя
-- `/vacation start` или `/vacation`: запускает сценарий планировщика. Перед стартом FSM выполняется попытка подключения к MCP `open-weather` и публикация списка `tools`.
-- `/vacation stop`: останавливает режим планировщика и возвращает обычный чат.
-- `approve`: подтвердить собранные данные и запустить генерацию финального результата.
-- `revise: <комментарий>`: откатиться к повторному выбору направления с учетом комментария.
-- любое другое сообщение: обработать как пользовательский ввод анкеты (`userMessage`).
+- `OPENWEATHER_API_KEY` (для реальных weather вызовов)
+- `OPENWEATHER_BASE_URL` (опционально, default `https://api.openweathermap.org`)
+- `OPENWEATHER_DEFAULT_LANG` (опционально)
 
-## Валидация и инварианты
-- `ProcessUserAnswerUseCase` извлекает структурированные поля из свободного ввода (LLM-first), применяет валидаторы и confidence threshold.
-- При неуспешном извлечении/валидации пользователь получает уточняющий вопрос, FSM не падает.
-- `VacationPlanningInvariantValidator` проверяет доменные инварианты (даты, бюджет, количество путешественников, корректность переходов).
-- Для обратной совместимости старые сохраненные состояния автоматически маппятся в новую FSM при декодировании snapshot.
+## Структура репозитория
 
-## Структура проекта
-- `LightNeiroClient/LightNeiroClient/App`: сборка зависимостей и окружения.
-- `LightNeiroClient/LightNeiroClient/Presentation`: экраны чата, настроек, метрик.
-- `LightNeiroClient/LightNeiroClient/Domain`: модели, протоколы, use case'ы.
-- `LightNeiroClient/LightNeiroClient/Data`: network/storage/security/mocks.
-- `LightNeiroClient/LightNeiroClientTests`: unit-тесты, включая жизненный цикл Vacation Planner.
+- `LightNeiroClient/` - macOS клиент.
+- `OpenWeatherMCPServer/` - MCP сервер OpenWeather.
+- `AGENTS.md` - инженерные правила проекта.
 
 ## Ограничения текущей версии
+
 - одна активная ветка диалога без UI для полноценного branch management;
-- генерация вопросов/извлечение полей зависят от доступности LLM и валидного API-ключа;
-- анкета и чат используют единый pipeline (отдельной формы сценария планировщика нет).
+- извлечение полей и генерация плана зависят от доступности LLM и корректного API-ключа;
+- отдельной формы для анкеты Vacation Planner нет (используется чатовый pipeline).
