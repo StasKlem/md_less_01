@@ -1,11 +1,12 @@
 # LightNeiroClient Monorepo
 
-Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальным MCP-сервером `OpenWeatherMCPServer`.
+Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальными MCP-серверами `OpenWeatherMCPServer` и `HackerNewsMCPServer`.
 
 ## Что внутри
 
 - `LightNeiroClient`: чат-клиент на `AppKit` с memory layers, метриками сессии и сценарным Vacation Planner.
 - `OpenWeatherMCPServer`: MCP сервер (`stdio`) с инструментами погоды OpenWeather.
+- `HackerNewsMCPServer`: MCP сервер (`stdio`) с инструментом случайной новости из Hacker News.
 
 ## Ключевые возможности LightNeiroClient
 
@@ -107,16 +108,29 @@ cd OpenWeatherMCPServer
 OPENWEATHER_API_KEY=your_key swift run OpenWeatherMCPServer
 ```
 
+### Запуск HackerNewsMCPServer
+
+```bash
+cd HackerNewsMCPServer
+swift run HackerNewsMCPServer
+```
+
 ## Переменные окружения OpenWeatherMCPServer
 
 - `OPENWEATHER_API_KEY` (для реальных weather вызовов)
 - `OPENWEATHER_BASE_URL` (опционально, default `https://api.openweathermap.org`)
 - `OPENWEATHER_DEFAULT_LANG` (опционально)
 
+## Переменные окружения HackerNewsMCPServer
+
+- `HACKERNEWS_BASE_URL` (опционально, default `https://hacker-news.firebaseio.com`)
+- `HACKERNEWS_LOG_LEVEL` (опционально, default `info`, значения `debug|info|warn|error`)
+
 ## Структура репозитория
 
 - `LightNeiroClient/` - macOS клиент.
 - `OpenWeatherMCPServer/` - MCP сервер OpenWeather.
+- `HackerNewsMCPServer/` - MCP сервер Hacker News.
 - `AGENTS.md` - инженерные правила проекта.
 
 ## Ограничения текущей версии
