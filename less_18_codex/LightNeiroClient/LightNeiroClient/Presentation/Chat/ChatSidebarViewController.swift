@@ -32,6 +32,25 @@ private final class ChatInputTextView: NSTextView {
     }
 }
 
+private final class AgentCommandButton: NSButton {
+    let command: String
+
+    init(title: String, command: String, target: AnyObject?, action: Selector) {
+        self.command = command
+        super.init(frame: .zero)
+        self.title = title
+        self.target = target
+        self.action = action
+        setButtonType(.momentaryPushIn)
+        bezelStyle = .rounded
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
 final class ChatSidebarViewController: NSViewController {
     private enum InputLayout {
         static let visibleLines = 3
@@ -46,8 +65,12 @@ final class ChatSidebarViewController: NSViewController {
     private let inputScrollView = NSScrollView()
     private let sendButton = NSButton(title: "Отправить", target: nil, action: nil)
     private let approvePlanButton = NSButton(title: "Approve", target: nil, action: nil)
-    private let startPlannerButton = NSButton(title: "Запустить отпуск", target: nil, action: nil)
+    private let taskAgentsTitleLabel = NSTextField(labelWithString: "Task Agents")
+    private let taskAgentsButtonsStack = NSStackView()
+    private let controlsTitleLabel = NSTextField(labelWithString: "Agent Controls")
+    private let controlsButtonsStack = NSStackView()
     private let plannerStatusLabel = NSTextField(labelWithString: "Планировщик: выключен")
+    private var taskAgentLaunchButtons: [TaskAgentID: NSButton] = [:]
 
     init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -77,15 +100,22 @@ final class ChatSidebarViewController: NSViewController {
         approvePlanButton.target = self
         approvePlanButton.action = #selector(approvePlanTapped)
         approvePlanButton.isEnabled = false
-        startPlannerButton.target = self
-        startPlannerButton.action = #selector(startPlannerTapped)
+        configureTaskAgentPanel()
         configureInputTextView()
 
         addChild(dialogHistoryViewController)
         let dialogView = dialogHistoryViewController.view
         dialogView.translatesAutoresizingMaskIntoConstraints = false
 
-        let inputRow = NSStackView(views: [inputScrollView, startPlannerButton, approvePlanButton, sendButton])
+        let taskAgentsPanel = NSStackView(views: [taskAgentsTitleLabel, taskAgentsButtonsStack])
+        taskAgentsPanel.orientation = .vertical
+        taskAgentsPanel.spacing = 4
+
+        let controlsPanel = NSStackView(views: [controlsTitleLabel, controlsButtonsStack])
+        controlsPanel.orientation = .vertical
+        controlsPanel.spacing = 4
+
+        let inputRow = NSStackView(views: [inputScrollView, approvePlanButton, sendButton])
         inputRow.orientation = .horizontal
         inputRow.alignment = .bottom
         inputRow.spacing = 8
@@ -95,7 +125,7 @@ final class ChatSidebarViewController: NSViewController {
         plannerStatusLabel.textColor = .secondaryLabelColor
         plannerStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
 
-        let root = NSStackView(views: [dialogView, plannerStatusLabel, inputRow])
+        let root = NSStackView(views: [dialogView, plannerStatusLabel, taskAgentsPanel, controlsPanel, inputRow])
         root.orientation = .vertical
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
@@ -106,11 +136,13 @@ final class ChatSidebarViewController: NSViewController {
             root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
-            startPlannerButton.widthAnchor.constraint(equalToConstant: 120),
             approvePlanButton.widthAnchor.constraint(equalToConstant: 88),
             sendButton.widthAnchor.constraint(equalToConstant: 88),
             inputScrollView.heightAnchor.constraint(equalToConstant: inputHeightForThreeLines()),
         ])
+
+        rebuildTaskAgentLaunchButtons()
+        rebuildControlButtons()
     }
 
     private func configureInputTextView() {
@@ -140,6 +172,21 @@ final class ChatSidebarViewController: NSViewController {
         inputScrollView.hasHorizontalScroller = false
         inputScrollView.drawsBackground = false
         inputScrollView.documentView = inputTextView
+    }
+
+    private func configureTaskAgentPanel() {
+        taskAgentsTitleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        taskAgentsTitleLabel.textColor = .secondaryLabelColor
+        controlsTitleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        controlsTitleLabel.textColor = .secondaryLabelColor
+
+        taskAgentsButtonsStack.orientation = .horizontal
+        taskAgentsButtonsStack.alignment = .leading
+        taskAgentsButtonsStack.spacing = 8
+
+        controlsButtonsStack.orientation = .horizontal
+        controlsButtonsStack.alignment = .leading
+        controlsButtonsStack.spacing = 8
     }
 
     override func viewDidAppear() {
@@ -172,8 +219,9 @@ final class ChatSidebarViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
-                self?.startPlannerButton.isEnabled = !sending
                 self?.approvePlanButton.isEnabled = !sending && (self?.viewModel.canApprovePlan ?? false)
+                self?.updateTaskAgentLaunchButtons(isEnabled: !sending)
+                self?.updateControlButtonsAvailability(isEnabled: !sending)
             }
             .store(in: &cancellables)
 
@@ -196,6 +244,13 @@ final class ChatSidebarViewController: NSViewController {
                     .joined(separator: " ")
             }
             .store(in: &cancellables)
+
+        viewModel.$chatMode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuildControlButtons()
+            }
+            .store(in: &cancellables)
     }
 
     @objc
@@ -206,12 +261,63 @@ final class ChatSidebarViewController: NSViewController {
     }
 
     @objc
-    private func startPlannerTapped() {
-        viewModel.send(text: "/vacation start")
+    private func approvePlanTapped() {
+        viewModel.approvePlan()
     }
 
     @objc
-    private func approvePlanTapped() {
-        viewModel.approvePlan()
+    private func taskAgentCommandTapped(_ sender: NSButton) {
+        guard let commandButton = sender as? AgentCommandButton else { return }
+        viewModel.send(text: commandButton.command)
+    }
+
+    private func rebuildTaskAgentLaunchButtons() {
+        taskAgentLaunchButtons.removeAll()
+        taskAgentsButtonsStack.arrangedSubviews.forEach { view in
+            taskAgentsButtonsStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for descriptor in viewModel.taskAgentCatalog {
+            let button = AgentCommandButton(
+                title: descriptor.name,
+                command: descriptor.startCommand,
+                target: self,
+                action: #selector(taskAgentCommandTapped)
+            )
+            taskAgentLaunchButtons[descriptor.id] = button
+            taskAgentsButtonsStack.addArrangedSubview(button)
+        }
+    }
+
+    private func rebuildControlButtons() {
+        controlsButtonsStack.arrangedSubviews.forEach { view in
+            controlsButtonsStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        guard let descriptor = viewModel.activeTaskAgentDescriptor else { return }
+        for control in descriptor.controls {
+            let button = AgentCommandButton(
+                title: control.title,
+                command: control.command,
+                target: self,
+                action: #selector(taskAgentCommandTapped)
+            )
+            button.isEnabled = !viewModel.isSending
+            controlsButtonsStack.addArrangedSubview(button)
+        }
+    }
+
+    private func updateTaskAgentLaunchButtons(isEnabled: Bool) {
+        for button in taskAgentLaunchButtons.values {
+            button.isEnabled = isEnabled
+        }
+    }
+
+    private func updateControlButtonsAvailability(isEnabled: Bool) {
+        for button in controlsButtonsStack.arrangedSubviews.compactMap({ $0 as? NSButton }) {
+            button.isEnabled = isEnabled
+        }
     }
 }

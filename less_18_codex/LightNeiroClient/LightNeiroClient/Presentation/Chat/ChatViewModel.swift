@@ -18,6 +18,13 @@ final class ChatViewModel {
     @Published private(set) var questionnaireState: QuestionnaireState = .empty
     @Published private(set) var questionnaireProgressText: String?
 
+    let taskAgentCatalog: [TaskAgentDescriptor]
+
+    var activeTaskAgentDescriptor: TaskAgentDescriptor? {
+        guard let activeID = activeTaskAgentID else { return nil }
+        return taskAgentCatalog.first(where: { $0.id == activeID })
+    }
+
     var dialogPatchesPublisher: AnyPublisher<[DialogHistoryPatch], Never> {
         dialogPatchesSubject.eraseToAnyPublisher()
     }
@@ -63,7 +70,8 @@ final class ChatViewModel {
         stopCounterTaskAgentUseCase: StopCounterTaskAgentUseCaseProtocol? = nil,
         configureCounterTaskAgentIntervalUseCase: ConfigureCounterTaskAgentIntervalUseCaseProtocol? = nil,
         tickCounterTaskAgentUseCase: TickCounterTaskAgentUseCaseProtocol? = nil,
-        getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol? = nil
+        getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol? = nil,
+        taskAgentCatalog: [TaskAgentDescriptor] = TaskAgentCatalog.all
     ) {
         self.session = session
         self.sendMessageUseCase = sendMessageUseCase
@@ -80,6 +88,7 @@ final class ChatViewModel {
         self.configureCounterTaskAgentIntervalUseCase = configureCounterTaskAgentIntervalUseCase
         self.tickCounterTaskAgentUseCase = tickCounterTaskAgentUseCase
         self.getCounterTaskAgentStatusUseCase = getCounterTaskAgentStatusUseCase
+        self.taskAgentCatalog = taskAgentCatalog
 
         Task { [weak self] in
             await self?.loadInitialState()
@@ -836,6 +845,17 @@ final class ChatViewModel {
             return String(format: "%.0f", interval)
         }
         return String(format: "%.2f", interval)
+    }
+
+    private var activeTaskAgentID: TaskAgentID? {
+        switch chatMode {
+        case .mockTaskAgent:
+            return .mock
+        case .counterTaskAgent:
+            return .counter
+        case .default, .vacationPlanner:
+            return nil
+        }
     }
 }
 
