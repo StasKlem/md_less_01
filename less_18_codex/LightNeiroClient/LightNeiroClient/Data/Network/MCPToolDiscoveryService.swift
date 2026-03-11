@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import Logging
 
-final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol {
+final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol, MCPHackerNewsServiceProtocol {
     private let clientFactory: @Sendable () -> Client
 
     init(clientFactory: @escaping @Sendable () -> Client = {
@@ -71,6 +71,29 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
     }
 
+    func fetchRandomStory(serverURL: URL) async throws -> HackerNewsTaskAgentStory {
+        let client = clientFactory()
+        let transport = try makeTransport(serverURL: serverURL)
+
+        do {
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(name: "hackernews_get_random_story", arguments: [:])
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP hackernews_get_random_story returned an error." : text)
+            }
+            guard !text.isEmpty else {
+                throw MCPDiscoveryError.toolCall("MCP hackernews_get_random_story returned empty response.")
+            }
+            return parseHackerNewsStory(from: text)
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
     private func makeTransport(serverURL: URL) throws -> any Transport {
         if shouldUseStdio(serverURL: serverURL) {
             let configuration = try buildStdioLaunchConfiguration(serverURL: serverURL)
@@ -93,19 +116,24 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             return .init(executableURL: serverURL, arguments: [], currentDirectoryURL: nil)
         }
 
+        let serverKind = try inferStdioServerKind(from: serverURL)
         let environment = ProcessInfo.processInfo.environment
-        if let explicitPath = environment["OPENWEATHER_MCP_SERVER_PATH"]?
+        if let explicitPath = environment[serverKind.explicitPathEnv]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !explicitPath.isEmpty
         {
-            return .init(
-                executableURL: URL(fileURLWithPath: explicitPath),
-                arguments: [],
-                currentDirectoryURL: nil
+            if let configuration = buildLaunchConfigurationFromExplicitPath(
+                explicitPath,
+                serverKind: serverKind
+            ) {
+                return configuration
+            }
+            throw MCPDiscoveryError.configuration(
+                "\(serverKind.explicitPathEnv) points to missing path: \(explicitPath)"
             )
         }
 
-        if let packageDirectory = findOpenWeatherPackageDirectory() {
+        if let packageDirectory = findPackageDirectory(named: serverKind.packageDirectoryName) {
             return .init(
                 executableURL: URL(fileURLWithPath: "/usr/bin/env"),
                 arguments: [
@@ -113,23 +141,93 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                     "run",
                     "--package-path",
                     packageDirectory.path,
-                    "OpenWeatherMCPServer"
+                    serverKind.executableName
                 ],
                 currentDirectoryURL: packageDirectory
             )
         }
 
         throw MCPDiscoveryError.configuration(
-            "OpenWeather MCP server not found. Set OPENWEATHER_MCP_SERVER_PATH or use HTTP endpoint."
+            "\(serverKind.readableName) MCP server not found. Set \(serverKind.explicitPathEnv) or use HTTP endpoint."
         )
     }
 
-    private func findOpenWeatherPackageDirectory() -> URL? {
+    private func buildLaunchConfigurationFromExplicitPath(
+        _ explicitPath: String,
+        serverKind: MCPStdioServerKind
+    ) -> ProcessStdioMCPTransport.LaunchConfiguration? {
+        let fileManager = FileManager.default
+        guard let resolvedURL = resolveExistingPath(explicitPath, fileManager: fileManager) else {
+            return nil
+        }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+
+        if isDirectory.boolValue {
+            let packageManifest = resolvedURL.appendingPathComponent("Package.swift")
+            guard fileManager.fileExists(atPath: packageManifest.path) else {
+                return nil
+            }
+            return .init(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: [
+                    "swift",
+                    "run",
+                    "--package-path",
+                    resolvedURL.path,
+                    serverKind.executableName
+                ],
+                currentDirectoryURL: resolvedURL
+            )
+        }
+
+        return .init(executableURL: resolvedURL, arguments: [], currentDirectoryURL: nil)
+    }
+
+    private func resolveExistingPath(_ path: String, fileManager: FileManager) -> URL? {
+        let directURL = URL(fileURLWithPath: path)
+        if fileManager.fileExists(atPath: directURL.path) {
+            return directURL
+        }
+
+        var cursor = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+        for _ in 0...8 {
+            let candidate = cursor.appendingPathComponent(path)
+            if fileManager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            let parent = cursor.deletingLastPathComponent()
+            if parent.path == cursor.path {
+                break
+            }
+            cursor = parent
+        }
+        return nil
+    }
+
+    private func inferStdioServerKind(from serverURL: URL) throws -> MCPStdioServerKind {
+        let hint = serverURL.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch hint {
+        case "open-weather":
+            return .openWeather
+        case "hackernews", "hacker-news":
+            return .hackerNews
+        default:
+            throw MCPDiscoveryError.configuration(
+                "Unknown stdio MCP endpoint: \(serverURL.absoluteString). Expected stdio://open-weather or stdio://hackernews."
+            )
+        }
+    }
+
+    private func findPackageDirectory(named directoryName: String) -> URL? {
         let fileManager = FileManager.default
         var cursor = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
 
         for _ in 0...8 {
-            let packageCandidate = cursor.appendingPathComponent("OpenWeatherMCPServer", isDirectory: true)
+            let packageCandidate = cursor.appendingPathComponent(directoryName, isDirectory: true)
             let packageManifest = packageCandidate.appendingPathComponent("Package.swift")
             if fileManager.fileExists(atPath: packageManifest.path) {
                 return packageCandidate
@@ -137,7 +235,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 
             let localManifest = cursor.appendingPathComponent("Package.swift")
             if fileManager.fileExists(atPath: localManifest.path),
-               cursor.lastPathComponent == "OpenWeatherMCPServer"
+               cursor.lastPathComponent == directoryName
             {
                 return cursor
             }
@@ -150,6 +248,82 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
         return nil
     }
+}
+
+private enum MCPStdioServerKind {
+    case openWeather
+    case hackerNews
+
+    var explicitPathEnv: String {
+        switch self {
+        case .openWeather:
+            return "OPENWEATHER_MCP_SERVER_PATH"
+        case .hackerNews:
+            return "HACKERNEWS_MCP_SERVER_PATH"
+        }
+    }
+
+    var packageDirectoryName: String {
+        switch self {
+        case .openWeather:
+            return "OpenWeatherMCPServer"
+        case .hackerNews:
+            return "HackerNewsMCPServer"
+        }
+    }
+
+    var executableName: String {
+        packageDirectoryName
+    }
+
+    var readableName: String {
+        switch self {
+        case .openWeather:
+            return "OpenWeather"
+        case .hackerNews:
+            return "HackerNews"
+        }
+    }
+}
+
+private func parseHackerNewsStory(from text: String) -> HackerNewsTaskAgentStory {
+    let lines = text
+        .split(separator: "\n")
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    let title = extractHNField(prefix: "- Title:", lines: lines) ?? "Untitled Hacker News story"
+    let id = extractHNField(prefix: "- ID:", lines: lines).flatMap(Int.init)
+    let author = extractHNField(prefix: "- Author:", lines: lines)
+    let score = extractHNField(prefix: "- Score:", lines: lines).flatMap(Int.init)
+    let timestamp = extractHNField(prefix: "- Time:", lines: lines)
+    let urlValue = extractHNField(prefix: "- URL:", lines: lines)
+    let normalizedURL = normalizeHNURL(urlValue)
+
+    return HackerNewsTaskAgentStory(
+        storyID: id,
+        title: title,
+        author: author,
+        score: score,
+        publishedAtUTC: timestamp,
+        url: normalizedURL,
+        rawText: text
+    )
+}
+
+private func extractHNField(prefix: String, lines: [String]) -> String? {
+    guard let line = lines.first(where: { $0.hasPrefix(prefix) }) else { return nil }
+    let value = line
+        .replacingOccurrences(of: prefix, with: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? nil : value
+}
+
+private func normalizeHNURL(_ value: String?) -> String? {
+    guard let value else { return nil }
+    if value == "(no external URL)" {
+        return nil
+    }
+    return value
 }
 
 private func extractText(from content: [Tool.Content]) -> String {
@@ -295,7 +469,7 @@ private actor ProcessStdioMCPTransport: Transport {
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !text.isEmpty
         {
-            logger.debug("OpenWeather MCP stderr: \(text)")
+            logger.debug("MCP stderr: \(text)")
         }
     }
 
@@ -303,7 +477,7 @@ private actor ProcessStdioMCPTransport: Transport {
         guard isConnected else { return }
         isConnected = false
         if status != 0 {
-            logger.error("OpenWeather MCP process exited with code \(status)")
+            logger.error("MCP process exited with code \(status)")
         }
         messageContinuation.finish()
     }

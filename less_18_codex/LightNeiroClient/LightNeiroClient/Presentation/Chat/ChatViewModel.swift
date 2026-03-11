@@ -8,6 +8,7 @@ final class ChatViewModel {
         case vacationPlanner
         case mockTaskAgent
         case counterTaskAgent
+        case hackerNewsTaskAgent
     }
 
     @Published private(set) var dialogItems: [DialogHistoryItemViewState] = []
@@ -46,14 +47,22 @@ final class ChatViewModel {
     private let configureCounterTaskAgentIntervalUseCase: ConfigureCounterTaskAgentIntervalUseCaseProtocol?
     private let tickCounterTaskAgentUseCase: TickCounterTaskAgentUseCaseProtocol?
     private let getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol?
+    private let startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol?
+    private let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol?
+    private let configureHackerNewsTaskAgentIntervalUseCase: ConfigureHackerNewsTaskAgentIntervalUseCaseProtocol?
+    private let tickHackerNewsTaskAgentUseCase: TickHackerNewsTaskAgentUseCaseProtocol?
+    private let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol?
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
     private var lastPlannerState: VacationPlanningState?
     private var lastMockTaskAgentState: MockTaskAgentState?
     private var lastCounterTaskAgentState: CounterTaskAgentState?
+    private var lastHackerNewsTaskAgentState: HackerNewsTaskAgentState?
     private var counterTimerTask: Task<Void, Never>?
+    private var hackerNewsTimerTask: Task<Void, Never>?
     private var isCounterTickInFlight = false
+    private var isHackerNewsTickInFlight = false
 
     init(
         session: ChatSession,
@@ -71,6 +80,11 @@ final class ChatViewModel {
         configureCounterTaskAgentIntervalUseCase: ConfigureCounterTaskAgentIntervalUseCaseProtocol? = nil,
         tickCounterTaskAgentUseCase: TickCounterTaskAgentUseCaseProtocol? = nil,
         getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol? = nil,
+        startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol? = nil,
+        stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol? = nil,
+        configureHackerNewsTaskAgentIntervalUseCase: ConfigureHackerNewsTaskAgentIntervalUseCaseProtocol? = nil,
+        tickHackerNewsTaskAgentUseCase: TickHackerNewsTaskAgentUseCaseProtocol? = nil,
+        getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol? = nil,
         taskAgentCatalog: [TaskAgentDescriptor] = TaskAgentCatalog.all
     ) {
         self.session = session
@@ -88,6 +102,11 @@ final class ChatViewModel {
         self.configureCounterTaskAgentIntervalUseCase = configureCounterTaskAgentIntervalUseCase
         self.tickCounterTaskAgentUseCase = tickCounterTaskAgentUseCase
         self.getCounterTaskAgentStatusUseCase = getCounterTaskAgentStatusUseCase
+        self.startHackerNewsTaskAgentUseCase = startHackerNewsTaskAgentUseCase
+        self.stopHackerNewsTaskAgentUseCase = stopHackerNewsTaskAgentUseCase
+        self.configureHackerNewsTaskAgentIntervalUseCase = configureHackerNewsTaskAgentIntervalUseCase
+        self.tickHackerNewsTaskAgentUseCase = tickHackerNewsTaskAgentUseCase
+        self.getHackerNewsTaskAgentStatusUseCase = getHackerNewsTaskAgentStatusUseCase
         self.taskAgentCatalog = taskAgentCatalog
 
         Task { [weak self] in
@@ -98,6 +117,7 @@ final class ChatViewModel {
 
     deinit {
         counterTimerTask?.cancel()
+        hackerNewsTimerTask?.cancel()
     }
 
     func apply(settings: LLMSettings) {
@@ -122,6 +142,10 @@ final class ChatViewModel {
         }
         if chatMode == .counterTaskAgent {
             appendSystemMessage("Counter Task Agent работает в фоне. Используйте `/counter interval <сек>` или `/counter stop`.")
+            return
+        }
+        if chatMode == .hackerNewsTaskAgent {
+            appendSystemMessage("Hacker News Task Agent работает в фоне. Используйте `/hn interval <сек>` или `/hn stop`.")
             return
         }
 
@@ -216,12 +240,15 @@ final class ChatViewModel {
         if command.hasPrefix("/counter") {
             return handleCounterTaskAgentCommand(command)
         }
+        if command.hasPrefix("/hn") || command.hasPrefix("/hackernews") {
+            return handleHackerNewsTaskAgentCommand(command)
+        }
         return false
     }
 
     private func handleVacationCommand(_ command: String) -> Bool {
         if command == "/vacation stop" {
-            stopCounterTimer()
+            stopBackgroundAgentTimers()
             chatMode = .default
             plannerStepTitle = nil
             updateApproveAvailability()
@@ -240,7 +267,7 @@ final class ChatViewModel {
 
     private func handleMockTaskAgentCommand(_ command: String) -> Bool {
         if command == "/task stop" {
-            stopCounterTimer()
+            stopBackgroundAgentTimers()
             chatMode = .default
             plannerStepTitle = nil
             questionnaireProgressText = nil
@@ -290,8 +317,59 @@ final class ChatViewModel {
         return true
     }
 
+    private func handleHackerNewsTaskAgentCommand(_ command: String) -> Bool {
+        if command == "/hn stop" || command == "/hackernews stop" {
+            stopHackerNewsTaskAgent()
+            return true
+        }
+
+        if command == "/hn" || command == "/hn start" || command == "/hackernews" || command == "/hackernews start" {
+            startHackerNewsTaskAgent(intervalSeconds: nil)
+            return true
+        }
+
+        if command.hasPrefix("/hn start ") {
+            guard let value = parseIntervalSeconds(from: command.replacingOccurrences(of: "/hn start ", with: "")) else {
+                appendSystemMessage("Некорректный интервал. Пример: `/hn start 5`.")
+                return true
+            }
+            startHackerNewsTaskAgent(intervalSeconds: value)
+            return true
+        }
+
+        if command.hasPrefix("/hackernews start ") {
+            guard let value = parseIntervalSeconds(from: command.replacingOccurrences(of: "/hackernews start ", with: "")) else {
+                appendSystemMessage("Некорректный интервал. Пример: `/hackernews start 5`.")
+                return true
+            }
+            startHackerNewsTaskAgent(intervalSeconds: value)
+            return true
+        }
+
+        if command.hasPrefix("/hn interval ") {
+            guard let value = parseIntervalSeconds(from: command.replacingOccurrences(of: "/hn interval ", with: "")) else {
+                appendSystemMessage("Некорректный интервал. Пример: `/hn interval 10`.")
+                return true
+            }
+            configureHackerNewsTaskAgentInterval(value)
+            return true
+        }
+
+        if command.hasPrefix("/hackernews interval ") {
+            guard let value = parseIntervalSeconds(from: command.replacingOccurrences(of: "/hackernews interval ", with: "")) else {
+                appendSystemMessage("Некорректный интервал. Пример: `/hackernews interval 10`.")
+                return true
+            }
+            configureHackerNewsTaskAgentInterval(value)
+            return true
+        }
+
+        appendSystemMessage("Неизвестная команда Hacker News агента. Используйте `/hn start [сек]`, `/hn interval <сек>` или `/hn stop`.")
+        return true
+    }
+
     private func startVacationPlanner() {
-        stopCounterTimer()
+        stopBackgroundAgentTimers()
         guard let useCase = startVacationPlanningUseCase else {
             appendSystemMessage("Планировщик отпуска недоступен в этой сборке.")
             return
@@ -356,7 +434,7 @@ final class ChatViewModel {
     }
 
     private func startMockTaskAgent() {
-        stopCounterTimer()
+        stopBackgroundAgentTimers()
         guard let useCase = startMockTaskAgentUseCase else {
             appendSystemMessage("Mock Task Agent недоступен в этой сборке.")
             return
@@ -450,7 +528,7 @@ final class ChatViewModel {
     }
 
     private func startCounterTaskAgent(intervalSeconds: TimeInterval?) {
-        stopCounterTimer()
+        stopBackgroundAgentTimers()
         guard let useCase = startCounterTaskAgentUseCase else {
             appendSystemMessage("Counter Task Agent недоступен в этой сборке.")
             return
@@ -543,6 +621,100 @@ final class ChatViewModel {
         syncCounterTimer(with: result.snapshot)
     }
 
+    private func startHackerNewsTaskAgent(intervalSeconds: TimeInterval?) {
+        stopBackgroundAgentTimers()
+        guard let useCase = startHackerNewsTaskAgentUseCase else {
+            appendSystemMessage("Hacker News Task Agent недоступен в этой сборке.")
+            return
+        }
+        guard !isSending else { return }
+        isSending = true
+        chatMode = .hackerNewsTaskAgent
+        questionnaireState = .empty
+        updateApproveAvailability()
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isSending = false }
+            do {
+                let result = try await useCase.execute(
+                    sessionID: self.session.id,
+                    branchID: self.session.activeBranchID,
+                    intervalSeconds: intervalSeconds
+                )
+                self.applyHackerNewsTaskAgentResult(result)
+            } catch {
+                self.appendSystemMessage("Не удалось запустить Hacker News Task Agent: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func stopHackerNewsTaskAgent() {
+        stopHackerNewsTimer()
+        guard let useCase = stopHackerNewsTaskAgentUseCase else {
+            appendSystemMessage("Hacker News Task Agent недоступен в этой сборке.")
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await useCase.execute(
+                    sessionID: self.session.id,
+                    branchID: self.session.activeBranchID
+                )
+                self.applyHackerNewsTaskAgentResult(result)
+                self.chatMode = .default
+                self.plannerStepTitle = nil
+                self.questionnaireProgressText = nil
+            } catch {
+                self.appendSystemMessage("Не удалось остановить Hacker News Task Agent: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func configureHackerNewsTaskAgentInterval(_ intervalSeconds: TimeInterval) {
+        guard let useCase = configureHackerNewsTaskAgentIntervalUseCase else {
+            appendSystemMessage("Hacker News Task Agent недоступен в этой сборке.")
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await useCase.execute(
+                    sessionID: self.session.id,
+                    branchID: self.session.activeBranchID,
+                    intervalSeconds: intervalSeconds
+                )
+                self.applyHackerNewsTaskAgentResult(result)
+            } catch {
+                self.appendSystemMessage("Не удалось обновить интервал Hacker News Task Agent: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func applyHackerNewsTaskAgentResult(_ result: HackerNewsTaskAgentTurnResult) {
+        plannerStepTitle = result.snapshot.state.title
+        questionnaireState = .empty
+        questionnaireProgressText = hackerNewsTaskAgentProgressText(for: result.snapshot)
+        if lastHackerNewsTaskAgentState != result.snapshot.state {
+            appendSystemMessage(
+                hackerNewsTaskAgentStateListMessage(current: result.snapshot.state),
+                tone: .stateTransition
+            )
+        }
+        lastHackerNewsTaskAgentState = result.snapshot.state
+        updateApproveAvailability()
+        if case let .failed(reason) = result.snapshot.state {
+            appendSystemMessage("Ошибка Hacker News task-агента: \(reason)")
+        }
+        for message in result.systemMessages {
+            appendSystemMessage(message)
+        }
+        syncHackerNewsTimer(with: result.snapshot)
+    }
+
     private func replaceDialogItem(_ state: DialogHistoryItemViewState) {
         guard let index = dialogItems.firstIndex(where: { $0.id == state.id }) else { return }
         dialogItems[index] = state
@@ -618,6 +790,26 @@ final class ChatViewModel {
                 syncCounterTimer(with: snapshot)
             } catch {
                 appendSystemMessage("Не удалось загрузить состояние Counter Task Agent: \(error.localizedDescription)")
+            }
+        }
+
+        if let hackerNewsUseCase = getHackerNewsTaskAgentStatusUseCase {
+            do {
+                let snapshot = try await hackerNewsUseCase.execute(
+                    sessionID: session.id,
+                    branchID: session.activeBranchID
+                )
+                lastHackerNewsTaskAgentState = snapshot.state
+                if chatMode == .default, snapshot.state == .running {
+                    chatMode = .hackerNewsTaskAgent
+                    plannerStepTitle = snapshot.state.title
+                    questionnaireState = .empty
+                    questionnaireProgressText = hackerNewsTaskAgentProgressText(for: snapshot)
+                    appendSystemMessage(hackerNewsTaskAgentResumeHint(for: snapshot))
+                }
+                syncHackerNewsTimer(with: snapshot)
+            } catch {
+                appendSystemMessage("Не удалось загрузить состояние Hacker News Task Agent: \(error.localizedDescription)")
             }
         }
     }
@@ -784,12 +976,55 @@ final class ChatViewModel {
         return "Возобновлен Counter Task Agent: \(snapshot.state.title). \(action)"
     }
 
+    private func hackerNewsTaskAgentProgressText(for snapshot: HackerNewsTaskAgentSnapshot) -> String {
+        let interval = formatInterval(snapshot.context.intervalSeconds)
+        return "HN task: запросов \(snapshot.context.requestCount), следующий #\(snapshot.context.nextRequestNumber), интервал \(interval) сек."
+    }
+
+    private func hackerNewsTaskAgentStateListMessage(current: HackerNewsTaskAgentState) -> String {
+        let ordered: [HackerNewsTaskAgentState] = [
+            .idle,
+            .running
+        ]
+        var lines: [String] = ["Состояния Hacker News task-агента (текущее отмечено [x]):"]
+        for state in ordered {
+            let marker = (state == current) ? "[x]" : "[ ]"
+            lines.append("\(marker) \(state.title)")
+        }
+        if case let .failed(reason) = current {
+            lines.append("[x] Ошибка: \(reason)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func hackerNewsTaskAgentResumeHint(for snapshot: HackerNewsTaskAgentSnapshot) -> String {
+        let interval = formatInterval(snapshot.context.intervalSeconds)
+        let action: String
+        switch snapshot.state {
+        case .running:
+            action = "Мониторинг активен, интервал \(interval) сек."
+        case .failed:
+            action = "Отправьте `/hn start` для перезапуска."
+        case .idle:
+            action = "Агент не активен."
+        }
+        return "Возобновлен Hacker News Task Agent: \(snapshot.state.title). \(action)"
+    }
+
     private func syncCounterTimer(with snapshot: CounterTaskAgentSnapshot) {
         guard snapshot.state == .running else {
             stopCounterTimer()
             return
         }
         startCounterTimer(intervalSeconds: snapshot.context.intervalSeconds)
+    }
+
+    private func syncHackerNewsTimer(with snapshot: HackerNewsTaskAgentSnapshot) {
+        guard snapshot.state == .running else {
+            stopHackerNewsTimer()
+            return
+        }
+        startHackerNewsTimer(intervalSeconds: snapshot.context.intervalSeconds)
     }
 
     private func startCounterTimer(intervalSeconds: TimeInterval) {
@@ -815,6 +1050,34 @@ final class ChatViewModel {
         counterTimerTask = nil
     }
 
+    private func startHackerNewsTimer(intervalSeconds: TimeInterval) {
+        stopHackerNewsTimer()
+        guard intervalSeconds > 0 else { return }
+        let nanoseconds = UInt64(intervalSeconds * 1_000_000_000)
+        hackerNewsTimerTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+                await self.performHackerNewsTickIfNeeded()
+            }
+        }
+    }
+
+    private func stopHackerNewsTimer() {
+        hackerNewsTimerTask?.cancel()
+        hackerNewsTimerTask = nil
+    }
+
+    private func stopBackgroundAgentTimers() {
+        stopCounterTimer()
+        stopHackerNewsTimer()
+    }
+
     private func performCounterTickIfNeeded() async {
         guard chatMode == .counterTaskAgent else { return }
         guard !isCounterTickInFlight else { return }
@@ -829,6 +1092,23 @@ final class ChatViewModel {
             applyCounterTaskAgentResult(result)
         } catch {
             appendSystemMessage("Ошибка тика Counter Task Agent: \(error.localizedDescription)")
+        }
+    }
+
+    private func performHackerNewsTickIfNeeded() async {
+        guard chatMode == .hackerNewsTaskAgent else { return }
+        guard !isHackerNewsTickInFlight else { return }
+        guard let useCase = tickHackerNewsTaskAgentUseCase else { return }
+        isHackerNewsTickInFlight = true
+        defer { isHackerNewsTickInFlight = false }
+        do {
+            let result = try await useCase.execute(
+                sessionID: session.id,
+                branchID: session.activeBranchID
+            )
+            applyHackerNewsTaskAgentResult(result)
+        } catch {
+            appendSystemMessage("Ошибка тика Hacker News Task Agent: \(error.localizedDescription)")
         }
     }
 
@@ -853,6 +1133,8 @@ final class ChatViewModel {
             return .mock
         case .counterTaskAgent:
             return .counter
+        case .hackerNewsTaskAgent:
+            return .hackerNews
         case .default, .vacationPlanner:
             return nil
         }

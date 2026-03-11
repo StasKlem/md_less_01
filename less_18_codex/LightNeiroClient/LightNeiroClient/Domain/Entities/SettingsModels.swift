@@ -2,6 +2,7 @@ import Foundation
 
 /// Список поддерживаемых LLM-моделей.
 enum LLMModel: String, CaseIterable, Codable {
+    case seed20Mini = "bytedance-seed/seed-2.0-mini"
     case deepseekV32 = "deepseek/deepseek-v3.2"
     case gpt4oMini = "gpt-4o-mini"
     case gpt4o = "gpt-4o"
@@ -16,7 +17,7 @@ struct LLMSettings: Codable, Equatable {
 
     /// Значения настроек по умолчанию для новой сессии.
     static let `default` = LLMSettings(
-        model: .deepseekV32,
+        model: .seed20Mini,
         temperature: 0.4,
         windowSize: 3,
         plannerInvariants: [

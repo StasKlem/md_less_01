@@ -17,6 +17,7 @@ protocol TaskAgentDescriptorProtocol {
 enum TaskAgentID: String, Equatable {
     case mock
     case counter
+    case hackerNews
 }
 
 struct TaskAgentControl: TaskAgentControlProtocol, Equatable {
@@ -49,6 +50,16 @@ enum TaskAgentCatalog {
                 TaskAgentControl(title: "Стоп", command: "/counter stop"),
                 TaskAgentControl(title: "Интервал 1с", command: "/counter interval 1"),
                 TaskAgentControl(title: "Интервал 5с", command: "/counter interval 5")
+            ]
+        ),
+        TaskAgentDescriptor(
+            id: .hackerNews,
+            name: "Hacker News Task Agent",
+            startCommand: "/hn start",
+            controls: [
+                TaskAgentControl(title: "Стоп", command: "/hn stop"),
+                TaskAgentControl(title: "Интервал 5с", command: "/hn interval 5"),
+                TaskAgentControl(title: "Интервал 10с", command: "/hn interval 10")
             ]
         )
     ]

@@ -67,7 +67,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 stopCounterTaskAgentUseCase: environment.stopCounterTaskAgentUseCase,
                 configureCounterTaskAgentIntervalUseCase: environment.configureCounterTaskAgentIntervalUseCase,
                 tickCounterTaskAgentUseCase: environment.tickCounterTaskAgentUseCase,
-                getCounterTaskAgentStatusUseCase: environment.getCounterTaskAgentStatusUseCase
+                getCounterTaskAgentStatusUseCase: environment.getCounterTaskAgentStatusUseCase,
+                startHackerNewsTaskAgentUseCase: environment.startHackerNewsTaskAgentUseCase,
+                stopHackerNewsTaskAgentUseCase: environment.stopHackerNewsTaskAgentUseCase,
+                configureHackerNewsTaskAgentIntervalUseCase: environment.configureHackerNewsTaskAgentIntervalUseCase,
+                tickHackerNewsTaskAgentUseCase: environment.tickHackerNewsTaskAgentUseCase,
+                getHackerNewsTaskAgentStatusUseCase: environment.getHackerNewsTaskAgentStatusUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 session: environment.session,

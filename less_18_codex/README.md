@@ -1,5 +1,43 @@
 # LightNeiroClient Monorepo
 
+## HackerNewsMCPServer (MCP)
+
+`HackerNewsMCPServer` - локальный MCP сервер (transport `stdio`) с инструментом:
+
+- `hackernews_get_random_story` - возвращает случайную статью из top stories Hacker News (title, id, author, score, time, url).
+
+Запуск сервера:
+
+```bash
+cd HackerNewsMCPServer
+swift run HackerNewsMCPServer
+```
+
+Переменные окружения сервера:
+
+- `HACKERNEWS_BASE_URL` (опционально, по умолчанию `https://hacker-news.firebaseio.com`)
+- `HACKERNEWS_LOG_LEVEL` (опционально, `debug|info|warn|error`, по умолчанию `info`)
+
+## Hacker News Task Agent
+
+В `LightNeiroClient` добавлен task-агент `Hacker News Task Agent`:
+
+- каждые `N` секунд (по умолчанию `5`, настраивается) вызывает MCP tool `hackernews_get_random_story`;
+- каждую полученную статью сохраняет в JSON-файл в `Application Support/LightNeiroClient/task_flow/hacker_news_articles/...`;
+- выводит короткое системное сообщение по статье;
+- каждые 5 запросов отправляет LLM-запрос с суммаризацией последних статей и показывает результат в чате.
+
+Команды агента:
+
+- `/hn start` - запуск с интервалом по умолчанию (5 сек)
+- `/hn start <сек>` - запуск с заданным интервалом
+- `/hn interval <сек>` - изменить интервал
+- `/hn stop` - остановить агент
+
+Для явного пути к MCP-серверу можно задать:
+
+- `HACKERNEWS_MCP_SERVER_PATH=/abs/path/to/HackerNewsMCPServer`
+
 Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальными MCP-серверами `OpenWeatherMCPServer` и `HackerNewsMCPServer`.
 
 ## Что внутри

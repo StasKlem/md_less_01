@@ -23,6 +23,11 @@ struct AppEnvironment {
     let configureCounterTaskAgentIntervalUseCase: ConfigureCounterTaskAgentIntervalUseCaseProtocol
     let tickCounterTaskAgentUseCase: TickCounterTaskAgentUseCaseProtocol
     let getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol
+    let startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol
+    let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol
+    let configureHackerNewsTaskAgentIntervalUseCase: ConfigureHackerNewsTaskAgentIntervalUseCaseProtocol
+    let tickHackerNewsTaskAgentUseCase: TickHackerNewsTaskAgentUseCaseProtocol
+    let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -38,6 +43,8 @@ struct AppEnvironment {
         let vacationPlanRepository = FileVacationPlanRepository()
         let mockTaskAgentStateRepository = FileMockTaskAgentStateRepository()
         let counterTaskAgentStateRepository = FileCounterTaskAgentStateRepository()
+        let hackerNewsTaskAgentStateRepository = FileHackerNewsTaskAgentStateRepository()
+        let hackerNewsArticleArchiveRepository = FileHackerNewsArticleArchiveRepository()
         let mcpToolDiscoveryService = MCPToolDiscoveryService()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -130,6 +137,25 @@ struct AppEnvironment {
         )
         let tickCounterTaskAgent = TickCounterTaskAgentUseCase(orchestrator: counterTaskAgentOrchestrator)
         let getCounterTaskAgentStatus = GetCounterTaskAgentStatusUseCase(stateRepository: counterTaskAgentStateRepository)
+        let hackerNewsLLMSummaryService = HackerNewsLLMSummaryService(
+            llmClient: llmClient,
+            settingsRepository: settingsRepository
+        )
+        let hackerNewsTaskAgentOrchestrator = HackerNewsTaskAgentOrchestrator(
+            stateRepository: hackerNewsTaskAgentStateRepository,
+            articleArchiveRepository: hackerNewsArticleArchiveRepository,
+            mcpService: mcpToolDiscoveryService,
+            llmSummaryService: hackerNewsLLMSummaryService
+        )
+        let startHackerNewsTaskAgent = StartHackerNewsTaskAgentUseCase(orchestrator: hackerNewsTaskAgentOrchestrator)
+        let stopHackerNewsTaskAgent = StopHackerNewsTaskAgentUseCase(orchestrator: hackerNewsTaskAgentOrchestrator)
+        let configureHackerNewsTaskAgentInterval = ConfigureHackerNewsTaskAgentIntervalUseCase(
+            orchestrator: hackerNewsTaskAgentOrchestrator
+        )
+        let tickHackerNewsTaskAgent = TickHackerNewsTaskAgentUseCase(orchestrator: hackerNewsTaskAgentOrchestrator)
+        let getHackerNewsTaskAgentStatus = GetHackerNewsTaskAgentStatusUseCase(
+            stateRepository: hackerNewsTaskAgentStateRepository
+        )
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -174,7 +200,12 @@ struct AppEnvironment {
             stopCounterTaskAgentUseCase: stopCounterTaskAgent,
             configureCounterTaskAgentIntervalUseCase: configureCounterTaskAgentInterval,
             tickCounterTaskAgentUseCase: tickCounterTaskAgent,
-            getCounterTaskAgentStatusUseCase: getCounterTaskAgentStatus
+            getCounterTaskAgentStatusUseCase: getCounterTaskAgentStatus,
+            startHackerNewsTaskAgentUseCase: startHackerNewsTaskAgent,
+            stopHackerNewsTaskAgentUseCase: stopHackerNewsTaskAgent,
+            configureHackerNewsTaskAgentIntervalUseCase: configureHackerNewsTaskAgentInterval,
+            tickHackerNewsTaskAgentUseCase: tickHackerNewsTaskAgent,
+            getHackerNewsTaskAgentStatusUseCase: getHackerNewsTaskAgentStatus
         )
     }
 }

@@ -513,6 +513,62 @@ final class CounterTaskAgentLifecycleTests: XCTestCase {
     }
 }
 
+final class HackerNewsTaskAgentLifecycleTests: XCTestCase {
+    func testStartUsesDefaultInterval() async throws {
+        let repository = MockHackerNewsTaskAgentStateRepository()
+        let archive = MockHackerNewsArticleArchiveRepository()
+        let mcpService = StubMCPHackerNewsService()
+        let llmService = StubHackerNewsLLMSummaryService()
+        let orchestrator = HackerNewsTaskAgentOrchestrator(
+            stateRepository: repository,
+            articleArchiveRepository: archive,
+            mcpService: mcpService,
+            llmSummaryService: llmService
+        )
+        let start = StartHackerNewsTaskAgentUseCase(orchestrator: orchestrator)
+
+        let result = try await start.execute(sessionID: UUID(), branchID: UUID(), intervalSeconds: nil)
+
+        XCTAssertEqual(result.snapshot.state, .running)
+        XCTAssertEqual(result.snapshot.context.intervalSeconds, HackerNewsTaskAgentContext.defaultIntervalSeconds, accuracy: 0.001)
+        XCTAssertEqual(result.snapshot.context.nextRequestNumber, 1)
+        XCTAssertEqual(result.snapshot.context.requestCount, 0)
+        XCTAssertTrue(result.systemMessages.contains(where: { $0.contains("запущен") }))
+    }
+
+    func testTickSavesArticleAndRequestsLLMSummaryOnFifthRequest() async throws {
+        let repository = MockHackerNewsTaskAgentStateRepository()
+        let archive = MockHackerNewsArticleArchiveRepository()
+        let mcpService = StubMCPHackerNewsService()
+        let llmService = StubHackerNewsLLMSummaryService()
+        let orchestrator = HackerNewsTaskAgentOrchestrator(
+            stateRepository: repository,
+            articleArchiveRepository: archive,
+            mcpService: mcpService,
+            llmSummaryService: llmService
+        )
+        let start = StartHackerNewsTaskAgentUseCase(orchestrator: orchestrator)
+        let tick = TickHackerNewsTaskAgentUseCase(orchestrator: orchestrator)
+        let sessionID = UUID()
+        let branchID = UUID()
+
+        _ = try await start.execute(sessionID: sessionID, branchID: branchID, intervalSeconds: 5)
+        var fifthTick: HackerNewsTaskAgentTurnResult?
+        for _ in 0..<5 {
+            fifthTick = try await tick.execute(sessionID: sessionID, branchID: branchID)
+        }
+
+        let result = try XCTUnwrap(fifthTick)
+        let savedRecordsCount = await archive.savedRecordsCount
+        let llmCallCount = await llmService.callCount
+        XCTAssertEqual(result.snapshot.context.requestCount, 5)
+        XCTAssertEqual(result.snapshot.context.nextRequestNumber, 6)
+        XCTAssertEqual(savedRecordsCount, 5)
+        XCTAssertEqual(llmCallCount, 1)
+        XCTAssertTrue(result.systemMessages.contains(where: { $0.contains("LLM-сводка") }))
+    }
+}
+
 private actor MockMockTaskAgentStateRepository: MockTaskAgentStateRepositoryProtocol {
     private var snapshot: MockTaskAgentSnapshot?
 
@@ -534,5 +590,57 @@ private actor MockCounterTaskAgentStateRepository: CounterTaskAgentStateReposito
 
     func saveSnapshot(_ snapshot: CounterTaskAgentSnapshot) async throws {
         self.snapshot = snapshot
+    }
+}
+
+private actor MockHackerNewsTaskAgentStateRepository: HackerNewsTaskAgentStateRepositoryProtocol {
+    private var snapshot: HackerNewsTaskAgentSnapshot?
+
+    func fetchSnapshot(sessionID _: UUID, branchID _: UUID) async throws -> HackerNewsTaskAgentSnapshot? {
+        snapshot
+    }
+
+    func saveSnapshot(_ snapshot: HackerNewsTaskAgentSnapshot) async throws {
+        self.snapshot = snapshot
+    }
+}
+
+private actor MockHackerNewsArticleArchiveRepository: HackerNewsArticleArchiveRepositoryProtocol {
+    private var records: [HackerNewsTaskAgentArticleRecord] = []
+
+    @discardableResult
+    func saveArticle(_ record: HackerNewsTaskAgentArticleRecord) async throws -> URL {
+        records.append(record)
+        return URL(fileURLWithPath: "/tmp/request-\(record.requestNumber).json")
+    }
+
+    var savedRecordsCount: Int {
+        records.count
+    }
+}
+
+private actor StubMCPHackerNewsService: MCPHackerNewsServiceProtocol {
+    private var nextID = 1
+
+    func fetchRandomStory(serverURL _: URL) async throws -> HackerNewsTaskAgentStory {
+        defer { nextID += 1 }
+        return HackerNewsTaskAgentStory(
+            storyID: nextID,
+            title: "Story \(nextID)",
+            author: "author\(nextID)",
+            score: 100 + nextID,
+            publishedAtUTC: "2026-03-11 12:00 UTC",
+            url: "https://example.com/\(nextID)",
+            rawText: "raw"
+        )
+    }
+}
+
+private actor StubHackerNewsLLMSummaryService: HackerNewsLLMSummaryServiceProtocol {
+    private(set) var callCount = 0
+
+    func summarize(sessionID _: UUID, recentStories _: [HackerNewsTaskAgentStoryDigest]) async throws -> String {
+        callCount += 1
+        return "Краткая сводка."
     }
 }
