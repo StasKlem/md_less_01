@@ -1,10 +1,5 @@
 import Foundation
 
-private struct PersistedEnvelope<T: Codable>: Codable {
-    let schemaVersion: Int
-    let payload: T
-}
-
 struct FileVacationPlanningStateRepository: VacationPlanningStateRepositoryProtocol {
     private let fileManager: FileManager
     private let rootDirectoryURL: URL
@@ -25,7 +20,6 @@ struct FileVacationPlanningStateRepository: VacationPlanningStateRepositoryProto
         guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
         let data = try Data(contentsOf: fileURL)
         let envelope = try decoder.decode(PersistedEnvelope<VacationPlanningSnapshot>.self, from: data)
-        // Backward compatibility: allow older or newer version and trust payload checks in domain layer.
         _ = envelope.schemaVersion
         return envelope.payload
     }

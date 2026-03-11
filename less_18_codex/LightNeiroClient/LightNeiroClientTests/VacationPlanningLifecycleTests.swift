@@ -428,3 +428,49 @@ final class VacationPlanningLifecycleTests: XCTestCase {
         }
     }
 }
+
+final class MockTaskAgentLifecycleTests: XCTestCase {
+    func testStartTransitionsToAwaitingTask() async throws {
+        let repository = MockMockTaskAgentStateRepository()
+        let orchestrator = MockTaskAgentOrchestrator(stateRepository: repository)
+        let useCase = StartMockTaskAgentUseCase(orchestrator: orchestrator)
+
+        let result = try await useCase.execute(sessionID: UUID(), branchID: UUID())
+
+        XCTAssertEqual(result.snapshot.state, .awaitingTask)
+        XCTAssertTrue(result.agentMessages.contains(where: { $0.contains("Mock Task Agent запущен") }))
+    }
+
+    func testHandleBuildsChecklistAndMovesToPreparedState() async throws {
+        let repository = MockMockTaskAgentStateRepository()
+        let orchestrator = MockTaskAgentOrchestrator(stateRepository: repository)
+        let start = StartMockTaskAgentUseCase(orchestrator: orchestrator)
+        let handle = HandleMockTaskAgentEventUseCase(orchestrator: orchestrator)
+        let sessionID = UUID()
+        let branchID = UUID()
+
+        _ = try await start.execute(sessionID: sessionID, branchID: branchID)
+        let result = try await handle.execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            userText: "Подготовить релизный чек-лист"
+        )
+
+        XCTAssertEqual(result.snapshot.state, .taskPrepared)
+        XCTAssertEqual(result.snapshot.context.latestTask, "Подготовить релизный чек-лист")
+        XCTAssertEqual(result.snapshot.context.checklist.count, 4)
+        XCTAssertTrue(result.agentMessages.joined(separator: "\n").contains("Чек-лист:"))
+    }
+}
+
+private actor MockMockTaskAgentStateRepository: MockTaskAgentStateRepositoryProtocol {
+    private var snapshot: MockTaskAgentSnapshot?
+
+    func fetchSnapshot(sessionID _: UUID, branchID _: UUID) async throws -> MockTaskAgentSnapshot? {
+        snapshot
+    }
+
+    func saveSnapshot(_ snapshot: MockTaskAgentSnapshot) async throws {
+        self.snapshot = snapshot
+    }
+}

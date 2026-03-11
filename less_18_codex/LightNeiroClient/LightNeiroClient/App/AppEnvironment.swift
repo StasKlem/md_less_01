@@ -15,6 +15,9 @@ struct AppEnvironment {
     let getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol
     let finalizeVacationPlanUseCase: FinalizeVacationPlanUseCaseProtocol
     let fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol
+    let startMockTaskAgentUseCase: StartMockTaskAgentUseCaseProtocol
+    let handleMockTaskAgentEventUseCase: HandleMockTaskAgentEventUseCaseProtocol
+    let getMockTaskAgentStatusUseCase: GetMockTaskAgentStatusUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -28,6 +31,7 @@ struct AppEnvironment {
         let metricsRepository = MockMetricsRepository()
         let vacationStateRepository = FileVacationPlanningStateRepository()
         let vacationPlanRepository = FileVacationPlanRepository()
+        let mockTaskAgentStateRepository = FileMockTaskAgentStateRepository()
         let mcpToolDiscoveryService = MCPToolDiscoveryService()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -104,6 +108,12 @@ struct AppEnvironment {
         let fetchVacationPlannerMCPTools = FetchVacationPlannerMCPToolsUseCase(
             toolDiscoveryService: mcpToolDiscoveryService
         )
+        let mockTaskAgentOrchestrator = MockTaskAgentOrchestrator(
+            stateRepository: mockTaskAgentStateRepository
+        )
+        let startMockTaskAgent = StartMockTaskAgentUseCase(orchestrator: mockTaskAgentOrchestrator)
+        let handleMockTaskAgentEvent = HandleMockTaskAgentEventUseCase(orchestrator: mockTaskAgentOrchestrator)
+        let getMockTaskAgentStatus = GetMockTaskAgentStatusUseCase(stateRepository: mockTaskAgentStateRepository)
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -140,7 +150,10 @@ struct AppEnvironment {
             handleVacationPlanningEventUseCase: handleVacationPlanningEvent,
             getVacationPlanningStatusUseCase: getVacationPlanningStatus,
             finalizeVacationPlanUseCase: finalizeVacationPlan,
-            fetchVacationPlannerMCPToolsUseCase: fetchVacationPlannerMCPTools
+            fetchVacationPlannerMCPToolsUseCase: fetchVacationPlannerMCPTools,
+            startMockTaskAgentUseCase: startMockTaskAgent,
+            handleMockTaskAgentEventUseCase: handleMockTaskAgentEvent,
+            getMockTaskAgentStatusUseCase: getMockTaskAgentStatus
         )
     }
 }

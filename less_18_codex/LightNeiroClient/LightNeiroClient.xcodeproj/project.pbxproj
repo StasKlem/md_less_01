@@ -10,6 +10,16 @@
 		C1A200012F70000100A1B2C3 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = C1A200022F70000100A1B2C3 /* MCP */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		B1A100072F60000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AE9A012A2F52F81800ACC179 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AE9A01312F52F81800ACC179;
+			remoteInfo = LightNeiroClient;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		AE9A01322F52F81800ACC179 /* LightNeiroClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LightNeiroClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1A100012F60000100ABCDEF /* LightNeiroClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LightNeiroClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -142,13 +152,13 @@
 			);
 			mainGroup = AE9A01292F52F81800ACC179;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AE9A01332F52F81800ACC179 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			packageReferences = (
-				C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */,
-			);
 			targets = (
 				AE9A01312F52F81800ACC179 /* LightNeiroClient */,
 				B1A100062F60000100ABCDEF /* LightNeiroClientTests */,
@@ -190,16 +200,6 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXContainerItemProxy section */
-		B1A100072F60000100ABCDEF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = AE9A012A2F52F81800ACC179 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = AE9A01312F52F81800ACC179;
-			remoteInfo = LightNeiroClient;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXTargetDependency section */
 		B1A100082F60000100ABCDEF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -207,25 +207,6 @@
 			targetProxy = B1A100072F60000100ABCDEF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/msventurini/swift-mcp-sdk.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.10.2;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		C1A200022F70000100A1B2C3 /* MCP */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */;
-			productName = MCP;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AE9A013E2F52F81900ACC179 /* Debug */ = {
@@ -421,14 +402,14 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = R48NAQ3X5H;
 				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../../../LightNeiroClient.app/Contents/MacOS",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)/LightNeiroClient.app/Contents/MacOS/LightNeiroClient.debug.dylib",
-				);
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@loader_path/../../../LightNeiroClient.app/Contents/MacOS",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = StasKlem.LightNeiroClientTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -444,14 +425,14 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = R48NAQ3X5H;
 				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../../../LightNeiroClient.app/Contents/MacOS",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)/LightNeiroClient.app/Contents/MacOS/LightNeiroClient.debug.dylib",
-				);
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@loader_path/../../../LightNeiroClient.app/Contents/MacOS",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = StasKlem.LightNeiroClientTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -491,6 +472,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/msventurini/swift-mcp-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.10.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C1A200022F70000100A1B2C3 /* MCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C1A200032F70000100A1B2C3 /* XCRemoteSwiftPackageReference "swift-mcp-sdk" */;
+			productName = MCP;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AE9A012A2F52F81800ACC179 /* Project object */;
 }

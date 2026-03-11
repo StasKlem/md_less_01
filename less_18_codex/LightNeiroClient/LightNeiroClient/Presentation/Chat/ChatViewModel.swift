@@ -6,6 +6,7 @@ final class ChatViewModel {
     enum ChatMode: Equatable {
         case `default`
         case vacationPlanner
+        case mockTaskAgent
     }
 
     @Published private(set) var dialogItems: [DialogHistoryItemViewState] = []
@@ -29,10 +30,14 @@ final class ChatViewModel {
     private let handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol?
     private let getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol?
     private let fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol?
+    private let startMockTaskAgentUseCase: StartMockTaskAgentUseCaseProtocol?
+    private let handleMockTaskAgentEventUseCase: HandleMockTaskAgentEventUseCaseProtocol?
+    private let getMockTaskAgentStatusUseCase: GetMockTaskAgentStatusUseCaseProtocol?
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
     private var lastPlannerState: VacationPlanningState?
+    private var lastMockTaskAgentState: MockTaskAgentState?
 
     init(
         session: ChatSession,
@@ -41,7 +46,10 @@ final class ChatViewModel {
         startVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol? = nil,
         handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol? = nil,
         getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol? = nil,
-        fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol? = nil
+        fetchVacationPlannerMCPToolsUseCase: FetchVacationPlannerMCPToolsUseCaseProtocol? = nil,
+        startMockTaskAgentUseCase: StartMockTaskAgentUseCaseProtocol? = nil,
+        handleMockTaskAgentEventUseCase: HandleMockTaskAgentEventUseCaseProtocol? = nil,
+        getMockTaskAgentStatusUseCase: GetMockTaskAgentStatusUseCaseProtocol? = nil
     ) {
         self.session = session
         self.sendMessageUseCase = sendMessageUseCase
@@ -50,6 +58,9 @@ final class ChatViewModel {
         self.handleVacationPlanningEventUseCase = handleVacationPlanningEventUseCase
         self.getVacationPlanningStatusUseCase = getVacationPlanningStatusUseCase
         self.fetchVacationPlannerMCPToolsUseCase = fetchVacationPlannerMCPToolsUseCase
+        self.startMockTaskAgentUseCase = startMockTaskAgentUseCase
+        self.handleMockTaskAgentEventUseCase = handleMockTaskAgentEventUseCase
+        self.getMockTaskAgentStatusUseCase = getMockTaskAgentStatusUseCase
 
         Task { [weak self] in
             await self?.loadInitialState()
@@ -65,12 +76,16 @@ final class ChatViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSending else { return }
         guard !trimmed.isEmpty else { return }
-        if handlePlannerCommand(text: trimmed) {
+        if handleAgentCommand(text: trimmed) {
             return
         }
 
         if chatMode == .vacationPlanner {
             sendToVacationPlanner(text: trimmed, source: .chat)
+            return
+        }
+        if chatMode == .mockTaskAgent {
+            sendToMockTaskAgent(text: trimmed)
             return
         }
 
@@ -154,10 +169,18 @@ final class ChatViewModel {
         send(text: "approve")
     }
 
-    private func handlePlannerCommand(text: String) -> Bool {
+    private func handleAgentCommand(text: String) -> Bool {
         let command = text.lowercased()
-        guard command.hasPrefix("/vacation") else { return false }
+        if command.hasPrefix("/vacation") {
+            return handleVacationCommand(command)
+        }
+        if command.hasPrefix("/task") {
+            return handleMockTaskAgentCommand(command)
+        }
+        return false
+    }
 
+    private func handleVacationCommand(_ command: String) -> Bool {
         if command == "/vacation stop" {
             chatMode = .default
             plannerStepTitle = nil
@@ -172,6 +195,24 @@ final class ChatViewModel {
         }
 
         appendSystemMessage("Неизвестная команда планировщика. Используйте `/vacation start` или `/vacation stop`.")
+        return true
+    }
+
+    private func handleMockTaskAgentCommand(_ command: String) -> Bool {
+        if command == "/task stop" {
+            chatMode = .default
+            plannerStepTitle = nil
+            questionnaireProgressText = nil
+            appendSystemMessage("Mock Task Agent отключен.")
+            return true
+        }
+
+        if command == "/task start" || command == "/task" {
+            startMockTaskAgent()
+            return true
+        }
+
+        appendSystemMessage("Неизвестная команда task-агента. Используйте `/task start` или `/task stop`.")
         return true
     }
 
@@ -239,6 +280,59 @@ final class ChatViewModel {
         }
     }
 
+    private func startMockTaskAgent() {
+        guard let useCase = startMockTaskAgentUseCase else {
+            appendSystemMessage("Mock Task Agent недоступен в этой сборке.")
+            return
+        }
+        guard !isSending else { return }
+        isSending = true
+        chatMode = .mockTaskAgent
+        questionnaireState = .empty
+        questionnaireProgressText = nil
+        updateApproveAvailability()
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isSending = false }
+            do {
+                let result = try await useCase.execute(
+                    sessionID: self.session.id,
+                    branchID: self.session.activeBranchID
+                )
+                self.applyMockTaskAgentResult(result)
+            } catch {
+                self.appendSystemMessage("Не удалось запустить Mock Task Agent: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func sendToMockTaskAgent(text: String) {
+        guard let useCase = handleMockTaskAgentEventUseCase else {
+            appendSystemMessage("Обработчик Mock Task Agent недоступен.")
+            return
+        }
+
+        dialogItems.append(DialogHistoryItemViewState(kind: .user, text: text, status: .sent))
+        isSending = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isSending = false }
+            do {
+                let result = try await useCase.execute(
+                    sessionID: self.session.id,
+                    branchID: self.session.activeBranchID,
+                    userText: text
+                )
+                self.applyMockTaskAgentResult(result)
+                self.onDidSendMessage?()
+            } catch {
+                self.appendSystemMessage("Ошибка Mock Task Agent: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func applyPlannerResult(_ result: VacationPlanningTurnResult) {
         plannerStepTitle = result.snapshot.state.title
         questionnaireState = result.snapshot.context.questionnaireState
@@ -253,6 +347,26 @@ final class ChatViewModel {
         updateApproveAvailability()
         if case let .failed(reason) = result.snapshot.state {
             appendSystemMessage("Ошибка инварианта/перехода планировщика: \(reason)")
+        }
+        for message in result.agentMessages {
+            dialogItems.append(DialogHistoryItemViewState(kind: .assistant, text: message, status: .sent))
+        }
+    }
+
+    private func applyMockTaskAgentResult(_ result: MockTaskAgentTurnResult) {
+        plannerStepTitle = result.snapshot.state.title
+        questionnaireState = .empty
+        questionnaireProgressText = mockTaskAgentProgressText(for: result.snapshot)
+        if lastMockTaskAgentState != result.snapshot.state {
+            appendSystemMessage(
+                mockTaskAgentStateListMessage(current: result.snapshot.state),
+                tone: .stateTransition
+            )
+        }
+        lastMockTaskAgentState = result.snapshot.state
+        updateApproveAvailability()
+        if case let .failed(reason) = result.snapshot.state {
+            appendSystemMessage("Ошибка mock task-агента: \(reason)")
         }
         for message in result.agentMessages {
             dialogItems.append(DialogHistoryItemViewState(kind: .assistant, text: message, status: .sent))
@@ -296,6 +410,24 @@ final class ChatViewModel {
             updateApproveAvailability()
         } catch {
             appendSystemMessage("Не удалось загрузить состояние планировщика: \(error.localizedDescription)")
+        }
+
+        guard let mockUseCase = getMockTaskAgentStatusUseCase else { return }
+        do {
+            let snapshot = try await mockUseCase.execute(
+                sessionID: session.id,
+                branchID: session.activeBranchID
+            )
+            lastMockTaskAgentState = snapshot.state
+            if chatMode == .default, snapshot.state != .idle {
+                chatMode = .mockTaskAgent
+                plannerStepTitle = snapshot.state.title
+                questionnaireState = .empty
+                questionnaireProgressText = mockTaskAgentProgressText(for: snapshot)
+                appendSystemMessage(mockTaskAgentResumeHint(for: snapshot))
+            }
+        } catch {
+            appendSystemMessage("Не удалось загрузить состояние Mock Task Agent: \(error.localizedDescription)")
         }
     }
 
@@ -387,6 +519,43 @@ final class ChatViewModel {
             action = "Агент не активен."
         }
         return "Возобновлен планировщик: \(snapshot.state.title). \(action)"
+    }
+
+    private func mockTaskAgentProgressText(for snapshot: MockTaskAgentSnapshot) -> String {
+        let checklistCount = snapshot.context.checklist.count
+        return "Mock task: пунктов в чек-листе \(checklistCount)."
+    }
+
+    private func mockTaskAgentStateListMessage(current: MockTaskAgentState) -> String {
+        let ordered: [MockTaskAgentState] = [
+            .idle,
+            .awaitingTask,
+            .taskPrepared
+        ]
+        var lines: [String] = ["Состояния mock task-агента (текущее отмечено [x]):"]
+        for state in ordered {
+            let marker = (state == current) ? "[x]" : "[ ]"
+            lines.append("\(marker) \(state.title)")
+        }
+        if case let .failed(reason) = current {
+            lines.append("[x] Ошибка: \(reason)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func mockTaskAgentResumeHint(for snapshot: MockTaskAgentSnapshot) -> String {
+        let action: String
+        switch snapshot.state {
+        case .awaitingTask:
+            action = "Опишите задачу в свободной форме."
+        case .taskPrepared:
+            action = "Отправьте новый текст, чтобы обновить чек-лист, или `reset`."
+        case .failed:
+            action = "Отправьте `reset` для перезапуска."
+        case .idle:
+            action = "Агент не активен."
+        }
+        return "Возобновлен Mock Task Agent: \(snapshot.state.title). \(action)"
     }
 }
 

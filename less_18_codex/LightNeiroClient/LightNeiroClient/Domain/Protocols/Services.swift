@@ -1,25 +1,47 @@
 import Foundation
 
+/// Модель запроса к LLM-клиенту.
 struct LLMRequest {
+    /// Системный промпт для модели.
     let systemPrompt: String
+    /// Короткий контекст переписки.
     let shortTermMessages: [ChatMessage]
+    /// Текущие элементы рабочей памяти.
     let workingMemory: [WorkingMemoryItem]
+    /// Долговременные элементы памяти.
     let longTermMemory: [LongTermMemoryItem]
+    /// Настройки модели.
     let settings: LLMSettings
 }
 
+/// Модель ответа от LLM-клиента.
 struct LLMResponse {
+    /// Текст ответа модели.
     let content: String
+    /// Количество токенов во входе.
     let inputTokens: Int
+    /// Количество токенов в выходе.
     let outputTokens: Int
+    /// Полная задержка запроса в миллисекундах.
     let latencyMs: Int
 }
 
+/// Контракт клиента для отправки запросов в LLM-провайдер.
 protocol LLMClientProtocol {
+    /// Отправляет запрос в LLM и возвращает результат генерации.
+    /// - Parameter request: Подготовленный запрос.
+    /// - Returns: Ответ модели с метаданными токенов и задержки.
     func send(request: LLMRequest) async throws -> LLMResponse
 }
 
+/// Контракт сборщика memory context.
 protocol ContextBuilderProtocol {
+    /// Формирует контекст памяти по сессии и ветке.
+    /// - Parameters:
+    ///   - sessionID: Идентификатор сессии.
+    ///   - branchID: Идентификатор ветки.
+    ///   - settings: Текущие настройки модели.
+    /// - Returns: Сформированный memory context.
     func buildContext(
         sessionID: UUID,
         branchID: UUID,
@@ -27,71 +49,14 @@ protocol ContextBuilderProtocol {
     ) async throws -> MemoryContext
 }
 
+/// Контракт защищенного хранилища API ключа.
 protocol APIKeyStoreProtocol {
+    /// Загружает API key из защищенного хранилища.
+    /// - Returns: API key или `nil`, если ключ не сохранен.
     nonisolated func fetchAPIKey() throws -> String?
+    /// Сохраняет API key в защищенном хранилище.
+    /// - Parameter apiKey: Ключ доступа к API.
     nonisolated func saveAPIKey(_ apiKey: String) throws
+    /// Удаляет API key из защищенного хранилища.
     nonisolated func deleteAPIKey() throws
-}
-
-struct VacationSlotsExtractionResult: Equatable {
-    let slots: VacationSlots
-    let validationErrors: [String]
-}
-
-protocol VacationSlotExtractionServiceProtocol {
-    func extractSlots(from userText: String, current: VacationSlots) async throws -> VacationSlotsExtractionResult
-}
-
-protocol VacationOptionGenerationServiceProtocol {
-    func generateOptions(context: VacationPlanningContext) async throws -> [VacationOption]
-}
-
-protocol VacationItineraryServiceProtocol {
-    func generateItinerary(context: VacationPlanningContext) async throws -> VacationItinerary
-}
-
-protocol VacationBudgetEstimatorProtocol {
-    func estimateBudget(context: VacationPlanningContext) async throws -> VacationBudgetBreakdown
-}
-
-struct QuestionnaireQuestionContext {
-    let schema: QuestionnaireSchema
-    let state: QuestionnaireState
-    let latestUserMessage: String?
-    let settings: LLMSettings
-}
-
-protocol QuestionGenerationServiceProtocol {
-    func generateQuestion(
-        context: QuestionnaireQuestionContext,
-        targetField: QuestionnaireFieldDefinition?,
-        toneHints: [String]
-    ) async throws -> QuestionPrompt
-}
-
-protocol AnswerExtractionServiceProtocol {
-    func extractFields(
-        userText: String,
-        schema: QuestionnaireSchema,
-        currentState: QuestionnaireState,
-        settings: LLMSettings
-    ) async throws -> QuestionnaireExtractionResult
-}
-
-struct MCPToolSummary: Equatable {
-    let name: String
-    let description: String?
-}
-
-protocol MCPToolDiscoveryServiceProtocol {
-    func fetchTools(serverURL: URL) async throws -> [MCPToolSummary]
-}
-
-protocol MCPWeatherServiceProtocol {
-    func fetchCurrentWeather(
-        serverURL: URL,
-        city: String,
-        units: String,
-        language: String?
-    ) async throws -> String
 }
