@@ -62,7 +62,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 fetchVacationPlannerMCPToolsUseCase: environment.fetchVacationPlannerMCPToolsUseCase,
                 startMockTaskAgentUseCase: environment.startMockTaskAgentUseCase,
                 handleMockTaskAgentEventUseCase: environment.handleMockTaskAgentEventUseCase,
-                getMockTaskAgentStatusUseCase: environment.getMockTaskAgentStatusUseCase
+                getMockTaskAgentStatusUseCase: environment.getMockTaskAgentStatusUseCase,
+                startCounterTaskAgentUseCase: environment.startCounterTaskAgentUseCase,
+                stopCounterTaskAgentUseCase: environment.stopCounterTaskAgentUseCase,
+                configureCounterTaskAgentIntervalUseCase: environment.configureCounterTaskAgentIntervalUseCase,
+                tickCounterTaskAgentUseCase: environment.tickCounterTaskAgentUseCase,
+                getCounterTaskAgentStatusUseCase: environment.getCounterTaskAgentStatusUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 session: environment.session,

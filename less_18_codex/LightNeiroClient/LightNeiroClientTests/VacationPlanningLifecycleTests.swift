@@ -463,6 +463,56 @@ final class MockTaskAgentLifecycleTests: XCTestCase {
     }
 }
 
+final class CounterTaskAgentLifecycleTests: XCTestCase {
+    func testStartUsesDefaultIntervalAndResetsCounter() async throws {
+        let repository = MockCounterTaskAgentStateRepository()
+        let orchestrator = CounterTaskAgentOrchestrator(stateRepository: repository)
+        let start = StartCounterTaskAgentUseCase(orchestrator: orchestrator)
+        let sessionID = UUID()
+        let branchID = UUID()
+
+        let result = try await start.execute(sessionID: sessionID, branchID: branchID, intervalSeconds: nil)
+
+        XCTAssertEqual(result.snapshot.state, .running)
+        XCTAssertEqual(result.snapshot.context.intervalSeconds, CounterTaskAgentContext.defaultIntervalSeconds, accuracy: 0.001)
+        XCTAssertEqual(result.snapshot.context.nextNumber, 1)
+        XCTAssertTrue(result.systemMessages.contains(where: { $0.contains("запущен") }))
+    }
+
+    func testTickEmitsNumberAndIncrementsCounter() async throws {
+        let repository = MockCounterTaskAgentStateRepository()
+        let orchestrator = CounterTaskAgentOrchestrator(stateRepository: repository)
+        let start = StartCounterTaskAgentUseCase(orchestrator: orchestrator)
+        let tick = TickCounterTaskAgentUseCase(orchestrator: orchestrator)
+        let sessionID = UUID()
+        let branchID = UUID()
+
+        _ = try await start.execute(sessionID: sessionID, branchID: branchID, intervalSeconds: 5)
+        let firstTick = try await tick.execute(sessionID: sessionID, branchID: branchID)
+        let secondTick = try await tick.execute(sessionID: sessionID, branchID: branchID)
+
+        XCTAssertEqual(firstTick.systemMessages, ["#1"])
+        XCTAssertEqual(secondTick.systemMessages, ["#2"])
+        XCTAssertEqual(secondTick.snapshot.context.nextNumber, 3)
+    }
+
+    func testConfigureIntervalUpdatesRunningSnapshot() async throws {
+        let repository = MockCounterTaskAgentStateRepository()
+        let orchestrator = CounterTaskAgentOrchestrator(stateRepository: repository)
+        let start = StartCounterTaskAgentUseCase(orchestrator: orchestrator)
+        let configure = ConfigureCounterTaskAgentIntervalUseCase(orchestrator: orchestrator)
+        let sessionID = UUID()
+        let branchID = UUID()
+
+        _ = try await start.execute(sessionID: sessionID, branchID: branchID, intervalSeconds: 5)
+        let updated = try await configure.execute(sessionID: sessionID, branchID: branchID, intervalSeconds: 1.5)
+
+        XCTAssertEqual(updated.snapshot.state, .running)
+        XCTAssertEqual(updated.snapshot.context.intervalSeconds, 1.5, accuracy: 0.001)
+        XCTAssertTrue(updated.systemMessages.contains(where: { $0.contains("обновлен") }))
+    }
+}
+
 private actor MockMockTaskAgentStateRepository: MockTaskAgentStateRepositoryProtocol {
     private var snapshot: MockTaskAgentSnapshot?
 
@@ -471,6 +521,18 @@ private actor MockMockTaskAgentStateRepository: MockTaskAgentStateRepositoryProt
     }
 
     func saveSnapshot(_ snapshot: MockTaskAgentSnapshot) async throws {
+        self.snapshot = snapshot
+    }
+}
+
+private actor MockCounterTaskAgentStateRepository: CounterTaskAgentStateRepositoryProtocol {
+    private var snapshot: CounterTaskAgentSnapshot?
+
+    func fetchSnapshot(sessionID _: UUID, branchID _: UUID) async throws -> CounterTaskAgentSnapshot? {
+        snapshot
+    }
+
+    func saveSnapshot(_ snapshot: CounterTaskAgentSnapshot) async throws {
         self.snapshot = snapshot
     }
 }

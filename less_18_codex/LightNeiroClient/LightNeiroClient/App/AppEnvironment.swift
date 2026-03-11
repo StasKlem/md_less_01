@@ -18,6 +18,11 @@ struct AppEnvironment {
     let startMockTaskAgentUseCase: StartMockTaskAgentUseCaseProtocol
     let handleMockTaskAgentEventUseCase: HandleMockTaskAgentEventUseCaseProtocol
     let getMockTaskAgentStatusUseCase: GetMockTaskAgentStatusUseCaseProtocol
+    let startCounterTaskAgentUseCase: StartCounterTaskAgentUseCaseProtocol
+    let stopCounterTaskAgentUseCase: StopCounterTaskAgentUseCaseProtocol
+    let configureCounterTaskAgentIntervalUseCase: ConfigureCounterTaskAgentIntervalUseCaseProtocol
+    let tickCounterTaskAgentUseCase: TickCounterTaskAgentUseCaseProtocol
+    let getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -32,6 +37,7 @@ struct AppEnvironment {
         let vacationStateRepository = FileVacationPlanningStateRepository()
         let vacationPlanRepository = FileVacationPlanRepository()
         let mockTaskAgentStateRepository = FileMockTaskAgentStateRepository()
+        let counterTaskAgentStateRepository = FileCounterTaskAgentStateRepository()
         let mcpToolDiscoveryService = MCPToolDiscoveryService()
         let apiKeyStore = KeychainAPIKeyStore()
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -114,6 +120,16 @@ struct AppEnvironment {
         let startMockTaskAgent = StartMockTaskAgentUseCase(orchestrator: mockTaskAgentOrchestrator)
         let handleMockTaskAgentEvent = HandleMockTaskAgentEventUseCase(orchestrator: mockTaskAgentOrchestrator)
         let getMockTaskAgentStatus = GetMockTaskAgentStatusUseCase(stateRepository: mockTaskAgentStateRepository)
+        let counterTaskAgentOrchestrator = CounterTaskAgentOrchestrator(
+            stateRepository: counterTaskAgentStateRepository
+        )
+        let startCounterTaskAgent = StartCounterTaskAgentUseCase(orchestrator: counterTaskAgentOrchestrator)
+        let stopCounterTaskAgent = StopCounterTaskAgentUseCase(orchestrator: counterTaskAgentOrchestrator)
+        let configureCounterTaskAgentInterval = ConfigureCounterTaskAgentIntervalUseCase(
+            orchestrator: counterTaskAgentOrchestrator
+        )
+        let tickCounterTaskAgent = TickCounterTaskAgentUseCase(orchestrator: counterTaskAgentOrchestrator)
+        let getCounterTaskAgentStatus = GetCounterTaskAgentStatusUseCase(stateRepository: counterTaskAgentStateRepository)
 
         let sessionID = UUID()
         let branchID = UUID()
@@ -153,7 +169,12 @@ struct AppEnvironment {
             fetchVacationPlannerMCPToolsUseCase: fetchVacationPlannerMCPTools,
             startMockTaskAgentUseCase: startMockTaskAgent,
             handleMockTaskAgentEventUseCase: handleMockTaskAgentEvent,
-            getMockTaskAgentStatusUseCase: getMockTaskAgentStatus
+            getMockTaskAgentStatusUseCase: getMockTaskAgentStatus,
+            startCounterTaskAgentUseCase: startCounterTaskAgent,
+            stopCounterTaskAgentUseCase: stopCounterTaskAgent,
+            configureCounterTaskAgentIntervalUseCase: configureCounterTaskAgentInterval,
+            tickCounterTaskAgentUseCase: tickCounterTaskAgent,
+            getCounterTaskAgentStatusUseCase: getCounterTaskAgentStatus
         )
     }
 }
