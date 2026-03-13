@@ -1,5 +1,36 @@
 # LightNeiroClient Monorepo
 
+## Hacker News Task Agent
+
+`Hacker News Task Agent` работает в режиме `one-shot` (без таймеров и интервалов): один запуск = один полный цикл.
+
+Последовательность выполнения:
+
+1. получает новость через MCP tool `hackernews_get_random_story`;
+2. получает перевод новости через MCP tool `hackernews_translate_story`;
+3. сохраняет перевод через MCP tool `hackernews_archive_save_json`.
+
+Системные сообщения в чате приходят сразу (потоково): перед каждым шагом и после него с результатом.
+
+Особенности:
+
+- `start` не запускает фоновый таймер, а выполняет один цикл и завершает агент в `idle`;
+- каждые 5 выполнений дополнительно строится LLM-сводка последних новостей;
+- перевод использует тот же API key и модель, что и приложение (`Settings` + keychain), и совместимый base URL LLM-провайдера.
+
+Команды агента:
+
+- `/hn start` - выполнить один цикл `fetch -> translate -> save`
+- `/hn stop` - остановить агент
+
+Для явных путей к MCP-серверам можно задать:
+
+- `HACKERNEWS_MCP_SERVER_PATH=/abs/path/to/HackerNewsMCPServer`
+- `HACKERNEWS_TRANSLATE_MCP_SERVER_PATH=/abs/path/to/HackerNewsTranslateMCPServer`
+- `HACKERNEWS_ARCHIVE_MCP_SERVER_PATH=/abs/path/to/HackerNewsArchiveMCPServer`
+
+Если пути не заданы, клиент пытается автоматически найти локальные пакеты MCP-серверов в workspace и запускать их через `swift run`.
+
 ## HackerNewsMCPServer (MCP)
 
 `HackerNewsMCPServer` - локальный MCP сервер (transport `stdio`) с инструментом:
@@ -17,26 +48,6 @@ swift run HackerNewsMCPServer
 
 - `HACKERNEWS_BASE_URL` (опционально, по умолчанию `https://hacker-news.firebaseio.com`)
 - `HACKERNEWS_LOG_LEVEL` (опционально, `debug|info|warn|error`, по умолчанию `info`)
-
-## Hacker News Task Agent
-
-В `LightNeiroClient` добавлен task-агент `Hacker News Task Agent`:
-
-- каждые `N` секунд (по умолчанию `5`, настраивается) вызывает MCP tool `hackernews_get_random_story`;
-- каждую полученную статью сохраняет в JSON-файл в `Application Support/LightNeiroClient/task_flow/hacker_news_articles/...`;
-- выводит короткое системное сообщение по статье;
-- каждые 5 запросов отправляет LLM-запрос с суммаризацией последних статей и показывает результат в чате.
-
-Команды агента:
-
-- `/hn start` - запуск с интервалом по умолчанию (5 сек)
-- `/hn start <сек>` - запуск с заданным интервалом
-- `/hn interval <сек>` - изменить интервал
-- `/hn stop` - остановить агент
-
-Для явного пути к MCP-серверу можно задать:
-
-- `HACKERNEWS_MCP_SERVER_PATH=/abs/path/to/HackerNewsMCPServer`
 
 Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальными MCP-серверами `OpenWeatherMCPServer`, `HackerNewsMCPServer`, `HackerNewsArchiveMCPServer`, `HackerNewsSummaryMCPServer` и `HackerNewsTranslateMCPServer`.
 
