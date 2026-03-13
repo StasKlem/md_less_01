@@ -514,58 +514,66 @@ final class CounterTaskAgentLifecycleTests: XCTestCase {
 }
 
 final class HackerNewsTaskAgentLifecycleTests: XCTestCase {
-    func testStartUsesDefaultInterval() async throws {
+    func testStartExecutesOneShotFlowWithoutTimer() async throws {
         let repository = MockHackerNewsTaskAgentStateRepository()
-        let archive = MockHackerNewsArticleArchiveRepository()
         let mcpService = StubMCPHackerNewsService()
         let llmService = StubHackerNewsLLMSummaryService()
         let orchestrator = HackerNewsTaskAgentOrchestrator(
             stateRepository: repository,
-            articleArchiveRepository: archive,
             mcpService: mcpService,
             llmSummaryService: llmService
         )
         let start = StartHackerNewsTaskAgentUseCase(orchestrator: orchestrator)
 
-        let result = try await start.execute(sessionID: UUID(), branchID: UUID(), intervalSeconds: nil)
+        let result = try await start.execute(sessionID: UUID(), branchID: UUID())
+        let fetchCallCount = await mcpService.fetchCallCount
+        let translateCallCount = await mcpService.translateCallCount
+        let saveCallCount = await mcpService.saveCallCount
+        let firstThreeCalls = await mcpService.firstThreeCalls
 
-        XCTAssertEqual(result.snapshot.state, .running)
-        XCTAssertEqual(result.snapshot.context.intervalSeconds, HackerNewsTaskAgentContext.defaultIntervalSeconds, accuracy: 0.001)
-        XCTAssertEqual(result.snapshot.context.nextRequestNumber, 1)
-        XCTAssertEqual(result.snapshot.context.requestCount, 0)
-        XCTAssertTrue(result.systemMessages.contains(where: { $0.contains("запущен") }))
+        XCTAssertEqual(result.snapshot.state, HackerNewsTaskAgentState.idle)
+        XCTAssertEqual(result.snapshot.context.nextRequestNumber, 2)
+        XCTAssertEqual(result.snapshot.context.requestCount, 1)
+        XCTAssertEqual(fetchCallCount, 1)
+        XCTAssertEqual(translateCallCount, 1)
+        XCTAssertEqual(saveCallCount, 1)
+        XCTAssertEqual(firstThreeCalls, ["fetch", "translate", "save"])
+        XCTAssertTrue(result.systemMessages.contains(where: { $0.contains("выполнен один раз") }))
     }
 
-    func testTickSavesArticleAndRequestsLLMSummaryOnFifthRequest() async throws {
+    func testStartRequestsLLMSummaryOnFifthRequest() async throws {
         let repository = MockHackerNewsTaskAgentStateRepository()
-        let archive = MockHackerNewsArticleArchiveRepository()
         let mcpService = StubMCPHackerNewsService()
         let llmService = StubHackerNewsLLMSummaryService()
         let orchestrator = HackerNewsTaskAgentOrchestrator(
             stateRepository: repository,
-            articleArchiveRepository: archive,
             mcpService: mcpService,
             llmSummaryService: llmService
         )
         let start = StartHackerNewsTaskAgentUseCase(orchestrator: orchestrator)
-        let tick = TickHackerNewsTaskAgentUseCase(orchestrator: orchestrator)
         let sessionID = UUID()
         let branchID = UUID()
 
-        _ = try await start.execute(sessionID: sessionID, branchID: branchID, intervalSeconds: 5)
-        var fifthTick: HackerNewsTaskAgentTurnResult?
+        var latestResult: HackerNewsTaskAgentTurnResult?
         for _ in 0..<5 {
-            fifthTick = try await tick.execute(sessionID: sessionID, branchID: branchID)
+            latestResult = try await start.execute(sessionID: sessionID, branchID: branchID)
         }
 
-        let result = try XCTUnwrap(fifthTick)
-        let savedRecordsCount = await archive.savedRecordsCount
+        let result = try XCTUnwrap(latestResult)
+        let fetchCallCount = await mcpService.fetchCallCount
+        let translateCallCount = await mcpService.translateCallCount
+        let saveCallCount = await mcpService.saveCallCount
+        let firstThreeCalls = await mcpService.firstThreeCalls
         let llmCallCount = await llmService.callCount
         XCTAssertEqual(result.snapshot.context.requestCount, 5)
         XCTAssertEqual(result.snapshot.context.nextRequestNumber, 6)
-        XCTAssertEqual(savedRecordsCount, 5)
+        XCTAssertEqual(fetchCallCount, 5)
+        XCTAssertEqual(translateCallCount, 5)
+        XCTAssertEqual(saveCallCount, 5)
+        XCTAssertEqual(firstThreeCalls, ["fetch", "translate", "save"])
         XCTAssertEqual(llmCallCount, 1)
         XCTAssertTrue(result.systemMessages.contains(where: { $0.contains("LLM-сводка") }))
+        XCTAssertEqual(result.snapshot.state, HackerNewsTaskAgentState.idle)
     }
 }
 
@@ -605,24 +613,12 @@ private actor MockHackerNewsTaskAgentStateRepository: HackerNewsTaskAgentStateRe
     }
 }
 
-private actor MockHackerNewsArticleArchiveRepository: HackerNewsArticleArchiveRepositoryProtocol {
-    private var records: [HackerNewsTaskAgentArticleRecord] = []
-
-    @discardableResult
-    func saveArticle(_ record: HackerNewsTaskAgentArticleRecord) async throws -> URL {
-        records.append(record)
-        return URL(fileURLWithPath: "/tmp/request-\(record.requestNumber).json")
-    }
-
-    var savedRecordsCount: Int {
-        records.count
-    }
-}
-
 private actor StubMCPHackerNewsService: MCPHackerNewsServiceProtocol {
     private var nextID = 1
+    private var calls: [String] = []
 
     func fetchRandomStory(serverURL _: URL) async throws -> HackerNewsTaskAgentStory {
+        calls.append("fetch")
         defer { nextID += 1 }
         return HackerNewsTaskAgentStory(
             storyID: nextID,
@@ -633,6 +629,32 @@ private actor StubMCPHackerNewsService: MCPHackerNewsServiceProtocol {
             url: "https://example.com/\(nextID)",
             rawText: "raw"
         )
+    }
+
+    func translateStory(serverURL _: URL, sessionID _: UUID, story: String, language _: String) async throws -> String {
+        calls.append("translate")
+        return "translated: \(story)"
+    }
+
+    func saveArchiveJSON(serverURL _: URL, json _: String) async throws -> String {
+        calls.append("save")
+        return "saved"
+    }
+
+    var fetchCallCount: Int {
+        calls.filter { $0 == "fetch" }.count
+    }
+
+    var translateCallCount: Int {
+        calls.filter { $0 == "translate" }.count
+    }
+
+    var saveCallCount: Int {
+        calls.filter { $0 == "save" }.count
+    }
+
+    var firstThreeCalls: [String] {
+        Array(calls.prefix(3))
     }
 }
 

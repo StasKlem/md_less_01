@@ -20,7 +20,7 @@ final class TaskAgentCatalogTests: XCTestCase {
         )
         XCTAssertEqual(
             catalog.first(where: { $0.id == .hackerNews })?.controls.map(\.title),
-            ["Стоп", "Интервал 5с", "Интервал 10с"]
+            ["Стоп"]
         )
     }
 }

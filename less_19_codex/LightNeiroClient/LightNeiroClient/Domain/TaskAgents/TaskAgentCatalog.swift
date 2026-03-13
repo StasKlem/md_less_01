@@ -57,9 +57,7 @@ enum TaskAgentCatalog {
             name: "Hacker News Task Agent",
             startCommand: "/hn start",
             controls: [
-                TaskAgentControl(title: "Стоп", command: "/hn stop"),
-                TaskAgentControl(title: "Интервал 5с", command: "/hn interval 5"),
-                TaskAgentControl(title: "Интервал 10с", command: "/hn interval 10")
+                TaskAgentControl(title: "Стоп", command: "/hn stop")
             ]
         )
     ]

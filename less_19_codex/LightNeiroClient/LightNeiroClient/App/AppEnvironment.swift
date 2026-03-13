@@ -25,8 +25,6 @@ struct AppEnvironment {
     let getCounterTaskAgentStatusUseCase: GetCounterTaskAgentStatusUseCaseProtocol
     let startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol
     let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol
-    let configureHackerNewsTaskAgentIntervalUseCase: ConfigureHackerNewsTaskAgentIntervalUseCaseProtocol
-    let tickHackerNewsTaskAgentUseCase: TickHackerNewsTaskAgentUseCaseProtocol
     let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol
 
     static func bootstrap() async -> AppEnvironment {
@@ -44,9 +42,25 @@ struct AppEnvironment {
         let mockTaskAgentStateRepository = FileMockTaskAgentStateRepository()
         let counterTaskAgentStateRepository = FileCounterTaskAgentStateRepository()
         let hackerNewsTaskAgentStateRepository = FileHackerNewsTaskAgentStateRepository()
-        let hackerNewsArticleArchiveRepository = FileHackerNewsArticleArchiveRepository()
-        let mcpToolDiscoveryService = MCPToolDiscoveryService()
         let apiKeyStore = KeychainAPIKeyStore()
+        let mcpToolDiscoveryService = MCPToolDiscoveryService(
+            hackerNewsTranslateEnvironmentProvider: { sessionID in
+                let settings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
+                var environmentOverrides: [String: String] = [
+                    "HACKERNEWS_TRANSLATE_OPENAI_MODEL": settings.model.rawValue,
+                    "HACKERNEWS_TRANSLATE_OPENAI_BASE_URL": Self.routerAICompatibleBaseURL(
+                        endpoint: RouterAIConfiguration.default.endpoint
+                    )
+                ]
+                if let apiKey = try? apiKeyStore.fetchAPIKey() {
+                    let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        environmentOverrides["HACKERNEWS_TRANSLATE_OPENAI_API_KEY"] = trimmed
+                    }
+                }
+                return environmentOverrides
+            }
+        )
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let llmClient = RouterAILLMClient(
@@ -143,16 +157,11 @@ struct AppEnvironment {
         )
         let hackerNewsTaskAgentOrchestrator = HackerNewsTaskAgentOrchestrator(
             stateRepository: hackerNewsTaskAgentStateRepository,
-            articleArchiveRepository: hackerNewsArticleArchiveRepository,
             mcpService: mcpToolDiscoveryService,
             llmSummaryService: hackerNewsLLMSummaryService
         )
         let startHackerNewsTaskAgent = StartHackerNewsTaskAgentUseCase(orchestrator: hackerNewsTaskAgentOrchestrator)
         let stopHackerNewsTaskAgent = StopHackerNewsTaskAgentUseCase(orchestrator: hackerNewsTaskAgentOrchestrator)
-        let configureHackerNewsTaskAgentInterval = ConfigureHackerNewsTaskAgentIntervalUseCase(
-            orchestrator: hackerNewsTaskAgentOrchestrator
-        )
-        let tickHackerNewsTaskAgent = TickHackerNewsTaskAgentUseCase(orchestrator: hackerNewsTaskAgentOrchestrator)
         let getHackerNewsTaskAgentStatus = GetHackerNewsTaskAgentStatusUseCase(
             stateRepository: hackerNewsTaskAgentStateRepository
         )
@@ -203,9 +212,17 @@ struct AppEnvironment {
             getCounterTaskAgentStatusUseCase: getCounterTaskAgentStatus,
             startHackerNewsTaskAgentUseCase: startHackerNewsTaskAgent,
             stopHackerNewsTaskAgentUseCase: stopHackerNewsTaskAgent,
-            configureHackerNewsTaskAgentIntervalUseCase: configureHackerNewsTaskAgentInterval,
-            tickHackerNewsTaskAgentUseCase: tickHackerNewsTaskAgent,
             getHackerNewsTaskAgentStatusUseCase: getHackerNewsTaskAgentStatus
         )
+    }
+
+    private static func routerAICompatibleBaseURL(endpoint: URL) -> String {
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        let completionSuffix = "/chat/completions"
+        if let path = components?.path, path.hasSuffix(completionSuffix) {
+            let trimmedPath = String(path.dropLast(completionSuffix.count))
+            components?.path = trimmedPath.isEmpty ? "/" : trimmedPath
+        }
+        return components?.url?.absoluteString ?? "https://api.openai.com/v1"
     }
 }

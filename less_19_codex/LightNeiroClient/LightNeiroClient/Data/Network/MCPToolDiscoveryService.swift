@@ -4,16 +4,19 @@ import Logging
 
 final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol, MCPHackerNewsServiceProtocol {
     private let clientFactory: @Sendable () -> Client
+    private let hackerNewsTranslateEnvironmentProvider: (@Sendable (UUID) async -> [String: String])?
 
     init(clientFactory: @escaping @Sendable () -> Client = {
         Client(name: "LightNeiroClient", version: "1.0.0")
-    }) {
+    },
+    hackerNewsTranslateEnvironmentProvider: (@Sendable (UUID) async -> [String: String])? = nil) {
         self.clientFactory = clientFactory
+        self.hackerNewsTranslateEnvironmentProvider = hackerNewsTranslateEnvironmentProvider
     }
 
     func fetchTools(serverURL: URL) async throws -> [MCPToolSummary] {
         let client = clientFactory()
-        let transport = try makeTransport(serverURL: serverURL)
+        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: nil)
 
         do {
             _ = try await client.connect(transport: transport)
@@ -40,7 +43,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
 
         let client = clientFactory()
-        let transport = try makeTransport(serverURL: serverURL)
+        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: nil)
 
         var arguments: [String: Value] = [
             "city": .string(normalizedCity),
@@ -73,7 +76,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 
     func fetchRandomStory(serverURL: URL) async throws -> HackerNewsTaskAgentStory {
         let client = clientFactory()
-        let transport = try makeTransport(serverURL: serverURL)
+        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: nil)
 
         do {
             _ = try await client.connect(transport: transport)
@@ -94,9 +97,81 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
     }
 
-    private func makeTransport(serverURL: URL) throws -> any Transport {
+    func translateStory(serverURL: URL, sessionID: UUID, story: String, language: String) async throws -> String {
+        let trimmedStory = story.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedStory.isEmpty else {
+            throw MCPDiscoveryError.toolCall("Story text is required for translation.")
+        }
+
+        let normalizedLanguage = language.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputLanguage = normalizedLanguage.isEmpty ? "ru" : normalizedLanguage
+
+        let client = clientFactory()
+        let envOverrides = await hackerNewsTranslateEnvironmentProvider?(sessionID)
+        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: envOverrides)
+
+        do {
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(
+                name: "hackernews_translate_story",
+                arguments: [
+                    "story": .string(trimmedStory),
+                    "language": .string(outputLanguage)
+                ]
+            )
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP hackernews_translate_story returned an error." : text)
+            }
+            guard !text.isEmpty else {
+                throw MCPDiscoveryError.toolCall("MCP hackernews_translate_story returned empty response.")
+            }
+            return text
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
+    func saveArchiveJSON(serverURL: URL, json: String) async throws -> String {
+        let trimmedJSON = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedJSON.isEmpty else {
+            throw MCPDiscoveryError.toolCall("JSON payload is required for archiving.")
+        }
+
+        let client = clientFactory()
+        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: nil)
+
+        do {
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(
+                name: "hackernews_archive_save_json",
+                arguments: ["json": .string(trimmedJSON)]
+            )
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP hackernews_archive_save_json returned an error." : text)
+            }
+            guard !text.isEmpty else {
+                throw MCPDiscoveryError.toolCall("MCP hackernews_archive_save_json returned empty response.")
+            }
+            return text
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
+    private func makeTransport(serverURL: URL, environmentOverrides: [String: String]?) throws -> any Transport {
         if shouldUseStdio(serverURL: serverURL) {
-            let configuration = try buildStdioLaunchConfiguration(serverURL: serverURL)
+            let configuration = try buildStdioLaunchConfiguration(
+                serverURL: serverURL,
+                environmentOverrides: environmentOverrides
+            )
             return ProcessStdioMCPTransport(launchConfiguration: configuration)
         }
         return HTTPClientTransport(endpoint: serverURL, streaming: true)
@@ -111,26 +186,34 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
     }
 
-    private func buildStdioLaunchConfiguration(serverURL: URL) throws -> ProcessStdioMCPTransport.LaunchConfiguration {
+    private func buildStdioLaunchConfiguration(
+        serverURL: URL,
+        environmentOverrides: [String: String]?
+    ) throws -> ProcessStdioMCPTransport.LaunchConfiguration {
         if serverURL.isFileURL {
-            return .init(executableURL: serverURL, arguments: [], currentDirectoryURL: nil)
+            return .init(
+                executableURL: serverURL,
+                arguments: [],
+                currentDirectoryURL: nil,
+                environmentOverrides: environmentOverrides
+            )
         }
 
         let serverKind = try inferStdioServerKind(from: serverURL)
         let environment = ProcessInfo.processInfo.environment
+        var invalidExplicitPathMessage: String?
         if let explicitPath = environment[serverKind.explicitPathEnv]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !explicitPath.isEmpty
         {
             if let configuration = buildLaunchConfigurationFromExplicitPath(
                 explicitPath,
-                serverKind: serverKind
+                serverKind: serverKind,
+                environmentOverrides: environmentOverrides
             ) {
                 return configuration
             }
-            throw MCPDiscoveryError.configuration(
-                "\(serverKind.explicitPathEnv) points to missing path: \(explicitPath)"
-            )
+            invalidExplicitPathMessage = "\(serverKind.explicitPathEnv) points to missing path: \(explicitPath)"
         }
 
         if let packageDirectory = findPackageDirectory(named: serverKind.packageDirectoryName) {
@@ -143,7 +226,14 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                     packageDirectory.path,
                     serverKind.executableName
                 ],
-                currentDirectoryURL: packageDirectory
+                currentDirectoryURL: packageDirectory,
+                environmentOverrides: environmentOverrides
+            )
+        }
+
+        if let invalidExplicitPathMessage {
+            throw MCPDiscoveryError.configuration(
+                "\(invalidExplicitPathMessage). Also failed to auto-detect \(serverKind.packageDirectoryName) in current workspace hierarchy."
             )
         }
 
@@ -154,7 +244,8 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 
     private func buildLaunchConfigurationFromExplicitPath(
         _ explicitPath: String,
-        serverKind: MCPStdioServerKind
+        serverKind: MCPStdioServerKind,
+        environmentOverrides: [String: String]?
     ) -> ProcessStdioMCPTransport.LaunchConfiguration? {
         let fileManager = FileManager.default
         guard let resolvedURL = resolveExistingPath(explicitPath, fileManager: fileManager) else {
@@ -180,11 +271,17 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                     resolvedURL.path,
                     serverKind.executableName
                 ],
-                currentDirectoryURL: resolvedURL
+                currentDirectoryURL: resolvedURL,
+                environmentOverrides: environmentOverrides
             )
         }
 
-        return .init(executableURL: resolvedURL, arguments: [], currentDirectoryURL: nil)
+        return .init(
+            executableURL: resolvedURL,
+            arguments: [],
+            currentDirectoryURL: nil,
+            environmentOverrides: environmentOverrides
+        )
     }
 
     private func resolveExistingPath(_ path: String, fileManager: FileManager) -> URL? {
@@ -215,9 +312,13 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             return .openWeather
         case "hackernews", "hacker-news":
             return .hackerNews
+        case "hackernews-translate", "hacker-news-translate":
+            return .hackerNewsTranslate
+        case "hackernews-archive", "hacker-news-archive":
+            return .hackerNewsArchive
         default:
             throw MCPDiscoveryError.configuration(
-                "Unknown stdio MCP endpoint: \(serverURL.absoluteString). Expected stdio://open-weather or stdio://hackernews."
+                "Unknown stdio MCP endpoint: \(serverURL.absoluteString). Expected stdio://open-weather, stdio://hackernews, stdio://hackernews-translate, or stdio://hackernews-archive."
             )
         }
     }
@@ -253,6 +354,8 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 private enum MCPStdioServerKind {
     case openWeather
     case hackerNews
+    case hackerNewsTranslate
+    case hackerNewsArchive
 
     var explicitPathEnv: String {
         switch self {
@@ -260,6 +363,10 @@ private enum MCPStdioServerKind {
             return "OPENWEATHER_MCP_SERVER_PATH"
         case .hackerNews:
             return "HACKERNEWS_MCP_SERVER_PATH"
+        case .hackerNewsTranslate:
+            return "HACKERNEWS_TRANSLATE_MCP_SERVER_PATH"
+        case .hackerNewsArchive:
+            return "HACKERNEWS_ARCHIVE_MCP_SERVER_PATH"
         }
     }
 
@@ -269,6 +376,10 @@ private enum MCPStdioServerKind {
             return "OpenWeatherMCPServer"
         case .hackerNews:
             return "HackerNewsMCPServer"
+        case .hackerNewsTranslate:
+            return "HackerNewsTranslateMCPServer"
+        case .hackerNewsArchive:
+            return "HackerNewsArchiveMCPServer"
         }
     }
 
@@ -282,6 +393,10 @@ private enum MCPStdioServerKind {
             return "OpenWeather"
         case .hackerNews:
             return "HackerNews"
+        case .hackerNewsTranslate:
+            return "HackerNewsTranslate"
+        case .hackerNewsArchive:
+            return "HackerNewsArchive"
         }
     }
 }
@@ -340,6 +455,7 @@ private actor ProcessStdioMCPTransport: Transport {
         let executableURL: URL
         let arguments: [String]
         let currentDirectoryURL: URL?
+        let environmentOverrides: [String: String]?
     }
 
     nonisolated let logger: Logger
@@ -351,6 +467,7 @@ private actor ProcessStdioMCPTransport: Transport {
     private var errorPipe: Pipe?
     private var isConnected = false
     private var pendingData = Data()
+    private var stderrLines: [String] = []
     private let messageStream: AsyncThrowingStream<Data, Swift.Error>
     private let messageContinuation: AsyncThrowingStream<Data, Swift.Error>.Continuation
 
@@ -374,6 +491,15 @@ private actor ProcessStdioMCPTransport: Transport {
         process.executableURL = launchConfiguration.executableURL
         process.arguments = launchConfiguration.arguments
         process.currentDirectoryURL = launchConfiguration.currentDirectoryURL
+        if let environmentOverrides = launchConfiguration.environmentOverrides,
+           !environmentOverrides.isEmpty
+        {
+            var environment = ProcessInfo.processInfo.environment
+            for (key, value) in environmentOverrides {
+                environment[key] = value
+            }
+            process.environment = environment
+        }
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
@@ -425,6 +551,7 @@ private actor ProcessStdioMCPTransport: Transport {
         errorPipe = nil
         process = nil
         pendingData = Data()
+        stderrLines.removeAll(keepingCapacity: false)
         messageContinuation.finish()
     }
 
@@ -469,6 +596,12 @@ private actor ProcessStdioMCPTransport: Transport {
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !text.isEmpty
         {
+            for line in text.split(separator: "\n").map({ String($0) }) {
+                stderrLines.append(line)
+            }
+            if stderrLines.count > 20 {
+                stderrLines = Array(stderrLines.suffix(20))
+            }
             logger.debug("MCP stderr: \(text)")
         }
     }
@@ -477,7 +610,11 @@ private actor ProcessStdioMCPTransport: Transport {
         guard isConnected else { return }
         isConnected = false
         if status != 0 {
-            logger.error("MCP process exited with code \(status)")
+            let stderrSuffix = stderrLines.isEmpty ? "" : ". stderr: \(stderrLines.joined(separator: " | "))"
+            let message = "MCP process exited with code \(status)\(stderrSuffix)"
+            logger.error("\(message)")
+            messageContinuation.finish(throwing: MCPDiscoveryError.transport(message))
+            return
         }
         messageContinuation.finish()
     }

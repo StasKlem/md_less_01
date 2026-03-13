@@ -7,8 +7,16 @@ struct StartHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol 
         self.orchestrator = orchestrator
     }
 
-    func execute(sessionID: UUID, branchID: UUID, intervalSeconds: TimeInterval?) async throws -> HackerNewsTaskAgentTurnResult {
-        try await orchestrator.start(sessionID: sessionID, branchID: branchID, intervalSeconds: intervalSeconds)
+    func execute(
+        sessionID: UUID,
+        branchID: UUID,
+        onSystemMessage: (@Sendable (String) async -> Void)?
+    ) async throws -> HackerNewsTaskAgentTurnResult {
+        try await orchestrator.start(
+            sessionID: sessionID,
+            branchID: branchID,
+            onSystemMessage: onSystemMessage
+        )
     }
 }
 
@@ -21,34 +29,6 @@ struct StopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol {
 
     func execute(sessionID: UUID, branchID: UUID) async throws -> HackerNewsTaskAgentTurnResult {
         try await orchestrator.stop(sessionID: sessionID, branchID: branchID)
-    }
-}
-
-struct ConfigureHackerNewsTaskAgentIntervalUseCase: ConfigureHackerNewsTaskAgentIntervalUseCaseProtocol {
-    private let orchestrator: HackerNewsTaskAgentOrchestrator
-
-    init(orchestrator: HackerNewsTaskAgentOrchestrator) {
-        self.orchestrator = orchestrator
-    }
-
-    func execute(sessionID: UUID, branchID: UUID, intervalSeconds: TimeInterval) async throws -> HackerNewsTaskAgentTurnResult {
-        try await orchestrator.configureInterval(
-            sessionID: sessionID,
-            branchID: branchID,
-            intervalSeconds: intervalSeconds
-        )
-    }
-}
-
-struct TickHackerNewsTaskAgentUseCase: TickHackerNewsTaskAgentUseCaseProtocol {
-    private let orchestrator: HackerNewsTaskAgentOrchestrator
-
-    init(orchestrator: HackerNewsTaskAgentOrchestrator) {
-        self.orchestrator = orchestrator
-    }
-
-    func execute(sessionID: UUID, branchID: UUID) async throws -> HackerNewsTaskAgentTurnResult {
-        try await orchestrator.tick(sessionID: sessionID, branchID: branchID)
     }
 }
 
@@ -76,60 +56,55 @@ struct GetHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseP
 
 struct HackerNewsTaskAgentOrchestrator {
     private let stateRepository: HackerNewsTaskAgentStateRepositoryProtocol
-    private let articleArchiveRepository: HackerNewsArticleArchiveRepositoryProtocol
     private let mcpService: MCPHackerNewsServiceProtocol
     private let llmSummaryService: HackerNewsLLMSummaryServiceProtocol
-    private let endpointURL: URL
+    private let storyEndpointURL: URL
+    private let translateEndpointURL: URL
+    private let archiveEndpointURL: URL
+    private let translationLanguage: String
 
     init(
         stateRepository: HackerNewsTaskAgentStateRepositoryProtocol,
-        articleArchiveRepository: HackerNewsArticleArchiveRepositoryProtocol,
         mcpService: MCPHackerNewsServiceProtocol,
         llmSummaryService: HackerNewsLLMSummaryServiceProtocol,
-        endpointURL: URL = URL(string: "stdio://hackernews")!
+        storyEndpointURL: URL = URL(string: "stdio://hackernews")!,
+        translateEndpointURL: URL = URL(string: "stdio://hackernews-translate")!,
+        archiveEndpointURL: URL = URL(string: "stdio://hackernews-archive")!,
+        translationLanguage: String = "ru"
     ) {
         self.stateRepository = stateRepository
-        self.articleArchiveRepository = articleArchiveRepository
         self.mcpService = mcpService
         self.llmSummaryService = llmSummaryService
-        self.endpointURL = endpointURL
+        self.storyEndpointURL = storyEndpointURL
+        self.translateEndpointURL = translateEndpointURL
+        self.archiveEndpointURL = archiveEndpointURL
+        self.translationLanguage = translationLanguage
     }
 
-    func start(sessionID: UUID, branchID: UUID, intervalSeconds: TimeInterval?) async throws -> HackerNewsTaskAgentTurnResult {
+    func start(
+        sessionID: UUID,
+        branchID: UUID,
+        onSystemMessage: (@Sendable (String) async -> Void)?
+    ) async throws -> HackerNewsTaskAgentTurnResult {
         let baseSnapshot = try await loadSnapshot(sessionID: sessionID, branchID: branchID)
-        let requestedInterval = intervalSeconds ?? baseSnapshot.context.intervalSeconds
-        guard requestedInterval > 0 else {
-            return HackerNewsTaskAgentTurnResult(
-                snapshot: baseSnapshot,
-                systemMessages: ["Интервал должен быть больше 0 секунд."]
-            )
-        }
-
         let now = Date()
-        let snapshot = HackerNewsTaskAgentSnapshot(
+        let runningSnapshot = HackerNewsTaskAgentSnapshot(
             schemaVersion: HackerNewsTaskAgentSnapshot.schemaVersionCurrent,
             sessionID: sessionID,
             branchID: branchID,
             state: .running,
             context: HackerNewsTaskAgentContext(
-                nextRequestNumber: 1,
-                requestCount: 0,
-                intervalSeconds: requestedInterval,
+                nextRequestNumber: baseSnapshot.context.nextRequestNumber,
+                requestCount: baseSnapshot.context.requestCount,
+                intervalSeconds: baseSnapshot.context.intervalSeconds,
                 llmSummaryEvery: max(1, baseSnapshot.context.llmSummaryEvery),
-                recentStories: [],
+                recentStories: baseSnapshot.context.recentStories,
                 updatedAt: now
             ),
             updatedAt: now
         )
-        try await stateRepository.saveSnapshot(snapshot)
-
-        return HackerNewsTaskAgentTurnResult(
-            snapshot: snapshot,
-            systemMessages: [
-                "Hacker News Task Agent запущен. Интервал: \(Self.intervalText(requestedInterval)) сек.",
-                "Каждый запрос сохраняется в JSON. Каждые \(snapshot.context.llmSummaryEvery) запросов будет LLM-сводка."
-            ]
-        )
+        try await stateRepository.saveSnapshot(runningSnapshot)
+        return try await executeSingleRun(from: runningSnapshot, onSystemMessage: onSystemMessage)
     }
 
     func stop(sessionID: UUID, branchID: UUID) async throws -> HackerNewsTaskAgentTurnResult {
@@ -158,56 +133,82 @@ struct HackerNewsTaskAgentOrchestrator {
         )
     }
 
-    func configureInterval(sessionID: UUID, branchID: UUID, intervalSeconds: TimeInterval) async throws -> HackerNewsTaskAgentTurnResult {
-        let current = try await loadSnapshot(sessionID: sessionID, branchID: branchID)
-        guard intervalSeconds > 0 else {
-            return HackerNewsTaskAgentTurnResult(
-                snapshot: current,
-                systemMessages: ["Интервал должен быть больше 0 секунд."]
-            )
-        }
-
-        let now = Date()
-        let snapshot = HackerNewsTaskAgentSnapshot(
-            schemaVersion: HackerNewsTaskAgentSnapshot.schemaVersionCurrent,
-            sessionID: sessionID,
-            branchID: branchID,
-            state: current.state,
-            context: HackerNewsTaskAgentContext(
-                nextRequestNumber: current.context.nextRequestNumber,
-                requestCount: current.context.requestCount,
-                intervalSeconds: intervalSeconds,
-                llmSummaryEvery: current.context.llmSummaryEvery,
-                recentStories: current.context.recentStories,
-                updatedAt: now
-            ),
-            updatedAt: now
-        )
-        try await stateRepository.saveSnapshot(snapshot)
-
-        return HackerNewsTaskAgentTurnResult(
-            snapshot: snapshot,
-            systemMessages: ["Интервал Hacker News Task Agent обновлен: \(Self.intervalText(intervalSeconds)) сек."]
-        )
-    }
-
-    func tick(sessionID: UUID, branchID: UUID) async throws -> HackerNewsTaskAgentTurnResult {
-        let current = try await loadSnapshot(sessionID: sessionID, branchID: branchID)
-        guard current.state == .running else {
-            return HackerNewsTaskAgentTurnResult(snapshot: current, systemMessages: [])
-        }
-
+    private func executeSingleRun(
+        from current: HackerNewsTaskAgentSnapshot,
+        onSystemMessage: (@Sendable (String) async -> Void)?
+    ) async throws -> HackerNewsTaskAgentTurnResult {
+        let sessionID = current.sessionID
+        let branchID = current.branchID
         let requestNumber = current.context.nextRequestNumber
+        var systemMessages: [String] = []
         do {
-            let story = try await mcpService.fetchRandomStory(serverURL: endpointURL)
-            let record = HackerNewsTaskAgentArticleRecord(
+            await Self.appendSystemMessage("Шаг 1/3: запрашиваю новость через MCP...", to: &systemMessages, onSystemMessage: onSystemMessage)
+            let story: HackerNewsTaskAgentStory
+            do {
+                story = try await mcpService.fetchRandomStory(serverURL: storyEndpointURL)
+            } catch {
+                await Self.appendSystemMessage(
+                    "Шаг 1/3: ошибка получения новости: \(error.localizedDescription)",
+                    to: &systemMessages,
+                    onSystemMessage: onSystemMessage
+                )
+                throw error
+            }
+            await Self.appendSystemMessage("Шаг 1/3: новость получена: \(story.shortSummary)", to: &systemMessages, onSystemMessage: onSystemMessage)
+
+            await Self.appendSystemMessage("Шаг 2/3: запрашиваю перевод новости через MCP...", to: &systemMessages, onSystemMessage: onSystemMessage)
+            let translatedStory: String
+            do {
+                translatedStory = try await mcpService.translateStory(
+                    serverURL: translateEndpointURL,
+                    sessionID: sessionID,
+                    story: story.rawText,
+                    language: translationLanguage
+                )
+            } catch {
+                await Self.appendSystemMessage(
+                    "Шаг 2/3: ошибка перевода: \(error.localizedDescription)",
+                    to: &systemMessages,
+                    onSystemMessage: onSystemMessage
+                )
+                throw error
+            }
+            let translationPreview = translatedStory
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(120)
+            await Self.appendSystemMessage(
+                "Шаг 2/3: перевод получен (\(translationLanguage)): \(translationPreview)",
+                to: &systemMessages,
+                onSystemMessage: onSystemMessage
+            )
+
+            let translatedArchiveRecord = HackerNewsTaskAgentTranslatedArticleRecord(
                 sessionID: sessionID,
                 branchID: branchID,
                 requestNumber: requestNumber,
                 fetchedAt: Date(),
-                story: story
+                sourceStory: story,
+                translatedText: translatedStory,
+                translationLanguage: translationLanguage
             )
-            let fileURL = try await articleArchiveRepository.saveArticle(record)
+
+            await Self.appendSystemMessage("Шаг 3/3: сохраняю перевод через MCP...", to: &systemMessages, onSystemMessage: onSystemMessage)
+            let archivePayload = try Self.makeArchivePayload(from: translatedArchiveRecord)
+            let archiveResponse: String
+            do {
+                archiveResponse = try await mcpService.saveArchiveJSON(
+                    serverURL: archiveEndpointURL,
+                    json: archivePayload
+                )
+            } catch {
+                await Self.appendSystemMessage(
+                    "Шаг 3/3: ошибка сохранения: \(error.localizedDescription)",
+                    to: &systemMessages,
+                    onSystemMessage: onSystemMessage
+                )
+                throw error
+            }
+            await Self.appendSystemMessage("Шаг 3/3: перевод сохранен: \(archiveResponse)", to: &systemMessages, onSystemMessage: onSystemMessage)
 
             var recentStories = current.context.recentStories
             recentStories.append(
@@ -228,7 +229,7 @@ struct HackerNewsTaskAgentOrchestrator {
                 schemaVersion: HackerNewsTaskAgentSnapshot.schemaVersionCurrent,
                 sessionID: sessionID,
                 branchID: branchID,
-                state: .running,
+                state: .idle,
                 context: HackerNewsTaskAgentContext(
                     nextRequestNumber: requestNumber + 1,
                     requestCount: updatedRequestCount,
@@ -241,10 +242,9 @@ struct HackerNewsTaskAgentOrchestrator {
             )
             try await stateRepository.saveSnapshot(snapshot)
 
-            var systemMessages = [
-                "HN #\(requestNumber): \(story.shortSummary)",
-                "JSON сохранен: \(fileURL.path)"
-            ]
+            let completedMessage = "Hacker News Task Agent выполнен один раз."
+            systemMessages.insert(completedMessage, at: 0)
+            await onSystemMessage?(completedMessage)
 
             if updatedRequestCount % snapshot.context.llmSummaryEvery == 0 {
                 do {
@@ -277,9 +277,16 @@ struct HackerNewsTaskAgentOrchestrator {
                 updatedAt: now
             )
             try await stateRepository.saveSnapshot(failedSnapshot)
+            var failedMessages = systemMessages
+            let failedPrefix = "Hacker News Task Agent завершился с ошибкой."
+            failedMessages.insert(failedPrefix, at: 0)
+            await onSystemMessage?(failedPrefix)
+            let failedDetail = "Ошибка запроса Hacker News: \(error.localizedDescription)"
+            failedMessages.append(failedDetail)
+            await onSystemMessage?(failedDetail)
             return HackerNewsTaskAgentTurnResult(
                 snapshot: failedSnapshot,
-                systemMessages: ["Ошибка запроса Hacker News: \(error.localizedDescription)"]
+                systemMessages: failedMessages
             )
         }
     }
@@ -298,10 +305,43 @@ struct HackerNewsTaskAgentOrchestrator {
         )
     }
 
-    private static func intervalText(_ interval: TimeInterval) -> String {
-        if interval.rounded(.towardZero) == interval {
-            return String(format: "%.0f", interval)
+    private static func makeArchivePayload(from record: HackerNewsTaskAgentTranslatedArticleRecord) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(record)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw HackerNewsTaskAgentArchivePayloadError.encodingFailed
         }
-        return String(format: "%.2f", interval)
+        return json
+    }
+
+    private static func appendSystemMessage(
+        _ message: String,
+        to messages: inout [String],
+        onSystemMessage: (@Sendable (String) async -> Void)?
+    ) async {
+        messages.append(message)
+        await onSystemMessage?(message)
+    }
+}
+
+private struct HackerNewsTaskAgentTranslatedArticleRecord: Codable {
+    let sessionID: UUID
+    let branchID: UUID
+    let requestNumber: Int
+    let fetchedAt: Date
+    let sourceStory: HackerNewsTaskAgentStory
+    let translatedText: String
+    let translationLanguage: String
+}
+
+private enum HackerNewsTaskAgentArchivePayloadError: LocalizedError {
+    case encodingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return "Не удалось закодировать JSON для архивации перевода."
+        }
     }
 }
