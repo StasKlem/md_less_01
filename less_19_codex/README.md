@@ -38,7 +38,7 @@ swift run HackerNewsMCPServer
 
 - `HACKERNEWS_MCP_SERVER_PATH=/abs/path/to/HackerNewsMCPServer`
 
-Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальными MCP-серверами `OpenWeatherMCPServer`, `HackerNewsMCPServer`, `HackerNewsArchiveMCPServer` и `HackerNewsSummaryMCPServer`.
+Монорепозиторий с macOS-клиентом `LightNeiroClient` (AppKit + MVVM) и локальными MCP-серверами `OpenWeatherMCPServer`, `HackerNewsMCPServer`, `HackerNewsArchiveMCPServer`, `HackerNewsSummaryMCPServer` и `HackerNewsTranslateMCPServer`.
 
 ## Что внутри
 
@@ -47,6 +47,7 @@ swift run HackerNewsMCPServer
 - `HackerNewsMCPServer`: MCP сервер (`stdio`) с инструментом случайной новости из Hacker News.
 - `HackerNewsArchiveMCPServer`: MCP сервер (`stdio`) для сохранения JSON в файл и чтения 3 последних сохранений.
 - `HackerNewsSummaryMCPServer`: MCP сервер (`stdio`) для LLM-суммаризации списка новостей Hacker News.
+- `HackerNewsTranslateMCPServer`: MCP сервер (`stdio`) для LLM-перевода одной новости Hacker News в формате `hackernews_get_random_story`.
 
 ## Ключевые возможности LightNeiroClient
 
@@ -169,6 +170,13 @@ cd HackerNewsSummaryMCPServer
 HACKERNEWS_SUMMARY_OPENAI_API_KEY=your_key swift run HackerNewsSummaryMCPServer
 ```
 
+### Запуск HackerNewsTranslateMCPServer
+
+```bash
+cd HackerNewsTranslateMCPServer
+HACKERNEWS_TRANSLATE_OPENAI_API_KEY=your_key swift run HackerNewsTranslateMCPServer
+```
+
 ## Переменные окружения OpenWeatherMCPServer
 
 - `OPENWEATHER_API_KEY` (для реальных weather вызовов)
@@ -193,6 +201,14 @@ HACKERNEWS_SUMMARY_OPENAI_API_KEY=your_key swift run HackerNewsSummaryMCPServer
 - `HACKERNEWS_SUMMARY_SYSTEM_PROMPT` (опционально, кастомный system prompt)
 - `HACKERNEWS_SUMMARY_LOG_LEVEL` (опционально, default `info`, значения `debug|info|warn|error`)
 
+## Переменные окружения HackerNewsTranslateMCPServer
+
+- `HACKERNEWS_TRANSLATE_OPENAI_API_KEY` (обязательно для вызова LLM)
+- `HACKERNEWS_TRANSLATE_OPENAI_BASE_URL` (опционально, default `https://api.openai.com/v1`)
+- `HACKERNEWS_TRANSLATE_OPENAI_MODEL` (опционально, default `gpt-4o-mini`)
+- `HACKERNEWS_TRANSLATE_SYSTEM_PROMPT` (опционально, кастомный system prompt)
+- `HACKERNEWS_TRANSLATE_LOG_LEVEL` (опционально, default `info`, значения `debug|info|warn|error`)
+
 ## Структура репозитория
 
 - `LightNeiroClient/` - macOS клиент.
@@ -200,6 +216,7 @@ HACKERNEWS_SUMMARY_OPENAI_API_KEY=your_key swift run HackerNewsSummaryMCPServer
 - `HackerNewsMCPServer/` - MCP сервер Hacker News.
 - `HackerNewsArchiveMCPServer/` - MCP сервер архива JSON для Hacker News.
 - `HackerNewsSummaryMCPServer/` - MCP сервер суммаризации новостей Hacker News через LLM.
+- `HackerNewsTranslateMCPServer/` - MCP сервер перевода новости Hacker News через LLM.
 - `AGENTS.md` - инженерные правила проекта.
 
 ## Ограничения текущей версии
