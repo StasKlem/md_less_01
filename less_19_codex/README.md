@@ -10,6 +10,12 @@
 2. получает перевод новости через MCP tool `hackernews_translate_story`;
 3. сохраняет перевод через MCP tool `hackernews_archive_save_json`.
 
+Важно: это три разных MCP-сервера (три отдельных subprocess):
+
+- шаг 1: `stdio://hackernews` -> `HackerNewsMCPServer`;
+- шаг 2: `stdio://hackernews-translate` -> `HackerNewsTranslateMCPServer`;
+- шаг 3: `stdio://hackernews-archive` -> `HackerNewsArchiveMCPServer`.
+
 Системные сообщения в чате приходят сразу (потоково): перед каждым шагом и после него с результатом.
 
 Особенности:
