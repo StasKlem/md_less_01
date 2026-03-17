@@ -100,6 +100,15 @@ struct AppEnvironment {
                 embeddingDimension: 768,
                 batchSize: 16,
                 normalizeEmbeddings: true
+            ),
+            embeddingProvider: AppLLMEmbeddingProvider(
+                configuration: RouterAIConfiguration(
+                    endpoint: RouterAIConfiguration.default.endpoint,
+                    timeoutInterval: RouterAIConfiguration.default.timeoutInterval,
+                    apiKeyProvider: {
+                        try? apiKeyStore.fetchAPIKey()
+                    }
+                )
             )
         )
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
@@ -114,9 +123,7 @@ struct AppEnvironment {
             metricsRepository: metricsRepository,
             ragUseCaseFacade: ragUseCaseFacade,
             ragDocumentsProvider: {
-                RAGModuleFactory.defaultDocumentURLs(
-                    baseDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                )
+                Self.defaultRAGDocumentURLs()
             }
         )
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
@@ -240,5 +247,47 @@ struct AppEnvironment {
             components?.path = trimmedPath.isEmpty ? "/" : trimmedPath
         }
         return components?.url?.absoluteString ?? "https://api.openai.com/v1"
+    }
+
+    private static func defaultRAGDocumentURLs() -> [URL] {
+        for baseDirectory in ragBaseDirectoryCandidates() {
+            let urls = RAGModuleFactory.defaultDocumentURLs(baseDirectory: baseDirectory)
+            if !urls.isEmpty {
+                return urls
+            }
+        }
+        return []
+    }
+
+    private static func ragBaseDirectoryCandidates() -> [URL] {
+        var candidates: [URL] = [
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        ]
+
+        // Works reliably when app is launched from Xcode: use compile-time source path.
+        let sourceFileURL = URL(fileURLWithPath: #filePath, isDirectory: false)
+        let repoRootFromSource = sourceFileURL
+            .deletingLastPathComponent() // App
+            .deletingLastPathComponent() // LightNeiroClient (app sources)
+            .deletingLastPathComponent() // LightNeiroClient (xcodeproj folder)
+            .deletingLastPathComponent() // repo root
+        candidates.append(repoRootFromSource)
+
+        // Fallback for rare launch contexts where currentDirectoryPath points inside project.
+        candidates.append(
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                .deletingLastPathComponent()
+        )
+
+        var unique: [URL] = []
+        var seen = Set<String>()
+        for candidate in candidates {
+            let path = candidate.standardizedFileURL.path
+            if !seen.contains(path) {
+                seen.insert(path)
+                unique.append(candidate)
+            }
+        }
+        return unique
     }
 }
