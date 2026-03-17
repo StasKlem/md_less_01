@@ -53,6 +53,11 @@ final class SettingsViewModel {
         persist()
     }
 
+    func updateMemoryEnabled(_ enabled: Bool) {
+        settings.isMemoryEnabled = enabled
+        persist()
+    }
+
     func updatePlannerInvariantsText(_ text: String) {
         plannerInvariantsText = text
         plannerInvariantsStatus = ""

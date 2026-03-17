@@ -364,6 +364,7 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                     temperature: 0.0,
                     windowSize: 1,
                     isRAGEnabled: settings.isRAGEnabled,
+                    isMemoryEnabled: settings.isMemoryEnabled,
                     plannerInvariants: settings.plannerInvariants
                 )
             )
@@ -502,6 +503,7 @@ private struct LLMLongTermExtractionResult: Decodable {
 /// 1. `short-term` — слайдинг-окно последних сообщений (учитывает `windowSize` из настроек).
 /// 2. `working` — оперативные рабочие факты/цели/ограничения из текущего контекста.
 /// 3. `long-term` — устойчивые знания, извлеченные через LLM.
+/// Обновления выполняются только если в `LLMSettings` включен `isMemoryEnabled`.
 ///
 /// После получения ответа ассистента `short-term` и `working` обновляются повторно,
 /// чтобы в следующем ходу модель получила уже завершенное состояние текущего обмена.
@@ -562,17 +564,17 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 
     /// Выполняет end-to-end обработку пользовательского сообщения.
     ///
-    /// Полный сценарий:
-    /// 1. Сохраняет входное сообщение пользователя.
-    /// 2. Загружает настройки сессии.
-    /// 3. Обновляет память после user-turn:
-    ///    - short-term (strict),
-    ///    - working (best-effort),
-    ///    - long-term (best-effort).
-    /// 4. Строит `MemoryContext` и отправляет запрос в LLM.
-    /// 5. Сохраняет сообщение ассистента.
-    /// 6. Повторно обновляет short-term и working после assistant-turn.
-    /// 7. Сохраняет метрику запроса (latency/tokens).
+/// Полный сценарий:
+/// 1. Сохраняет входное сообщение пользователя.
+/// 2. Загружает настройки сессии.
+/// 3. Если включено сохранение в память, обновляет память после user-turn:
+///    - short-term (strict),
+///    - working (best-effort),
+///    - long-term (best-effort).
+/// 4. Строит `MemoryContext` и отправляет запрос в LLM.
+/// 5. Сохраняет сообщение ассистента.
+/// 6. Если включено сохранение в память, повторно обновляет short-term и working после assistant-turn.
+/// 7. Сохраняет метрику запроса (latency/tokens).
     ///
     /// Ошибки:
     /// - любые ошибки критичных этапов (`saveMessage`, `fetchSettings`, `send`, `appendMetric`)
@@ -598,33 +600,34 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         // 2) Получаем актуальные настройки сессии (модель, лимиты, windowSize и т.д.),
         // которые будут использоваться и для памяти, и для вызова LLM.
         let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
+        if settings.isMemoryEnabled {
+            // 3) Обновляем short-term memory строго: это критичный слой для ближайшего контекста.
+            // Если обновление прошло и вернулось событие записи памяти, сохраняем это событие в историю.
+            if let event = try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize) {
+                try await appendMemoryEventMessage(branchID: branchID, event: event)
+            }
 
-        // 3) Обновляем short-term memory строго: это критичный слой для ближайшего контекста.
-        // Если обновление прошло и вернулось событие записи памяти, сохраняем это событие в историю.
-        if let event = try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize) {
-            try await appendMemoryEventMessage(branchID: branchID, event: event)
+            // 4) Обновляем working memory после сообщения пользователя.
+            // Этот шаг best-effort: при сбое не прерываем основной сценарий ответа ассистента.
+            let workingUserEvents = (try? await updateWorkingMemoryUseCase.execute(
+                sessionID: sessionID,
+                branchID: branchID,
+                latestUserMessage: userText,
+                latestAssistantMessage: nil
+            )) ?? []
+            // Даже если событий нет, метод безопасно обработает пустой массив.
+            try await appendMemoryEventMessages(branchID: branchID, events: workingUserEvents)
+
+            // 5) Пытаемся обновить long-term memory (устойчивые факты/выводы).
+            // Это тоже best-effort, чтобы временные проблемы extraction-пайплайна не ломали чат.
+            let longTermEvents = (try? await updateLongTermMemoryUseCase.execute(
+                sessionID: sessionID,
+                branchID: branchID,
+                latestUserMessage: userText,
+                settings: settings
+            )) ?? []
+            try await appendMemoryEventMessages(branchID: branchID, events: longTermEvents)
         }
-
-        // 4) Обновляем working memory после сообщения пользователя.
-        // Этот шаг best-effort: при сбое не прерываем основной сценарий ответа ассистента.
-        let workingUserEvents = (try? await updateWorkingMemoryUseCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
-            latestUserMessage: userText,
-            latestAssistantMessage: nil
-        )) ?? []
-        // Даже если событий нет, метод безопасно обработает пустой массив.
-        try await appendMemoryEventMessages(branchID: branchID, events: workingUserEvents)
-
-        // 5) Пытаемся обновить long-term memory (устойчивые факты/выводы).
-        // Это тоже best-effort, чтобы временные проблемы extraction-пайплайна не ломали чат.
-        let longTermEvents = (try? await updateLongTermMemoryUseCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
-            latestUserMessage: userText,
-            settings: settings
-        )) ?? []
-        try await appendMemoryEventMessages(branchID: branchID, events: longTermEvents)
 
         // 6) Собираем единый memory context из всех слоев памяти.
         // Этот контекст отправится в модель вместе с system prompt и настройками.
@@ -653,21 +656,23 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         )
         try await messageRepository.saveMessage(assistantMessage)
 
-        // 9) После assistant-turn снова обновляем short-term memory,
-        // чтобы следующий запрос видел завершенный обмен user+assistant.
-        if let event = try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize) {
-            try await appendMemoryEventMessage(branchID: branchID, event: event)
-        }
+        if settings.isMemoryEnabled {
+            // 9) После assistant-turn снова обновляем short-term memory,
+            // чтобы следующий запрос видел завершенный обмен user+assistant.
+            if let event = try await updateShortTermMemoryUseCase.execute(sessionID: sessionID, branchID: branchID, windowSize: settings.windowSize) {
+                try await appendMemoryEventMessage(branchID: branchID, event: event)
+            }
 
-        // 10) Повторно обновляем working memory уже с текстом ассистента.
-        // Это позволяет зафиксировать новые задачи, решения и ограничения из полного обмена.
-        let workingAssistantEvents = (try? await updateWorkingMemoryUseCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
-            latestUserMessage: userText,
-            latestAssistantMessage: assistantMessage.content
-        )) ?? []
-        try await appendMemoryEventMessages(branchID: branchID, events: workingAssistantEvents)
+            // 10) Повторно обновляем working memory уже с текстом ассистента.
+            // Это позволяет зафиксировать новые задачи, решения и ограничения из полного обмена.
+            let workingAssistantEvents = (try? await updateWorkingMemoryUseCase.execute(
+                sessionID: sessionID,
+                branchID: branchID,
+                latestUserMessage: userText,
+                latestAssistantMessage: assistantMessage.content
+            )) ?? []
+            try await appendMemoryEventMessages(branchID: branchID, events: workingAssistantEvents)
+        }
 
         // 11) Формируем метрику запроса для наблюдаемости:
         // latency, токены и временной интервал выполнения.

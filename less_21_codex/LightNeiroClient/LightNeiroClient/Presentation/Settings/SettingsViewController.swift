@@ -11,6 +11,7 @@ final class SettingsViewController: NSViewController {
     private let windowSlider = NSSlider(value: 12, minValue: 4, maxValue: 30, target: nil, action: nil)
     private let windowLabel = NSTextField(labelWithString: "Window: 12")
     private let ragCheckbox = NSButton(checkboxWithTitle: "Enable RAG", target: nil, action: nil)
+    private let memoryCheckbox = NSButton(checkboxWithTitle: "Save to memory", target: nil, action: nil)
     private let apiKeyField = NSSecureTextField()
     private let saveAPIKeyButton = NSButton(title: "Save API Key", target: nil, action: nil)
     private let apiKeyStatusLabel = NSTextField(labelWithString: "")
@@ -48,6 +49,8 @@ final class SettingsViewController: NSViewController {
         windowSlider.action = #selector(windowChanged)
         ragCheckbox.target = self
         ragCheckbox.action = #selector(ragToggled)
+        memoryCheckbox.target = self
+        memoryCheckbox.action = #selector(memoryToggled)
         apiKeyField.target = self
         apiKeyField.action = #selector(apiKeyEdited)
         apiKeyField.placeholderString = "routerai key"
@@ -65,6 +68,7 @@ final class SettingsViewController: NSViewController {
             windowLabel,
             windowSlider,
             ragCheckbox,
+            memoryCheckbox,
             makeRow(label: "RouterAI API Key", control: apiKeyField),
             saveAPIKeyButton,
             apiKeyStatusLabel
@@ -93,6 +97,7 @@ final class SettingsViewController: NSViewController {
                 self.temperatureLabel.stringValue = String(format: "Temperature: %.2f", settings.temperature)
                 self.windowLabel.stringValue = "Window: \(settings.windowSize)"
                 self.ragCheckbox.state = settings.isRAGEnabled ? .on : .off
+                self.memoryCheckbox.state = settings.isMemoryEnabled ? .on : .off
             }
             .store(in: &cancellables)
 
@@ -145,6 +150,11 @@ final class SettingsViewController: NSViewController {
     @objc
     private func ragToggled() {
         viewModel.updateRAGEnabled(ragCheckbox.state == .on)
+    }
+
+    @objc
+    private func memoryToggled() {
+        viewModel.updateMemoryEnabled(memoryCheckbox.state == .on)
     }
 
     @objc
