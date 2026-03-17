@@ -363,6 +363,7 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                     model: settings.model,
                     temperature: 0.0,
                     windowSize: 1,
+                    isRAGEnabled: settings.isRAGEnabled,
                     plannerInvariants: settings.plannerInvariants
                 )
             )
@@ -518,6 +519,9 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol
     private let updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol
     private let metricsRepository: MetricsRepositoryProtocol
+    private let ragUseCaseFacade: RAGUseCaseFacadeProtocol?
+    private let ragDocumentsProvider: @Sendable () -> [URL]
+    private let ragIndexState = RAGIndexState()
 
     /// Создает use case отправки сообщения и внедряет все необходимые зависимости.
     ///
@@ -530,6 +534,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - updateWorkingMemoryUseCase: обновление рабочего слоя памяти.
     ///   - updateLongTermMemoryUseCase: обновление долговременного слоя памяти.
     ///   - metricsRepository: хранилище телеметрии запроса/ответа модели.
+    ///   - ragUseCaseFacade: фасад RAG-пайплайна (опционально).
+    ///   - ragDocumentsProvider: провайдер списка документов для индексации RAG.
     init(
         settingsRepository: SettingsRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
@@ -538,7 +544,9 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         updateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol,
         updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol,
         updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol,
-        metricsRepository: MetricsRepositoryProtocol
+        metricsRepository: MetricsRepositoryProtocol,
+        ragUseCaseFacade: RAGUseCaseFacadeProtocol? = nil,
+        ragDocumentsProvider: @escaping @Sendable () -> [URL] = { [] }
     ) {
         self.settingsRepository = settingsRepository
         self.messageRepository = messageRepository
@@ -548,6 +556,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         self.updateWorkingMemoryUseCase = updateWorkingMemoryUseCase
         self.updateLongTermMemoryUseCase = updateLongTermMemoryUseCase
         self.metricsRepository = metricsRepository
+        self.ragUseCaseFacade = ragUseCaseFacade
+        self.ragDocumentsProvider = ragDocumentsProvider
     }
 
     /// Выполняет end-to-end обработку пользовательского сообщения.
@@ -619,7 +629,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         // 6) Собираем единый memory context из всех слоев памяти.
         // Этот контекст отправится в модель вместе с system prompt и настройками.
         let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
-        let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction)
+        let ragContextBlock = await buildRAGContextIfEnabled(settings: settings, userText: userText)
+        let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction, ragContextBlock: ragContextBlock)
         let request = LLMRequest(
             systemPrompt: systemPrompt,
             shortTermMessages: context.shortTermMessages,
@@ -675,20 +686,67 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         return assistantMessage
     }
 
-    private func makeSystemPrompt(extraInstruction: String?) -> String {
+    private func makeSystemPrompt(extraInstruction: String?, ragContextBlock: String?) -> String {
         // Базовое поведение ассистента по умолчанию.
         let base = "You are a helpful assistant."
 
-        // Если инструкция отсутствует, используем только базовый system prompt.
-        guard let extraInstruction else { return base }
+        var blocks: [String] = [base]
 
-        // Защита от "пустой" инструкции (пробелы/переводы строк не должны влиять на prompt).
-        let trimmed = extraInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return base }
+        if let extraInstruction {
+            let trimmed = extraInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                blocks.append(trimmed)
+            }
+        }
 
-        // Дополняем базовый prompt пользовательской/системной инструкцией.
-        // Разделяем пустой строкой для лучшей читаемости итогового текста.
-        return "\(base)\n\n\(trimmed)"
+        if let ragContextBlock {
+            blocks.append(ragContextBlock)
+        }
+
+        return blocks.joined(separator: "\n\n")
+    }
+
+    private func buildRAGContextIfEnabled(settings: LLMSettings, userText: String) async -> String? {
+        guard settings.isRAGEnabled, let ragUseCaseFacade else { return nil }
+
+        do {
+            try await ensureRAGIndexIsReady(ragUseCaseFacade)
+            let results = try await ragUseCaseFacade.search(query: userText, topK: 4)
+            guard !results.isEmpty else { return nil }
+            return formatRAGContext(results)
+        } catch {
+            return nil
+        }
+    }
+
+    private func ensureRAGIndexIsReady(_ ragUseCaseFacade: RAGUseCaseFacadeProtocol) async throws {
+        if await ragIndexState.isReady {
+            return
+        }
+
+        let documents = ragDocumentsProvider()
+        guard !documents.isEmpty else {
+            return
+        }
+
+        _ = try await ragUseCaseFacade.index(documents: documents, strategy: .structural)
+        await ragIndexState.markReady()
+    }
+
+    private func formatRAGContext(_ results: [SearchResult]) -> String {
+        var lines: [String] = [
+            "Use these retrieved context snippets if relevant to the user question:",
+        ]
+
+        for (index, result) in results.enumerated() {
+            let source = URL(fileURLWithPath: result.chunk.source).lastPathComponent
+            let section = result.chunk.section ?? "-"
+            let text = result.chunk.content
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            lines.append("[\(index + 1)] source=\(source) section=\(section) offset=\(result.chunk.offset) text=\(text)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Добавляет системные сообщения о событиях записи памяти.
@@ -719,6 +777,14 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             content: "Память [\(event.layer.rawValue)] \(event.details)"
         )
         try await messageRepository.saveMessage(systemMessage)
+    }
+}
+
+private actor RAGIndexState {
+    private(set) var isReady = false
+
+    func markReady() {
+        isReady = true
     }
 }
 

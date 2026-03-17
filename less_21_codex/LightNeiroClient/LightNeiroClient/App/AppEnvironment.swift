@@ -26,6 +26,7 @@ struct AppEnvironment {
     let startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol
     let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol
     let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol
+    let ragUseCaseFacade: RAGUseCaseFacadeProtocol
 
     static func bootstrap() async -> AppEnvironment {
         let sessionRepository = MockChatSessionRepository()
@@ -92,6 +93,15 @@ struct AppEnvironment {
             llmClient: llmClient,
             legacyFactsRepository: factsRepository
         )
+        let ragUseCaseFacade = RAGModuleFactory.makeFacade(
+            settings: RAGSettings(
+                provider: .appLLM,
+                embeddingModel: LLMSettings.default.model.rawValue,
+                embeddingDimension: 768,
+                batchSize: 16,
+                normalizeEmbeddings: true
+            )
+        )
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
         let sendMessage = SendMessageUseCase(
             settingsRepository: settingsRepository,
@@ -101,7 +111,13 @@ struct AppEnvironment {
             updateShortTermMemoryUseCase: updateShortTermMemory,
             updateWorkingMemoryUseCase: updateWorkingMemory,
             updateLongTermMemoryUseCase: updateLongTermMemory,
-            metricsRepository: metricsRepository
+            metricsRepository: metricsRepository,
+            ragUseCaseFacade: ragUseCaseFacade,
+            ragDocumentsProvider: {
+                RAGModuleFactory.defaultDocumentURLs(
+                    baseDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                )
+            }
         )
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
@@ -165,7 +181,6 @@ struct AppEnvironment {
         let getHackerNewsTaskAgentStatus = GetHackerNewsTaskAgentStatusUseCase(
             stateRepository: hackerNewsTaskAgentStateRepository
         )
-
         let sessionID = UUID()
         let branchID = UUID()
 
@@ -212,7 +227,8 @@ struct AppEnvironment {
             getCounterTaskAgentStatusUseCase: getCounterTaskAgentStatus,
             startHackerNewsTaskAgentUseCase: startHackerNewsTaskAgent,
             stopHackerNewsTaskAgentUseCase: stopHackerNewsTaskAgent,
-            getHackerNewsTaskAgentStatusUseCase: getHackerNewsTaskAgentStatus
+            getHackerNewsTaskAgentStatusUseCase: getHackerNewsTaskAgentStatus,
+            ragUseCaseFacade: ragUseCaseFacade
         )
     }
 

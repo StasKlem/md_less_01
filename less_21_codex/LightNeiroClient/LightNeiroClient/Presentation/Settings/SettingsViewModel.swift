@@ -48,6 +48,11 @@ final class SettingsViewModel {
         persist()
     }
 
+    func updateRAGEnabled(_ enabled: Bool) {
+        settings.isRAGEnabled = enabled
+        persist()
+    }
+
     func updatePlannerInvariantsText(_ text: String) {
         plannerInvariantsText = text
         plannerInvariantsStatus = ""

@@ -13,6 +13,7 @@ struct LLMSettings: Codable, Equatable {
     var model: LLMModel
     var temperature: Double
     var windowSize: Int
+    var isRAGEnabled: Bool
     var plannerInvariants: [String]
 
     /// Значения настроек по умолчанию для новой сессии.
@@ -20,6 +21,7 @@ struct LLMSettings: Codable, Equatable {
         model: .seed20Mini,
         temperature: 0.4,
         windowSize: 3,
+        isRAGEnabled: false,
         plannerInvariants: [
             "Даты поездки: дата начала не позже даты окончания.",
             "Бюджет: если указан, должен быть больше 0.",
@@ -34,6 +36,7 @@ struct LLMSettings: Codable, Equatable {
         case model
         case temperature
         case windowSize
+        case isRAGEnabled
         case plannerInvariants
     }
 
@@ -41,11 +44,13 @@ struct LLMSettings: Codable, Equatable {
         model: LLMModel,
         temperature: Double,
         windowSize: Int,
+        isRAGEnabled: Bool,
         plannerInvariants: [String]
     ) {
         self.model = model
         self.temperature = temperature
         self.windowSize = windowSize
+        self.isRAGEnabled = isRAGEnabled
         self.plannerInvariants = plannerInvariants
     }
 
@@ -54,6 +59,7 @@ struct LLMSettings: Codable, Equatable {
         model = try container.decode(LLMModel.self, forKey: .model)
         temperature = try container.decode(Double.self, forKey: .temperature)
         windowSize = try container.decode(Int.self, forKey: .windowSize)
+        isRAGEnabled = try container.decodeIfPresent(Bool.self, forKey: .isRAGEnabled) ?? Self.default.isRAGEnabled
         plannerInvariants = try container.decodeIfPresent([String].self, forKey: .plannerInvariants) ?? Self.default.plannerInvariants
     }
 }
