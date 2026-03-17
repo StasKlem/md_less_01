@@ -4,6 +4,8 @@ enum RAGError: LocalizedError {
     case unsupportedDocumentType(URL)
     case invalidChunkerConfiguration
     case invalidEmbeddingDimension(expected: Int, actual: Int)
+    case invalidTopK(Int)
+    case emptyQuery
     case embeddingProviderUnavailable(String)
     case vectorStoreUnavailable(String)
 
@@ -15,6 +17,10 @@ enum RAGError: LocalizedError {
             return "Invalid chunker configuration."
         case let .invalidEmbeddingDimension(expected, actual):
             return "Embedding dimension mismatch. Expected \(expected), got \(actual)."
+        case let .invalidTopK(value):
+            return "Invalid topK value: \(value)."
+        case .emptyQuery:
+            return "Search query must not be empty."
         case let .embeddingProviderUnavailable(reason):
             return "Embedding provider is unavailable: \(reason)"
         case let .vectorStoreUnavailable(reason):

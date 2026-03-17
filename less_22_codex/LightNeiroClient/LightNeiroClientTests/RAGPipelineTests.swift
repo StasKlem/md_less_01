@@ -166,6 +166,73 @@ final class RAGPipelineTests: XCTestCase {
         XCTAssertTrue(ChunkingStrategyType.allCases.contains(report.recommendedDefault))
     }
 
+    func testSearchChunksUseCaseValidatesQueryAndTopK() async throws {
+        let useCase = SearchChunksUseCase(
+            embeddingProvider: DeterministicHashEmbeddingProvider(dimension: 16),
+            vectorStore: InMemoryVectorStore(),
+            settings: RAGSettings(
+                provider: .localONNX,
+                embeddingModel: "test",
+                embeddingDimension: 16,
+                batchSize: 4,
+                normalizeEmbeddings: true
+            )
+        )
+
+        do {
+            _ = try await useCase.execute(query: "   ", topK: 3)
+            XCTFail("Ожидалась ошибка для пустого запроса")
+        } catch let error as RAGError {
+            guard case .emptyQuery = error else {
+                return XCTFail("Ожидалась emptyQuery, получено: \(error)")
+            }
+        }
+
+        do {
+            _ = try await useCase.execute(query: "swift", topK: 0)
+            XCTFail("Ожидалась ошибка для topK <= 0")
+        } catch let error as RAGError {
+            guard case let .invalidTopK(value) = error else {
+                return XCTFail("Ожидалась invalidTopK, получено: \(error)")
+            }
+            XCTAssertEqual(value, 0)
+        }
+    }
+
+    func testCompareChunkingStrategiesThrowsWhenEmbeddingCountMismatchesChunks() async throws {
+        let file = try makeTempFile(name: "doc.md", content: "# Header\nSome content for chunking.")
+        let useCase = CompareChunkingStrategiesUseCase(
+            parser: CompositeDocumentParser(),
+            chunkingStrategies: [
+                .fixed: FixedSizeChunker(chunkSize: 20, overlap: 5)
+            ],
+            embeddingProvider: MismatchedEmbeddingProvider(),
+            vectorStoreFactory: { InMemoryVectorStore() },
+            settings: RAGSettings(
+                provider: .localONNX,
+                embeddingModel: "test",
+                embeddingDimension: 8,
+                batchSize: 4,
+                normalizeEmbeddings: true
+            )
+        )
+
+        do {
+            _ = try await useCase.execute(
+                strategies: [.fixed],
+                dataset: [file],
+                evaluationCases: [],
+                topK: 3
+            )
+            XCTFail("Ожидалась ошибка несоответствия количества эмбеддингов")
+        } catch let error as RAGError {
+            guard case let .invalidEmbeddingDimension(expected, actual) = error else {
+                return XCTFail("Ожидалась invalidEmbeddingDimension, получено: \(error)")
+            }
+            XCTAssertGreaterThan(expected, actual)
+        }
+    }
+
     func testSQLiteStoreWorksWithFallbackSearch() async throws {
         let dbURL = temporaryDirectoryURL().appendingPathComponent(UUID().uuidString + ".sqlite")
         let store = SQLiteVSSVectorStore(databaseURL: dbURL)
@@ -300,5 +367,14 @@ private final class CapturingHTTPClient: HTTPClientProtocol {
             headerFields: nil
         )!
         return (responseData, response)
+    }
+}
+
+private final class MismatchedEmbeddingProvider: EmbeddingProvider {
+    func embed(texts: [String], settings: RAGSettings) async throws -> [[Float]] {
+        guard !texts.isEmpty else {
+            return []
+        }
+        return Array(repeating: Array(repeating: 0, count: settings.embeddingDimension), count: max(0, texts.count - 1))
     }
 }

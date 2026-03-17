@@ -23,45 +23,42 @@ final class IndexDocumentsUseCase {
 
     func execute(documents: [URL], strategy: ChunkingStrategyType) async throws -> IndexingSummary {
         let startedAt = Date()
-        guard let chunker = chunkingStrategies[strategy] else {
-            throw RAGError.invalidChunkerConfiguration
-        }
-
-        var chunks: [ChunkDraft] = []
-        for url in documents {
-            let parsed = try parser.parse(url: url)
-            let builtChunks = try chunker.makeChunks(document: parsed)
-            chunks.append(contentsOf: builtChunks)
-        }
-
-        let embeddings = try await embeddingProvider.embed(texts: chunks.map(\.content), settings: settings)
-        let documentChunks = try zipChunksWithEmbeddings(chunks: chunks, embeddings: embeddings)
+        let chunker = try resolveChunker(for: strategy)
+        let chunks = try buildChunks(from: documents, using: chunker)
+        let documentChunks = try await buildDocumentChunks(from: chunks)
 
         try await vectorStore.upsert(chunks: documentChunks)
 
         return IndexingSummary(
             documentCount: documents.count,
             chunkCount: documentChunks.count,
-            indexingDurationMs: Int(Date().timeIntervalSince(startedAt) * 1000.0)
+            indexingDurationMs: elapsedMilliseconds(since: startedAt)
         )
     }
 
-    private func zipChunksWithEmbeddings(chunks: [ChunkDraft], embeddings: [[Float]]) throws -> [DocumentChunk] {
-        guard chunks.count == embeddings.count else {
-            throw RAGError.invalidEmbeddingDimension(expected: chunks.count, actual: embeddings.count)
+    private func resolveChunker(for strategy: ChunkingStrategyType) throws -> ChunkingStrategy {
+        guard let chunker = chunkingStrategies[strategy] else {
+            throw RAGError.invalidChunkerConfiguration
         }
+        return chunker
+    }
 
-        return zip(chunks, embeddings).map { chunk, embedding in
-            DocumentChunk(
-                id: UUID(),
-                content: chunk.content,
-                embedding: embedding,
-                source: chunk.source,
-                title: chunk.title,
-                section: chunk.section,
-                offset: chunk.offset
-            )
+    private func buildChunks(from documents: [URL], using chunker: ChunkingStrategy) throws -> [ChunkDraft] {
+        var chunks: [ChunkDraft] = []
+        for url in documents {
+            let parsed = try parser.parse(url: url)
+            chunks.append(contentsOf: try chunker.makeChunks(document: parsed))
         }
+        return chunks
+    }
+
+    private func buildDocumentChunks(from chunks: [ChunkDraft]) async throws -> [DocumentChunk] {
+        // Пустой набор входных чанков не требует обращения к провайдеру эмбеддингов.
+        guard !chunks.isEmpty else {
+            return []
+        }
+        let embeddings = try await embeddingProvider.embed(texts: chunks.map(\.content), settings: settings)
+        return try RAGChunkFactory.makeDocumentChunks(chunks: chunks, embeddings: embeddings)
     }
 }
 
@@ -81,11 +78,20 @@ final class SearchChunksUseCase {
     }
 
     func execute(query: String, topK: Int) async throws -> [SearchResult] {
+        try validateSearchInput(query: query, topK: topK)
         let embeddings = try await embeddingProvider.embed(texts: [query], settings: settings)
-        guard let queryEmbedding = embeddings.first else {
-            return []
-        }
+        // Для поискового запроса ожидаем ровно один эмбеддинг.
+        let queryEmbedding = try RAGChunkFactory.singleEmbedding(from: embeddings)
         return try await vectorStore.search(queryEmbedding: queryEmbedding, topK: topK)
+    }
+
+    private func validateSearchInput(query: String, topK: Int) throws {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw RAGError.emptyQuery
+        }
+        guard topK > 0 else {
+            throw RAGError.invalidTopK(topK)
+        }
     }
 }
 
@@ -116,81 +122,123 @@ final class CompareChunkingStrategiesUseCase {
         evaluationCases: [ChunkingEvaluationCase],
         topK: Int
     ) async throws -> ChunkingComparisonReport {
+        guard topK > 0 else {
+            throw RAGError.invalidTopK(topK)
+        }
         var metrics: [ChunkingMetrics] = []
 
         for strategy in strategies {
-            guard let chunker = chunkingStrategies[strategy] else { continue }
-            let store = vectorStoreFactory()
-            try await store.reset()
-
-            let startedAt = Date()
-            var allChunks: [ChunkDraft] = []
-            for url in dataset {
-                let parsed = try parser.parse(url: url)
-                allChunks.append(contentsOf: try chunker.makeChunks(document: parsed))
-            }
-
-            let embeddings = try await embeddingProvider.embed(texts: allChunks.map(\.content), settings: settings)
-            let indexedChunks = zip(allChunks, embeddings).map { chunk, embedding in
-                DocumentChunk(
-                    id: UUID(),
-                    content: chunk.content,
-                    embedding: embedding,
-                    source: chunk.source,
-                    title: chunk.title,
-                    section: chunk.section,
-                    offset: chunk.offset
-                )
-            }
-            try await store.upsert(chunks: indexedChunks)
-            let indexingDurationMs = Int(Date().timeIntervalSince(startedAt) * 1000.0)
-
-            let lengths = indexedChunks.map { $0.content.count }
-            let average = lengths.isEmpty ? 0 : Double(lengths.reduce(0, +)) / Double(lengths.count)
-            let median = medianChunkLength(lengths)
-
-            var recallHits = 0
-            var totalLatencyMs = 0
-            for item in evaluationCases {
-                let queryStart = Date()
-                let queryEmbedding = try await embeddingProvider.embed(texts: [item.query], settings: settings).first ?? []
-                let results = try await store.search(queryEmbedding: queryEmbedding, topK: topK)
-                totalLatencyMs += Int(Date().timeIntervalSince(queryStart) * 1000.0)
-
-                if isQueryMatched(results: results, expected: item) {
-                    recallHits += 1
-                }
-            }
-
-            let recallAtK: Double
-            if evaluationCases.isEmpty {
-                recallAtK = 0
-            } else {
-                recallAtK = Double(recallHits) / Double(evaluationCases.count)
-            }
-
-            let avgSearchLatencyMs: Int
-            if evaluationCases.isEmpty {
-                avgSearchLatencyMs = 0
-            } else {
-                avgSearchLatencyMs = totalLatencyMs / evaluationCases.count
-            }
-
-            metrics.append(
-                ChunkingMetrics(
-                    strategy: strategy,
-                    chunkCount: indexedChunks.count,
-                    averageChunkLength: average,
-                    medianChunkLength: median,
-                    indexingDurationMs: indexingDurationMs,
-                    averageSearchLatencyMs: avgSearchLatencyMs,
-                    recallAtK: recallAtK
-                )
+            let chunker = try resolveChunker(for: strategy)
+            let strategyMetrics = try await evaluateStrategy(
+                strategy,
+                chunker: chunker,
+                dataset: dataset,
+                evaluationCases: evaluationCases,
+                topK: topK
             )
+            metrics.append(strategyMetrics)
         }
 
         let recommended = metrics.max(by: compareMetrics(lhs:rhs:))?.strategy ?? .structural
         return ChunkingComparisonReport(metrics: metrics, recommendedDefault: recommended)
+    }
+
+    private func resolveChunker(for strategy: ChunkingStrategyType) throws -> ChunkingStrategy {
+        guard let chunker = chunkingStrategies[strategy] else {
+            throw RAGError.invalidChunkerConfiguration
+        }
+        return chunker
+    }
+
+    private func evaluateStrategy(
+        _ strategy: ChunkingStrategyType,
+        chunker: ChunkingStrategy,
+        dataset: [URL],
+        evaluationCases: [ChunkingEvaluationCase],
+        topK: Int
+    ) async throws -> ChunkingMetrics {
+        // Для каждой стратегии используем изолированное хранилище, чтобы метрики не влияли друг на друга.
+        let store = vectorStoreFactory()
+        try await store.reset()
+
+        let startedAt = Date()
+        let chunks = try buildChunks(from: dataset, using: chunker)
+        let indexedChunks = try await index(chunks: chunks, into: store)
+        let indexingDurationMs = elapsedMilliseconds(since: startedAt)
+
+        let lengths = indexedChunks.map(\.content.count)
+        let averageChunkLength = averageLength(lengths)
+        let median = medianChunkLength(lengths)
+        let evaluation = try await evaluateSearch(
+            evaluationCases: evaluationCases,
+            store: store,
+            topK: topK
+        )
+
+        return ChunkingMetrics(
+            strategy: strategy,
+            chunkCount: indexedChunks.count,
+            averageChunkLength: averageChunkLength,
+            medianChunkLength: median,
+            indexingDurationMs: indexingDurationMs,
+            averageSearchLatencyMs: evaluation.averageSearchLatencyMs,
+            recallAtK: evaluation.recallAtK
+        )
+    }
+
+    private func buildChunks(from documents: [URL], using chunker: ChunkingStrategy) throws -> [ChunkDraft] {
+        var chunks: [ChunkDraft] = []
+        for url in documents {
+            let parsed = try parser.parse(url: url)
+            chunks.append(contentsOf: try chunker.makeChunks(document: parsed))
+        }
+        return chunks
+    }
+
+    private func index(chunks: [ChunkDraft], into store: VectorStore) async throws -> [DocumentChunk] {
+        guard !chunks.isEmpty else {
+            return []
+        }
+        let embeddings = try await embeddingProvider.embed(texts: chunks.map(\.content), settings: settings)
+        let indexedChunks = try RAGChunkFactory.makeDocumentChunks(chunks: chunks, embeddings: embeddings)
+        try await store.upsert(chunks: indexedChunks)
+        return indexedChunks
+    }
+
+    private func evaluateSearch(
+        evaluationCases: [ChunkingEvaluationCase],
+        store: VectorStore,
+        topK: Int
+    ) async throws -> (recallAtK: Double, averageSearchLatencyMs: Int) {
+        guard !evaluationCases.isEmpty else {
+            return (0, 0)
+        }
+
+        var recallHits = 0
+        var totalLatencyMs = 0
+        for item in evaluationCases {
+            let queryStart = Date()
+            let queryEmbeddings = try await embeddingProvider.embed(texts: [item.query], settings: settings)
+            let queryEmbedding = try RAGChunkFactory.singleEmbedding(from: queryEmbeddings)
+            let results = try await store.search(queryEmbedding: queryEmbedding, topK: topK)
+            totalLatencyMs += elapsedMilliseconds(since: queryStart)
+
+            if isQueryMatched(results: results, expected: item) {
+                recallHits += 1
+            }
+        }
+
+        // Recall@K считаем как долю кейсов, где в топе найден ожидаемый источник/секция.
+        let recallAtK = Double(recallHits) / Double(evaluationCases.count)
+        let avgSearchLatencyMs = totalLatencyMs / evaluationCases.count
+        return (recallAtK, avgSearchLatencyMs)
+    }
+
+    private func averageLength(_ lengths: [Int]) -> Double {
+        guard !lengths.isEmpty else {
+            return 0
+        }
+        return Double(lengths.reduce(0, +)) / Double(lengths.count)
     }
 
     private func medianChunkLength(_ lengths: [Int]) -> Double {
@@ -232,6 +280,39 @@ final class CompareChunkingStrategiesUseCase {
         }
         return lhs.chunkCount > rhs.chunkCount
     }
+}
+
+private enum RAGChunkFactory {
+    static func makeDocumentChunks(chunks: [ChunkDraft], embeddings: [[Float]]) throws -> [DocumentChunk] {
+        // Жестко валидируем соответствие размеров, чтобы избежать тихой потери чанков при zip.
+        guard chunks.count == embeddings.count else {
+            throw RAGError.invalidEmbeddingDimension(expected: chunks.count, actual: embeddings.count)
+        }
+
+        return zip(chunks, embeddings).map { chunk, embedding in
+            DocumentChunk(
+                id: UUID(),
+                content: chunk.content,
+                embedding: embedding,
+                source: chunk.source,
+                title: chunk.title,
+                section: chunk.section,
+                offset: chunk.offset
+            )
+        }
+    }
+
+    static func singleEmbedding(from embeddings: [[Float]]) throws -> [Float] {
+        // Для сценария единичного запроса любое отклонение — это ошибка контракта провайдера.
+        guard embeddings.count == 1, let embedding = embeddings.first else {
+            throw RAGError.invalidEmbeddingDimension(expected: 1, actual: embeddings.count)
+        }
+        return embedding
+    }
+}
+
+private func elapsedMilliseconds(since startDate: Date) -> Int {
+    Int(Date().timeIntervalSince(startDate) * 1000.0)
 }
 
 final class RAGUseCaseFacade: RAGUseCaseFacadeProtocol {
