@@ -1,5 +1,79 @@
 # LightNeiroClient Monorepo
 
+## Как работает RAG в приложении
+
+RAG в `LightNeiroClient` включается настройкой `Enable RAG` и работает как часть обычного чата:
+
+1. При первом запросе пользователя (для выбранной `RAG chunking` стратегии) клиент проверяет, готов ли индекс.
+2. Если индекс не готов - выполняется индексация документов.
+3. Для текущего сообщения пользователя строится embedding-запрос, выполняется поиск top-4 релевантных чанков.
+4. Найденные фрагменты добавляются в `system prompt` как блок контекста (`source`, `section`, `offset`, `text`).
+
+### 1) Разбиение документов на чанки
+
+Пайплайн индексации:
+
+- каждый документ сначала парсится в `ParsedDocument` (`fullText + sections`);
+- затем выбранная chunking-стратегия превращает документ в массив `ChunkDraft` (`content`, `source`, `title`, `section`, `offset`).
+
+По умолчанию для индекса используются документы:
+
+- `README.md`
+- `LightNeiroClient/LightNeiroClient/Doc/mobile_system_design_guide.md`
+
+### 2) Генерация эмбеддингов
+
+После chunking все `chunk.content` отправляются в embedding provider:
+
+- по умолчанию используется `AppLLMEmbeddingProvider`;
+- модель по умолчанию: `mistralai/mistral-embed-2312`;
+- размерность по умолчанию: `768`;
+- `normalizeEmbeddings = true` (векторы нормализуются к unit-length);
+- запрос отправляется на endpoint `/embeddings` того же LLM-провайдера, что и основной чат.
+
+Если количество эмбеддингов не совпадает с количеством чанков, индексация падает с ошибкой `invalidEmbeddingDimension`.
+
+### 3) Сохранение индекса
+
+Сгенерированные `DocumentChunk` сохраняются во `VectorStore` (по умолчанию `SQLiteVSSVectorStore`):
+
+- БД: `~/Library/Application Support/LightNeiroClient/rag.sqlite`;
+- таблица `document_chunks` хранит текст чанка, embedding (`BLOB`), метаданные источника и offset;
+- при доступном `sqlite-vss` дополнительно заполняется virtual table `vss_document_chunks` для ANN-поиска;
+- если `sqlite-vss` недоступен, поиск выполняется fallback-сканированием с `cosine similarity` по всем сохранённым чанкам.
+
+Индекс строится лениво (on-demand) и кешируется в памяти по выбранной стратегии chunking: повторная индексация в той же сессии не выполняется, пока стратегия не изменится.
+
+### Как работают стратегии chunking
+
+Поддерживаются две стратегии (`ChunkingStrategyType`):
+
+- `fixed`
+- `structural`
+
+#### `fixed` (FixedSizeChunker)
+
+- Делит `fullText` на окна фиксированного размера.
+- Параметры по умолчанию: `chunkSize = 800`, `overlap = 120`.
+- Смещение (`offset`) каждого чанка считается от начала полного текста документа.
+- `section` для таких чанков не заполняется (`nil`).
+
+Когда подходит: равномерные документы без чёткой структуры, где важен предсказуемый размер чанков.
+
+#### `structural` (StructuralChunker)
+
+- Работает по `document.sections`, которые формируются парсером:
+  - Markdown: секции по заголовкам `#`;
+  - Code: секции по маркерам (`struct`, `class`, `func`, `protocol`, и т.д.);
+  - PDF: секции по страницам (`Page N`);
+  - Plain text: одна секция на весь файл.
+- Если секция короткая (`<= maxSectionSize`), она становится одним чанком.
+- Если секция длинная, она дополнительно дробится встроенным `FixedSizeChunker`.
+- Параметры по умолчанию: `maxSectionSize = 1200`, fallback `chunkSize = 800`, `overlap = 120`.
+- Для всех чанков сохраняется `section`, что улучшает трассировку источника в ответе.
+
+Когда подходит: структурированные документы (техдоки, markdown, код), где важна семантика разделов.
+
 ## Hacker News Task Agent
 
 `Hacker News Task Agent` работает в режиме `one-shot` (без таймеров и интервалов): один запуск = один полный цикл.
