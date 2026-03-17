@@ -53,6 +53,11 @@ final class SettingsViewModel {
         persist()
     }
 
+    func updateRAGChunkingStrategy(_ strategy: ChunkingStrategyType) {
+        settings.ragChunkingStrategy = strategy
+        persist()
+    }
+
     func updateMemoryEnabled(_ enabled: Bool) {
         settings.isMemoryEnabled = enabled
         persist()

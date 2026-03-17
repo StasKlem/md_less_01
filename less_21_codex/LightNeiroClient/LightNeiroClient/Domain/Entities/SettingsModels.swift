@@ -14,6 +14,7 @@ struct LLMSettings: Codable, Equatable {
     var temperature: Double
     var windowSize: Int
     var isRAGEnabled: Bool
+    var ragChunkingStrategy: ChunkingStrategyType
     var isMemoryEnabled: Bool
     var plannerInvariants: [String]
 
@@ -23,6 +24,7 @@ struct LLMSettings: Codable, Equatable {
         temperature: 0.4,
         windowSize: 3,
         isRAGEnabled: false,
+        ragChunkingStrategy: .structural,
         isMemoryEnabled: true,
         plannerInvariants: [
             "Даты поездки: дата начала не позже даты окончания.",
@@ -39,6 +41,7 @@ struct LLMSettings: Codable, Equatable {
         case temperature
         case windowSize
         case isRAGEnabled
+        case ragChunkingStrategy
         case isMemoryEnabled
         case plannerInvariants
     }
@@ -48,6 +51,7 @@ struct LLMSettings: Codable, Equatable {
         temperature: Double,
         windowSize: Int,
         isRAGEnabled: Bool,
+        ragChunkingStrategy: ChunkingStrategyType = .structural,
         isMemoryEnabled: Bool = true,
         plannerInvariants: [String]
     ) {
@@ -55,16 +59,24 @@ struct LLMSettings: Codable, Equatable {
         self.temperature = temperature
         self.windowSize = windowSize
         self.isRAGEnabled = isRAGEnabled
+        self.ragChunkingStrategy = ragChunkingStrategy
         self.isMemoryEnabled = isMemoryEnabled
         self.plannerInvariants = plannerInvariants
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        model = try container.decode(LLMModel.self, forKey: .model)
+        if let decodedModel = try? container.decode(LLMModel.self, forKey: .model) {
+            model = decodedModel
+        } else {
+            let rawModel = try container.decodeIfPresent(String.self, forKey: .model)
+            model = rawModel.flatMap(LLMModel.init(rawValue:)) ?? Self.default.model
+        }
         temperature = try container.decode(Double.self, forKey: .temperature)
         windowSize = try container.decode(Int.self, forKey: .windowSize)
         isRAGEnabled = try container.decodeIfPresent(Bool.self, forKey: .isRAGEnabled) ?? Self.default.isRAGEnabled
+        ragChunkingStrategy = try container.decodeIfPresent(ChunkingStrategyType.self, forKey: .ragChunkingStrategy)
+            ?? Self.default.ragChunkingStrategy
         isMemoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isMemoryEnabled) ?? Self.default.isMemoryEnabled
         plannerInvariants = try container.decodeIfPresent([String].self, forKey: .plannerInvariants) ?? Self.default.plannerInvariants
     }

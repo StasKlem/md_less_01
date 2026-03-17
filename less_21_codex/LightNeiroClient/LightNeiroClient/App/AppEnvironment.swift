@@ -96,7 +96,7 @@ struct AppEnvironment {
         let ragUseCaseFacade = RAGModuleFactory.makeFacade(
             settings: RAGSettings(
                 provider: .appLLM,
-                embeddingModel: LLMSettings.default.model.rawValue,
+                embeddingModel: RAGSettings.defaultEmbeddingModel,
                 embeddingDimension: 768,
                 batchSize: 16,
                 normalizeEmbeddings: true

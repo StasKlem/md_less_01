@@ -11,6 +11,7 @@ final class SettingsViewController: NSViewController {
     private let windowSlider = NSSlider(value: 12, minValue: 4, maxValue: 30, target: nil, action: nil)
     private let windowLabel = NSTextField(labelWithString: "Window: 12")
     private let ragCheckbox = NSButton(checkboxWithTitle: "Enable RAG", target: nil, action: nil)
+    private let ragChunkingStrategyPopup = NSPopUpButton()
     private let memoryCheckbox = NSButton(checkboxWithTitle: "Save to memory", target: nil, action: nil)
     private let apiKeyField = NSSecureTextField()
     private let saveAPIKeyButton = NSButton(title: "Save API Key", target: nil, action: nil)
@@ -40,6 +41,7 @@ final class SettingsViewController: NSViewController {
 
     private func setupUI() {
         modelPopup.addItems(withTitles: LLMModel.allCases.map { $0.rawValue })
+        ragChunkingStrategyPopup.addItems(withTitles: ChunkingStrategyType.allCases.map { $0.rawValue })
 
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged)
@@ -49,6 +51,8 @@ final class SettingsViewController: NSViewController {
         windowSlider.action = #selector(windowChanged)
         ragCheckbox.target = self
         ragCheckbox.action = #selector(ragToggled)
+        ragChunkingStrategyPopup.target = self
+        ragChunkingStrategyPopup.action = #selector(ragChunkingStrategyChanged)
         memoryCheckbox.target = self
         memoryCheckbox.action = #selector(memoryToggled)
         apiKeyField.target = self
@@ -68,6 +72,7 @@ final class SettingsViewController: NSViewController {
             windowLabel,
             windowSlider,
             ragCheckbox,
+            makeRow(label: "RAG chunking", control: ragChunkingStrategyPopup),
             memoryCheckbox,
             makeRow(label: "RouterAI API Key", control: apiKeyField),
             saveAPIKeyButton,
@@ -97,6 +102,7 @@ final class SettingsViewController: NSViewController {
                 self.temperatureLabel.stringValue = String(format: "Temperature: %.2f", settings.temperature)
                 self.windowLabel.stringValue = "Window: \(settings.windowSize)"
                 self.ragCheckbox.state = settings.isRAGEnabled ? .on : .off
+                self.ragChunkingStrategyPopup.selectItem(withTitle: settings.ragChunkingStrategy.rawValue)
                 self.memoryCheckbox.state = settings.isMemoryEnabled ? .on : .off
             }
             .store(in: &cancellables)
@@ -150,6 +156,13 @@ final class SettingsViewController: NSViewController {
     @objc
     private func ragToggled() {
         viewModel.updateRAGEnabled(ragCheckbox.state == .on)
+    }
+
+    @objc
+    private func ragChunkingStrategyChanged() {
+        guard let title = ragChunkingStrategyPopup.selectedItem?.title,
+              let strategy = ChunkingStrategyType(rawValue: title) else { return }
+        viewModel.updateRAGChunkingStrategy(strategy)
     }
 
     @objc

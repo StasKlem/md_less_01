@@ -364,6 +364,7 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                     temperature: 0.0,
                     windowSize: 1,
                     isRAGEnabled: settings.isRAGEnabled,
+                    ragChunkingStrategy: settings.ragChunkingStrategy,
                     isMemoryEnabled: settings.isMemoryEnabled,
                     plannerInvariants: settings.plannerInvariants
                 )
@@ -715,7 +716,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         guard settings.isRAGEnabled, let ragUseCaseFacade else { return nil }
 
         do {
-            try await ensureRAGIndexIsReady(ragUseCaseFacade)
+            try await ensureRAGIndexIsReady(ragUseCaseFacade, strategy: settings.ragChunkingStrategy)
             let results = try await ragUseCaseFacade.search(query: userText, topK: 4)
             guard !results.isEmpty else { return nil }
             return formatRAGContext(results)
@@ -724,8 +725,11 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         }
     }
 
-    private func ensureRAGIndexIsReady(_ ragUseCaseFacade: RAGUseCaseFacadeProtocol) async throws {
-        if await ragIndexState.isReady {
+    private func ensureRAGIndexIsReady(
+        _ ragUseCaseFacade: RAGUseCaseFacadeProtocol,
+        strategy: ChunkingStrategyType
+    ) async throws {
+        if await ragIndexState.isReady(for: strategy) {
             return
         }
 
@@ -734,8 +738,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             return
         }
 
-        _ = try await ragUseCaseFacade.index(documents: documents, strategy: .structural)
-        await ragIndexState.markReady()
+        _ = try await ragUseCaseFacade.index(documents: documents, strategy: strategy)
+        await ragIndexState.markReady(for: strategy)
     }
 
     private func formatRAGContext(_ results: [SearchResult]) -> String {
@@ -786,10 +790,14 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 }
 
 private actor RAGIndexState {
-    private(set) var isReady = false
+    private var indexedStrategy: ChunkingStrategyType?
 
-    func markReady() {
-        isReady = true
+    func isReady(for strategy: ChunkingStrategyType) -> Bool {
+        indexedStrategy == strategy
+    }
+
+    func markReady(for strategy: ChunkingStrategyType) {
+        indexedStrategy = strategy
     }
 }
 

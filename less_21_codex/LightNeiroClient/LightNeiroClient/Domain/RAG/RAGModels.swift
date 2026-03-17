@@ -78,6 +78,8 @@ enum RAGEmbeddingProviderKind: String, Codable {
 }
 
 struct RAGSettings: Codable, Equatable {
+    static let defaultEmbeddingModel = "mistralai/mistral-embed-2312"
+
     var provider: RAGEmbeddingProviderKind
     var embeddingModel: String
     var embeddingDimension: Int
@@ -86,7 +88,7 @@ struct RAGSettings: Codable, Equatable {
 
     static let `default` = RAGSettings(
         provider: .appLLM,
-        embeddingModel: LLMSettings.default.model.rawValue,
+        embeddingModel: defaultEmbeddingModel,
         embeddingDimension: 768,
         batchSize: 16,
         normalizeEmbeddings: true
