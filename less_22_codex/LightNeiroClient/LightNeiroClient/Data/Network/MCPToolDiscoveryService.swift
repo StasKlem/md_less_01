@@ -459,6 +459,7 @@ private actor ProcessStdioMCPTransport: Transport {
     }
 
     nonisolated let logger: Logger
+    private let appLogger: AppLogger
 
     private let launchConfiguration: LaunchConfiguration
     private var process: Process?
@@ -471,9 +472,10 @@ private actor ProcessStdioMCPTransport: Transport {
     private let messageStream: AsyncThrowingStream<Data, Swift.Error>
     private let messageContinuation: AsyncThrowingStream<Data, Swift.Error>.Continuation
 
-    init(launchConfiguration: LaunchConfiguration, logger: Logger? = nil) {
+    init(launchConfiguration: LaunchConfiguration, logger: AppLogger = .shared) {
         self.launchConfiguration = launchConfiguration
-        self.logger = logger ?? Logger(label: "mcp.transport.process-stdio")
+        self.logger = Logger(label: "mcp.transport.process-stdio")
+        self.appLogger = logger
 
         var continuation: AsyncThrowingStream<Data, Swift.Error>.Continuation!
         self.messageStream = AsyncThrowingStream { continuation = $0 }
@@ -521,6 +523,10 @@ private actor ProcessStdioMCPTransport: Transport {
         do {
             try process.run()
         } catch {
+            appLogger.error(
+                "Не удалось запустить MCP процесс: \(error.localizedDescription)",
+                category: "mcp.transport.process-stdio"
+            )
             throw MCPDiscoveryError.transport("Failed to start MCP process: \(error.localizedDescription)")
         }
 
@@ -602,7 +608,7 @@ private actor ProcessStdioMCPTransport: Transport {
             if stderrLines.count > 20 {
                 stderrLines = Array(stderrLines.suffix(20))
             }
-            logger.debug("MCP stderr: \(text)")
+            appLogger.debug("MCP stderr: \(text)", category: "mcp.transport.process-stdio")
         }
     }
 
@@ -612,7 +618,7 @@ private actor ProcessStdioMCPTransport: Transport {
         if status != 0 {
             let stderrSuffix = stderrLines.isEmpty ? "" : ". stderr: \(stderrLines.joined(separator: " | "))"
             let message = "MCP process exited with code \(status)\(stderrSuffix)"
-            logger.error("\(message)")
+            appLogger.error(message, category: "mcp.transport.process-stdio")
             messageContinuation.finish(throwing: MCPDiscoveryError.transport(message))
             return
         }

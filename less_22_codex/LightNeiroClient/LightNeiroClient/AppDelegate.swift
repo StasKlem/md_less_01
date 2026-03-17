@@ -23,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var isWindowPersistenceEnabled = false
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        AppLogger.shared.info("Старт инициализации окна приложения", category: "app.lifecycle")
         let defaultFrame = NSRect(
             x: 0,
             y: 0,
@@ -95,6 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             isWindowPersistenceEnabled = true
             persistWindowFrame(of: window)
+            AppLogger.shared.info("Главный экран приложения инициализирован", category: "app.lifecycle")
         }
     }
 

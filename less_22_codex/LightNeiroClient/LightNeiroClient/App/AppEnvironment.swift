@@ -29,6 +29,7 @@ struct AppEnvironment {
     let ragUseCaseFacade: RAGUseCaseFacadeProtocol
 
     static func bootstrap() async -> AppEnvironment {
+        AppLogger.shared.info("Начало bootstrap окружения приложения", category: "app.bootstrap")
         let sessionRepository = MockChatSessionRepository()
         let branchRepository = MockBranchRepository()
         let messageRepository = MockMessageRepository()
@@ -210,6 +211,7 @@ struct AppEnvironment {
         let initialSettings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
         try? await settingsRepository.saveSettings(sessionID: sessionID, settings: initialSettings)
 
+        AppLogger.shared.info("Bootstrap окружения приложения завершен", category: "app.bootstrap")
         return AppEnvironment(
             session: rootSession,
             sendMessageUseCase: sendMessage,

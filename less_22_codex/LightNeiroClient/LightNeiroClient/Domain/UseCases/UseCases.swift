@@ -634,6 +634,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         // Этот контекст отправится в модель вместе с system prompt и настройками.
         let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
         let ragContextBlock = await buildRAGContextIfEnabled(settings: settings, userText: userText)
+        log(ragContextBlock)
         let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction, ragContextBlock: ragContextBlock)
         let request = LLMRequest(
             systemPrompt: systemPrompt,
