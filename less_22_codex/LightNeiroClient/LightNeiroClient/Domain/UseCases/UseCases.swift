@@ -725,6 +725,9 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             guard !results.isEmpty else { return nil }
             return formatRAGContext(results)
         } catch {
+#if DEBUG
+            print("[RAG] Контекст не собран: \(error)")
+#endif
             return nil
         }
     }

@@ -2,8 +2,9 @@ import Foundation
 
 enum RAGModuleFactory {
     static let defaultDocumentRelativePaths: [String] = [
-        "README.md",
-        "LightNeiroClient/LightNeiroClient/Doc/mobile_system_design_guide.md"
+//        "README.md",
+//        "LightNeiroClient/LightNeiroClient/Doc/mobile_system_design_guide.md"
+        "LightNeiroClient/LightNeiroClient/Doc/ai.md"
     ]
 
     static func defaultDocumentURLs(baseDirectory: URL) -> [URL] {
@@ -14,7 +15,7 @@ enum RAGModuleFactory {
 
     static func makeFacade(
         settings: RAGSettings = .default,
-        vectorStore: VectorStore = SQLiteVSSVectorStore(),
+        vectorStore: VectorStore? = nil,
         embeddingProvider: EmbeddingProvider? = nil
     ) -> RAGUseCaseFacadeProtocol {
         let parser = CompositeDocumentParser()
@@ -37,16 +38,18 @@ enum RAGModuleFactory {
             }
         }
 
+        let resolvedVectorStore = vectorStore ?? SQLiteVSSVectorStore(embeddingDimension: settings.embeddingDimension)
+
         let indexUseCase = IndexDocumentsUseCase(
             parser: parser,
             chunkingStrategies: chunkers,
             embeddingProvider: resolvedEmbeddingProvider,
-            vectorStore: vectorStore,
+            vectorStore: resolvedVectorStore,
             settings: settings
         )
         let searchUseCase = SearchChunksUseCase(
             embeddingProvider: resolvedEmbeddingProvider,
-            vectorStore: vectorStore,
+            vectorStore: resolvedVectorStore,
             settings: settings
         )
         let compareUseCase = CompareChunkingStrategiesUseCase(

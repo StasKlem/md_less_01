@@ -5,16 +5,19 @@ import Darwin
 actor SQLiteVSSVectorStore: VectorStore {
     private let databaseURL: URL
     private let vssExtensionPath: String?
+    private let embeddingDimension: Int
 
     private var db: OpaquePointer?
     private var vssEnabled = false
 
     init(
         databaseURL: URL = SQLiteVSSVectorStore.defaultDatabaseURL(),
-        vssExtensionPath: String? = ProcessInfo.processInfo.environment["SQLITE_VSS_EXTENSION_PATH"]
+        vssExtensionPath: String? = ProcessInfo.processInfo.environment["SQLITE_VSS_EXTENSION_PATH"],
+        embeddingDimension: Int = RAGSettings.default.embeddingDimension
     ) {
         self.databaseURL = databaseURL
         self.vssExtensionPath = vssExtensionPath
+        self.embeddingDimension = embeddingDimension
     }
 
     deinit {
@@ -70,7 +73,15 @@ actor SQLiteVSSVectorStore: VectorStore {
 
             if vssEnabled {
                 let rowID = sqlite3_last_insert_rowid(db)
-                try upsertIntoVSS(rowID: rowID, embedding: chunk.embedding)
+                do {
+                    try upsertIntoVSS(rowID: rowID, embedding: chunk.embedding)
+                } catch {
+                    vssEnabled = false
+                    AppLogger.shared.warning(
+                        "sqlite-vss отключен из-за ошибки записи эмбеддинга: \(error)",
+                        category: "rag.vectorstore"
+                    )
+                }
             }
         }
     }
@@ -127,7 +138,7 @@ actor SQLiteVSSVectorStore: VectorStore {
 
         let status = sqlite3_exec(
             db,
-            "CREATE VIRTUAL TABLE IF NOT EXISTS vss_document_chunks USING vss0(embedding(768));",
+            "CREATE VIRTUAL TABLE IF NOT EXISTS vss_document_chunks USING vss0(embedding(\(embeddingDimension)));",
             nil,
             nil,
             nil
@@ -336,7 +347,7 @@ actor SQLiteVSSVectorStore: VectorStore {
         return dot / denominator
     }
 
-    nonisolated private static func defaultDatabaseURL() -> URL {
+    nonisolated static func defaultDatabaseURL() -> URL {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())

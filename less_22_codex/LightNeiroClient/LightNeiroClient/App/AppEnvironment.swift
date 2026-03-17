@@ -98,8 +98,8 @@ struct AppEnvironment {
             settings: RAGSettings(
                 provider: .appLLM,
                 embeddingModel: RAGSettings.defaultEmbeddingModel,
-                embeddingDimension: 768,
-                batchSize: 16,
+                embeddingDimension: RAGSettings.default.embeddingDimension,
+                batchSize: RAGSettings.default.batchSize,
                 normalizeEmbeddings: true
             ),
             embeddingProvider: AppLLMEmbeddingProvider(
@@ -281,8 +281,17 @@ struct AppEnvironment {
             return nil
         }
 
+        if isPersistedRAGIndexAvailable(for: settings.ragChunkingStrategy) {
+            AppLogger.shared.info(
+                "Пропуск стартовой индексации RAG: используется сохраненный индекс, strategy=\(settings.ragChunkingStrategy.rawValue)",
+                category: "app.bootstrap.rag"
+            )
+            return settings.ragChunkingStrategy
+        }
+
         do {
             let summary = try await ragUseCaseFacade.index(documents: documents, strategy: settings.ragChunkingStrategy)
+            markPersistedRAGIndexReady(for: settings.ragChunkingStrategy)
             AppLogger.shared.info(
                 "Стартовая индексация RAG завершена: documents=\(summary.documentCount), chunks=\(summary.chunkCount), strategy=\(settings.ragChunkingStrategy.rawValue)",
                 category: "app.bootstrap.rag"
@@ -295,6 +304,27 @@ struct AppEnvironment {
             )
             return nil
         }
+    }
+
+    private static func ragIndexReadyDefaultsKey(for strategy: ChunkingStrategyType) -> String {
+        "rag.index.ready.\(strategy.rawValue)"
+    }
+
+    private static func isPersistedRAGIndexAvailable(for strategy: ChunkingStrategyType) -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: ragIndexReadyDefaultsKey(for: strategy)) else {
+            return false
+        }
+        let databaseURL = SQLiteVSSVectorStore.defaultDatabaseURL()
+        guard FileManager.default.fileExists(atPath: databaseURL.path) else {
+            return false
+        }
+        let size = (try? databaseURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        return size > 0
+    }
+
+    private static func markPersistedRAGIndexReady(for strategy: ChunkingStrategyType) {
+        UserDefaults.standard.set(true, forKey: ragIndexReadyDefaultsKey(for: strategy))
     }
 
     private static func ragBaseDirectoryCandidates() -> [URL] {

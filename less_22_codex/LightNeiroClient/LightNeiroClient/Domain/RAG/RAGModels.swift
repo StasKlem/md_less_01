@@ -95,8 +95,8 @@ struct RAGSettings: Codable, Equatable {
     static let `default` = RAGSettings(
         provider: .appLLM,
         embeddingModel: defaultEmbeddingModel,
-        embeddingDimension: 768,
-        batchSize: 16,
+        embeddingDimension: 1024,
+        batchSize: 150,
         normalizeEmbeddings: true
     )
 }

@@ -6,7 +6,7 @@ struct FixedSizeChunker: ChunkingStrategy {
     let chunkSize: Int
     let overlap: Int
 
-    init(chunkSize: Int = 800, overlap: Int = 120) {
+    init(chunkSize: Int = 600, overlap: Int = 100) {
         self.chunkSize = chunkSize
         self.overlap = overlap
     }
@@ -59,7 +59,7 @@ struct StructuralChunker: ChunkingStrategy {
     private let maxSectionSize: Int
     private let fallbackChunker: FixedSizeChunker
 
-    init(maxSectionSize: Int = 1200, fallbackChunkSize: Int = 800, fallbackOverlap: Int = 120) {
+    init(maxSectionSize: Int = 1200, fallbackChunkSize: Int = 600, fallbackOverlap: Int = 100) {
         self.maxSectionSize = maxSectionSize
         self.fallbackChunker = FixedSizeChunker(chunkSize: fallbackChunkSize, overlap: fallbackOverlap)
     }
