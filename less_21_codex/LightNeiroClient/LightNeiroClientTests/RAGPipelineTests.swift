@@ -202,6 +202,42 @@ final class RAGPipelineTests: XCTestCase {
         }
     }
 
+    func testAppLLMEmbeddingProviderSendsEncodingFormatFloat() async throws {
+        let httpClient = CapturingHTTPClient(
+            responseData: """
+            {
+              "data": [
+                { "index": 0, "embedding": [1.0, 2.0, 3.0] }
+              ]
+            }
+            """.data(using: .utf8)!
+        )
+        let provider = AppLLMEmbeddingProvider(
+            httpClient: httpClient,
+            configuration: RouterAIConfiguration(
+                endpoint: URL(string: "https://routerai.ru/api/v1/chat/completions")!,
+                timeoutInterval: 30,
+                apiKeyProvider: { "test-key" }
+            )
+        )
+
+        _ = try await provider.embed(
+            texts: ["hello"],
+            settings: RAGSettings(
+                provider: .appLLM,
+                embeddingModel: "text-embedding-3-small",
+                embeddingDimension: 3,
+                batchSize: 8,
+                normalizeEmbeddings: false
+            )
+        )
+
+        let request = try XCTUnwrap(httpClient.lastRequest)
+        let bodyData = try XCTUnwrap(request.httpBody)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+        XCTAssertEqual(body["encoding_format"] as? String, "float")
+    }
+
     private func makeTempFile(name: String, content: String) throws -> URL {
         let url = temporaryDirectoryURL().appendingPathComponent(UUID().uuidString + "-" + name)
         try content.write(to: url, atomically: true, encoding: .utf8)
@@ -242,5 +278,27 @@ final class RAGPipelineTests: XCTestCase {
             .appendingPathComponent("LightNeiroClientTests-RAG", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
+    }
+}
+
+private final class CapturingHTTPClient: HTTPClientProtocol {
+    private(set) var lastRequest: URLRequest?
+    private let responseData: Data
+    private let statusCode: Int
+
+    init(responseData: Data, statusCode: Int = 200) {
+        self.responseData = responseData
+        self.statusCode = statusCode
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        lastRequest = request
+        let response = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://example.com")!,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (responseData, response)
     }
 }

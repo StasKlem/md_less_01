@@ -25,7 +25,13 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
         urlRequest.timeoutInterval = configuration.timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try encoder.encode(EmbeddingRequest(model: settings.embeddingModel, input: texts))
+        urlRequest.httpBody = try encoder.encode(
+            EmbeddingRequest(
+                model: settings.embeddingModel,
+                input: texts,
+                encodingFormat: .float
+            )
+        )
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -100,8 +106,20 @@ struct DeterministicHashEmbeddingProvider: EmbeddingProvider {
 }
 
 private struct EmbeddingRequest: Encodable {
+    enum EncodingFormat: String, Encodable {
+        case float
+        case base64
+    }
+
     let model: String
     let input: [String]
+    let encodingFormat: EncodingFormat
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case input
+        case encodingFormat = "encoding_format"
+    }
 }
 
 private struct EmbeddingResponse: Decodable {
