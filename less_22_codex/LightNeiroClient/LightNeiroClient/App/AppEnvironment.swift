@@ -113,20 +113,6 @@ struct AppEnvironment {
             )
         )
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
-        let sendMessage = SendMessageUseCase(
-            settingsRepository: settingsRepository,
-            messageRepository: messageRepository,
-            llmClient: llmClient,
-            buildMemoryContextUseCase: buildMemoryContext,
-            updateShortTermMemoryUseCase: updateShortTermMemory,
-            updateWorkingMemoryUseCase: updateWorkingMemory,
-            updateLongTermMemoryUseCase: updateLongTermMemory,
-            metricsRepository: metricsRepository,
-            ragUseCaseFacade: ragUseCaseFacade,
-            ragDocumentsProvider: {
-                Self.defaultRAGDocumentURLs()
-            }
-        )
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
@@ -210,6 +196,27 @@ struct AppEnvironment {
         try? await branchRepository.saveBranch(rootBranch)
         let initialSettings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
         try? await settingsRepository.saveSettings(sessionID: sessionID, settings: initialSettings)
+        let ragDocuments = defaultRAGDocumentURLs()
+        let startupIndexedRAGStrategy = await preloadRAGIndexOnStartup(
+            ragUseCaseFacade: ragUseCaseFacade,
+            settings: initialSettings,
+            documents: ragDocuments
+        )
+        let sendMessage = SendMessageUseCase(
+            settingsRepository: settingsRepository,
+            messageRepository: messageRepository,
+            llmClient: llmClient,
+            buildMemoryContextUseCase: buildMemoryContext,
+            updateShortTermMemoryUseCase: updateShortTermMemory,
+            updateWorkingMemoryUseCase: updateWorkingMemory,
+            updateLongTermMemoryUseCase: updateLongTermMemory,
+            metricsRepository: metricsRepository,
+            ragUseCaseFacade: ragUseCaseFacade,
+            ragDocumentsProvider: {
+                ragDocuments
+            },
+            initialIndexedRAGStrategy: startupIndexedRAGStrategy
+        )
 
         AppLogger.shared.info("Bootstrap окружения приложения завершен", category: "app.bootstrap")
         return AppEnvironment(
@@ -259,6 +266,35 @@ struct AppEnvironment {
             }
         }
         return []
+    }
+
+    private static func preloadRAGIndexOnStartup(
+        ragUseCaseFacade: RAGUseCaseFacadeProtocol,
+        settings: LLMSettings,
+        documents: [URL]
+    ) async -> ChunkingStrategyType? {
+        guard !documents.isEmpty else {
+            AppLogger.shared.info(
+                "Пропуск стартовой индексации RAG: документы не найдены",
+                category: "app.bootstrap.rag"
+            )
+            return nil
+        }
+
+        do {
+            let summary = try await ragUseCaseFacade.index(documents: documents, strategy: settings.ragChunkingStrategy)
+            AppLogger.shared.info(
+                "Стартовая индексация RAG завершена: documents=\(summary.documentCount), chunks=\(summary.chunkCount), strategy=\(settings.ragChunkingStrategy.rawValue)",
+                category: "app.bootstrap.rag"
+            )
+            return settings.ragChunkingStrategy
+        } catch {
+            AppLogger.shared.warning(
+                "Стартовая индексация RAG завершилась с ошибкой: \(error)",
+                category: "app.bootstrap.rag"
+            )
+            return nil
+        }
     }
 
     private static func ragBaseDirectoryCandidates() -> [URL] {

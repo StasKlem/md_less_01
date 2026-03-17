@@ -524,7 +524,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     private let metricsRepository: MetricsRepositoryProtocol
     private let ragUseCaseFacade: RAGUseCaseFacadeProtocol?
     private let ragDocumentsProvider: @Sendable () -> [URL]
-    private let ragIndexState = RAGIndexState()
+    private let ragIndexState: RAGIndexState
 
     /// Создает use case отправки сообщения и внедряет все необходимые зависимости.
     ///
@@ -539,6 +539,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - metricsRepository: хранилище телеметрии запроса/ответа модели.
     ///   - ragUseCaseFacade: фасад RAG-пайплайна (опционально).
     ///   - ragDocumentsProvider: провайдер списка документов для индексации RAG.
+    ///   - initialIndexedRAGStrategy: стратегия, уже проиндексированная на этапе старта приложения.
     init(
         settingsRepository: SettingsRepositoryProtocol,
         messageRepository: MessageRepositoryProtocol,
@@ -549,7 +550,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         updateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol,
         metricsRepository: MetricsRepositoryProtocol,
         ragUseCaseFacade: RAGUseCaseFacadeProtocol? = nil,
-        ragDocumentsProvider: @escaping @Sendable () -> [URL] = { [] }
+        ragDocumentsProvider: @escaping @Sendable () -> [URL] = { [] },
+        initialIndexedRAGStrategy: ChunkingStrategyType? = nil
     ) {
         self.settingsRepository = settingsRepository
         self.messageRepository = messageRepository
@@ -561,6 +563,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         self.metricsRepository = metricsRepository
         self.ragUseCaseFacade = ragUseCaseFacade
         self.ragDocumentsProvider = ragDocumentsProvider
+        self.ragIndexState = RAGIndexState(initialStrategy: initialIndexedRAGStrategy)
     }
 
     /// Выполняет end-to-end обработку пользовательского сообщения.
@@ -792,6 +795,10 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 
 private actor RAGIndexState {
     private var indexedStrategy: ChunkingStrategyType?
+
+    init(initialStrategy: ChunkingStrategyType? = nil) {
+        indexedStrategy = initialStrategy
+    }
 
     func isReady(for strategy: ChunkingStrategyType) -> Bool {
         indexedStrategy == strategy
