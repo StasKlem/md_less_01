@@ -24,7 +24,9 @@ final class IndexDocumentsUseCase {
     func execute(documents: [URL], strategy: ChunkingStrategyType) async throws -> IndexingSummary {
         let startedAt = Date()
         let chunker = try resolveChunker(for: strategy)
+        // chunks: промежуточные черновики фрагментов текста после парсинга и разбиения документов.
         let chunks = try buildChunks(from: documents, using: chunker)
+        // documentChunks: финальные чанки для векторного индекса (контент + метаданные + эмбеддинг).
         let documentChunks = try await buildDocumentChunks(from: chunks)
 
         try await vectorStore.upsert(chunks: documentChunks)
@@ -200,6 +202,7 @@ final class CompareChunkingStrategiesUseCase {
             return []
         }
         let embeddings = try await embeddingProvider.embed(texts: chunks.map(\.content), settings: settings)
+        // indexedChunks: материализованные DocumentChunk, готовые к загрузке в хранилище векторов.
         let indexedChunks = try RAGChunkFactory.makeDocumentChunks(chunks: chunks, embeddings: embeddings)
         try await store.upsert(chunks: indexedChunks)
         return indexedChunks
