@@ -848,6 +848,26 @@ final class FetchSettingsUseCase: FetchSettingsUseCaseProtocol {
     }
 }
 
+final class ResetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol {
+    private let ragUseCaseFacade: RAGUseCaseFacadeProtocol
+    private let ragIndexReadinessRepository: RAGIndexReadinessRepositoryProtocol
+
+    /// Создает use case очистки embeddings-индекса RAG.
+    init(
+        ragUseCaseFacade: RAGUseCaseFacadeProtocol,
+        ragIndexReadinessRepository: RAGIndexReadinessRepositoryProtocol
+    ) {
+        self.ragUseCaseFacade = ragUseCaseFacade
+        self.ragIndexReadinessRepository = ragIndexReadinessRepository
+    }
+
+    /// Полностью очищает текущее хранилище embeddings RAG.
+    func execute() async throws {
+        try await ragUseCaseFacade.resetIndex()
+        ragIndexReadinessRepository.clearAll()
+    }
+}
+
 final class CollectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol {
     private let metricsRepository: MetricsRepositoryProtocol
 

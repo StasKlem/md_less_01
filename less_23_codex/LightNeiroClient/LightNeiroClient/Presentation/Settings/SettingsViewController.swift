@@ -13,6 +13,8 @@ final class SettingsViewController: NSViewController {
     private let ragCheckbox = NSButton(checkboxWithTitle: "Enable RAG", target: nil, action: nil)
     private let ragChunkingStrategyPopup = NSPopUpButton()
     private let memoryCheckbox = NSButton(checkboxWithTitle: "Save to memory", target: nil, action: nil)
+    private let clearEmbeddingsButton = NSButton(title: "Clear embeddings DB", target: nil, action: nil)
+    private let clearEmbeddingsStatusLabel = NSTextField(labelWithString: "")
     private let apiKeyField = NSSecureTextField()
     private let saveAPIKeyButton = NSButton(title: "Save API Key", target: nil, action: nil)
     private let apiKeyStatusLabel = NSTextField(labelWithString: "")
@@ -60,10 +62,15 @@ final class SettingsViewController: NSViewController {
         apiKeyField.placeholderString = "routerai key"
         saveAPIKeyButton.target = self
         saveAPIKeyButton.action = #selector(saveAPIKeyTapped)
+        clearEmbeddingsButton.target = self
+        clearEmbeddingsButton.action = #selector(clearEmbeddingsTapped)
 
         apiKeyStatusLabel.textColor = .secondaryLabelColor
         apiKeyStatusLabel.lineBreakMode = .byWordWrapping
         apiKeyStatusLabel.maximumNumberOfLines = 2
+        clearEmbeddingsStatusLabel.textColor = .secondaryLabelColor
+        clearEmbeddingsStatusLabel.lineBreakMode = .byWordWrapping
+        clearEmbeddingsStatusLabel.maximumNumberOfLines = 2
 
         let stack = NSStackView(views: [
             makeRow(label: "Model", control: modelPopup),
@@ -73,6 +80,8 @@ final class SettingsViewController: NSViewController {
             windowSlider,
             ragCheckbox,
             makeRow(label: "RAG chunking", control: ragChunkingStrategyPopup),
+            clearEmbeddingsButton,
+            clearEmbeddingsStatusLabel,
             memoryCheckbox,
             makeRow(label: "RouterAI API Key", control: apiKeyField),
             saveAPIKeyButton,
@@ -121,6 +130,13 @@ final class SettingsViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.apiKeyStatusLabel.stringValue = status
+            }
+            .store(in: &cancellables)
+
+        viewModel.$ragEmbeddingsStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.clearEmbeddingsStatusLabel.stringValue = status
             }
             .store(in: &cancellables)
     }
@@ -179,6 +195,11 @@ final class SettingsViewController: NSViewController {
     private func saveAPIKeyTapped() {
         viewModel.updateAPIKey(apiKeyField.stringValue)
         viewModel.saveAPIKey()
+    }
+
+    @objc
+    private func clearEmbeddingsTapped() {
+        viewModel.resetRAGEmbeddings()
     }
 }
 

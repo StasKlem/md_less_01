@@ -285,6 +285,18 @@ final class CompareChunkingStrategiesUseCase {
     }
 }
 
+final class ResetRAGIndexUseCase {
+    private let vectorStore: VectorStore
+
+    init(vectorStore: VectorStore) {
+        self.vectorStore = vectorStore
+    }
+
+    func execute() async throws {
+        try await vectorStore.reset()
+    }
+}
+
 private enum RAGChunkFactory {
     static func makeDocumentChunks(chunks: [ChunkDraft], embeddings: [[Float]]) throws -> [DocumentChunk] {
         // Жестко валидируем соответствие размеров, чтобы избежать тихой потери чанков при zip.
@@ -322,15 +334,18 @@ final class RAGUseCaseFacade: RAGUseCaseFacadeProtocol {
     private let indexUseCase: IndexDocumentsUseCase
     private let searchUseCase: SearchChunksUseCase
     private let compareUseCase: CompareChunkingStrategiesUseCase
+    private let resetUseCase: ResetRAGIndexUseCase
 
     init(
         indexUseCase: IndexDocumentsUseCase,
         searchUseCase: SearchChunksUseCase,
-        compareUseCase: CompareChunkingStrategiesUseCase
+        compareUseCase: CompareChunkingStrategiesUseCase,
+        resetUseCase: ResetRAGIndexUseCase
     ) {
         self.indexUseCase = indexUseCase
         self.searchUseCase = searchUseCase
         self.compareUseCase = compareUseCase
+        self.resetUseCase = resetUseCase
     }
 
     func index(documents: [URL], strategy: ChunkingStrategyType) async throws -> IndexingSummary {
@@ -353,5 +368,9 @@ final class RAGUseCaseFacade: RAGUseCaseFacadeProtocol {
             evaluationCases: evaluationCases,
             topK: topK
         )
+    }
+
+    func resetIndex() async throws {
+        try await resetUseCase.execute()
     }
 }

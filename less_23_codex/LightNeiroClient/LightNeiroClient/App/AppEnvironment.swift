@@ -7,6 +7,7 @@ struct AppEnvironment {
     let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
+    let resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol
     let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
@@ -38,6 +39,7 @@ struct AppEnvironment {
         let longTermMemoryRepository = FileLongTermMemoryRepository()
         let factsRepository = MockFactsRepository()
         let settingsRepository = UserDefaultsSettingsRepository()
+        let ragIndexReadinessRepository = UserDefaultsRAGIndexReadinessRepository()
         let metricsRepository = MockMetricsRepository()
         let vacationStateRepository = FileVacationPlanningStateRepository()
         let vacationPlanRepository = FileVacationPlanRepository()
@@ -115,6 +117,10 @@ struct AppEnvironment {
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
+        let resetRAGEmbeddings = ResetRAGEmbeddingsUseCase(
+            ragUseCaseFacade: ragUseCaseFacade,
+            ragIndexReadinessRepository: ragIndexReadinessRepository
+        )
         let collectMetrics = CollectSessionMetricsUseCase(metricsRepository: metricsRepository)
         let vacationReducer = VacationPlannerReducer()
         let answerExtractionService = LLMAnswerExtractionService(llmClient: llmClient)
@@ -200,7 +206,8 @@ struct AppEnvironment {
         let startupIndexedRAGStrategy = await preloadRAGIndexOnStartup(
             ragUseCaseFacade: ragUseCaseFacade,
             settings: initialSettings,
-            documents: ragDocuments
+            documents: ragDocuments,
+            ragIndexReadinessRepository: ragIndexReadinessRepository
         )
         let sendMessage = SendMessageUseCase(
             settingsRepository: settingsRepository,
@@ -225,6 +232,7 @@ struct AppEnvironment {
             fetchMessagesUseCase: fetchMessages,
             applySettingsUseCase: applySettings,
             fetchSettingsUseCase: fetchSettings,
+            resetRAGEmbeddingsUseCase: resetRAGEmbeddings,
             collectSessionMetricsUseCase: collectMetrics,
             loadAPIKeyUseCase: loadAPIKey,
             saveAPIKeyUseCase: saveAPIKey,
@@ -271,7 +279,8 @@ struct AppEnvironment {
     private static func preloadRAGIndexOnStartup(
         ragUseCaseFacade: RAGUseCaseFacadeProtocol,
         settings: LLMSettings,
-        documents: [URL]
+        documents: [URL],
+        ragIndexReadinessRepository: RAGIndexReadinessRepositoryProtocol
     ) async -> ChunkingStrategyType? {
         guard !documents.isEmpty else {
             AppLogger.shared.info(
@@ -281,7 +290,10 @@ struct AppEnvironment {
             return nil
         }
 
-        if isPersistedRAGIndexAvailable(for: settings.ragChunkingStrategy) {
+        if isPersistedRAGIndexAvailable(
+            for: settings.ragChunkingStrategy,
+            ragIndexReadinessRepository: ragIndexReadinessRepository
+        ) {
             AppLogger.shared.info(
                 "Пропуск стартовой индексации RAG: используется сохраненный индекс, strategy=\(settings.ragChunkingStrategy.rawValue)",
                 category: "app.bootstrap.rag"
@@ -291,7 +303,7 @@ struct AppEnvironment {
 
         do {
             let summary = try await ragUseCaseFacade.index(documents: documents, strategy: settings.ragChunkingStrategy)
-            markPersistedRAGIndexReady(for: settings.ragChunkingStrategy)
+            ragIndexReadinessRepository.markReady(for: settings.ragChunkingStrategy)
             AppLogger.shared.info(
                 "Стартовая индексация RAG завершена: documents=\(summary.documentCount), chunks=\(summary.chunkCount), strategy=\(settings.ragChunkingStrategy.rawValue)",
                 category: "app.bootstrap.rag"
@@ -306,13 +318,11 @@ struct AppEnvironment {
         }
     }
 
-    private static func ragIndexReadyDefaultsKey(for strategy: ChunkingStrategyType) -> String {
-        "rag.index.ready.\(strategy.rawValue)"
-    }
-
-    private static func isPersistedRAGIndexAvailable(for strategy: ChunkingStrategyType) -> Bool {
-        let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: ragIndexReadyDefaultsKey(for: strategy)) else {
+    private static func isPersistedRAGIndexAvailable(
+        for strategy: ChunkingStrategyType,
+        ragIndexReadinessRepository: RAGIndexReadinessRepositoryProtocol
+    ) -> Bool {
+        guard ragIndexReadinessRepository.isReady(for: strategy) else {
             return false
         }
         let databaseURL = SQLiteVSSVectorStore.defaultDatabaseURL()
@@ -321,10 +331,6 @@ struct AppEnvironment {
         }
         let size = (try? databaseURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         return size > 0
-    }
-
-    private static func markPersistedRAGIndexReady(for strategy: ChunkingStrategyType) {
-        UserDefaults.standard.set(true, forKey: ragIndexReadyDefaultsKey(for: strategy))
     }
 
     private static func ragBaseDirectoryCandidates() -> [URL] {

@@ -5,6 +5,7 @@ final class SettingsViewModel {
     @Published private(set) var settings: LLMSettings = .default
     @Published private(set) var apiKey: String = ""
     @Published private(set) var apiKeyStatus: String = ""
+    @Published private(set) var ragEmbeddingsStatus: String = ""
     @Published private(set) var plannerInvariantsText: String = ""
     @Published private(set) var plannerInvariantsStatus: String = ""
 
@@ -13,6 +14,7 @@ final class SettingsViewModel {
     private let session: ChatSession
     private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
+    private let resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     private let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
 
@@ -20,12 +22,14 @@ final class SettingsViewModel {
         session: ChatSession,
         fetchSettingsUseCase: FetchSettingsUseCaseProtocol,
         applySettingsUseCase: ApplySettingsUseCaseProtocol,
+        resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol,
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
         self.session = session
         self.fetchSettingsUseCase = fetchSettingsUseCase
         self.applySettingsUseCase = applySettingsUseCase
+        self.resetRAGEmbeddingsUseCase = resetRAGEmbeddingsUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
         self.saveAPIKeyUseCase = saveAPIKeyUseCase
 
@@ -94,6 +98,23 @@ final class SettingsViewModel {
                 : "API-ключ сохранен в Keychain."
         } catch {
             apiKeyStatus = "Не удалось сохранить API-ключ: \(error.localizedDescription)"
+        }
+    }
+
+    func resetRAGEmbeddings() {
+        ragEmbeddingsStatus = "Очистка embeddings..."
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await resetRAGEmbeddingsUseCase.execute()
+                await MainActor.run {
+                    self.ragEmbeddingsStatus = "База embeddings очищена."
+                }
+            } catch {
+                await MainActor.run {
+                    self.ragEmbeddingsStatus = "Не удалось очистить embeddings: \(error.localizedDescription)"
+                }
+            }
         }
     }
 

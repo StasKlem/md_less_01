@@ -108,4 +108,6 @@ private actor RAGFacadeSpy: RAGUseCaseFacadeProtocol {
         _ = topK
         return ChunkingComparisonReport(metrics: [], recommendedDefault: .structural)
     }
+
+    func resetIndex() async throws {}
 }

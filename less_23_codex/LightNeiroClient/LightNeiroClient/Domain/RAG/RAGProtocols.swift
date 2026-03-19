@@ -79,4 +79,7 @@ protocol RAGUseCaseFacadeProtocol {
         evaluationCases: [ChunkingEvaluationCase],
         topK: Int
     ) async throws -> ChunkingComparisonReport
+    /// Полностью очищает хранилище векторного индекса и связанные записи.
+    /// - Throws: Ошибка операции очистки.
+    func resetIndex() async throws
 }

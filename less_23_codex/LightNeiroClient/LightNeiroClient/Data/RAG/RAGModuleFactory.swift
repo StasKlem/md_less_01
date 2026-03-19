@@ -59,11 +59,13 @@ enum RAGModuleFactory {
             vectorStoreFactory: { InMemoryVectorStore() },
             settings: settings
         )
+        let resetUseCase = ResetRAGIndexUseCase(vectorStore: resolvedVectorStore)
 
         return RAGUseCaseFacade(
             indexUseCase: indexUseCase,
             searchUseCase: searchUseCase,
-            compareUseCase: compareUseCase
+            compareUseCase: compareUseCase,
+            resetUseCase: resetUseCase
         )
     }
 }

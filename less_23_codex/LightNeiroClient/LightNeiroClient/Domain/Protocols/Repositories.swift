@@ -139,3 +139,13 @@ protocol MetricsRepositoryProtocol {
     /// - Returns: Список метрик.
     func fetchMetrics(sessionID: UUID) async throws -> [RequestMetric]
 }
+
+/// Контракт хранения признака готовности RAG-индекса.
+protocol RAGIndexReadinessRepositoryProtocol {
+    /// Возвращает `true`, если для стратегии зафиксирован готовый индекс.
+    func isReady(for strategy: ChunkingStrategyType) -> Bool
+    /// Помечает стратегию как имеющую готовый индекс.
+    func markReady(for strategy: ChunkingStrategyType)
+    /// Сбрасывает признаки готовности для всех стратегий.
+    func clearAll()
+}

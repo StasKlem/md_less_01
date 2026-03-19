@@ -110,6 +110,12 @@ protocol FetchSettingsUseCaseProtocol {
     func execute(sessionID: UUID) async throws -> LLMSettings
 }
 
+/// Очищает хранилище embeddings RAG.
+protocol ResetRAGEmbeddingsUseCaseProtocol {
+    /// Удаляет все векторные записи embeddings из RAG-индекса.
+    func execute() async throws
+}
+
 /// Собирает агрегированную статистику по сессии.
 protocol CollectSessionMetricsUseCaseProtocol {
     /// Возвращает snapshot метрик по выбранной ветке.

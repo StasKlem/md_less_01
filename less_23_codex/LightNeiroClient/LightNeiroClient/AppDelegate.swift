@@ -77,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 session: environment.session,
                 fetchSettingsUseCase: environment.fetchSettingsUseCase,
                 applySettingsUseCase: environment.applySettingsUseCase,
+                resetRAGEmbeddingsUseCase: environment.resetRAGEmbeddingsUseCase,
                 loadAPIKeyUseCase: environment.loadAPIKeyUseCase,
                 saveAPIKeyUseCase: environment.saveAPIKeyUseCase
             )
