@@ -15,6 +15,10 @@ struct LLMSettings: Codable, Equatable {
     var windowSize: Int
     var isRAGEnabled: Bool
     var ragChunkingStrategy: ChunkingStrategyType
+    var isRAGPostFilteringEnabled: Bool
+    var ragTopKBeforeFiltering: Int
+    var ragTopKAfterFiltering: Int
+    var ragRelevanceThreshold: Double
     var isMemoryEnabled: Bool
     var plannerInvariants: [String]
 
@@ -25,6 +29,10 @@ struct LLMSettings: Codable, Equatable {
         windowSize: 3,
         isRAGEnabled: false,
         ragChunkingStrategy: .structural,
+        isRAGPostFilteringEnabled: true,
+        ragTopKBeforeFiltering: 8,
+        ragTopKAfterFiltering: 4,
+        ragRelevanceThreshold: 0.70,
         isMemoryEnabled: true,
         plannerInvariants: [
             "Даты поездки: дата начала не позже даты окончания.",
@@ -42,6 +50,10 @@ struct LLMSettings: Codable, Equatable {
         case windowSize
         case isRAGEnabled
         case ragChunkingStrategy
+        case isRAGPostFilteringEnabled
+        case ragTopKBeforeFiltering
+        case ragTopKAfterFiltering
+        case ragRelevanceThreshold
         case isMemoryEnabled
         case plannerInvariants
     }
@@ -52,6 +64,10 @@ struct LLMSettings: Codable, Equatable {
         windowSize: Int,
         isRAGEnabled: Bool,
         ragChunkingStrategy: ChunkingStrategyType = .structural,
+        isRAGPostFilteringEnabled: Bool = LLMSettings.default.isRAGPostFilteringEnabled,
+        ragTopKBeforeFiltering: Int = LLMSettings.default.ragTopKBeforeFiltering,
+        ragTopKAfterFiltering: Int = LLMSettings.default.ragTopKAfterFiltering,
+        ragRelevanceThreshold: Double = LLMSettings.default.ragRelevanceThreshold,
         isMemoryEnabled: Bool = true,
         plannerInvariants: [String]
     ) {
@@ -60,6 +76,10 @@ struct LLMSettings: Codable, Equatable {
         self.windowSize = windowSize
         self.isRAGEnabled = isRAGEnabled
         self.ragChunkingStrategy = ragChunkingStrategy
+        self.isRAGPostFilteringEnabled = isRAGPostFilteringEnabled
+        self.ragTopKBeforeFiltering = ragTopKBeforeFiltering
+        self.ragTopKAfterFiltering = ragTopKAfterFiltering
+        self.ragRelevanceThreshold = ragRelevanceThreshold
         self.isMemoryEnabled = isMemoryEnabled
         self.plannerInvariants = plannerInvariants
     }
@@ -77,6 +97,14 @@ struct LLMSettings: Codable, Equatable {
         isRAGEnabled = try container.decodeIfPresent(Bool.self, forKey: .isRAGEnabled) ?? Self.default.isRAGEnabled
         ragChunkingStrategy = try container.decodeIfPresent(ChunkingStrategyType.self, forKey: .ragChunkingStrategy)
             ?? Self.default.ragChunkingStrategy
+        isRAGPostFilteringEnabled = try container.decodeIfPresent(Bool.self, forKey: .isRAGPostFilteringEnabled)
+            ?? Self.default.isRAGPostFilteringEnabled
+        ragTopKBeforeFiltering = try container.decodeIfPresent(Int.self, forKey: .ragTopKBeforeFiltering)
+            ?? Self.default.ragTopKBeforeFiltering
+        ragTopKAfterFiltering = try container.decodeIfPresent(Int.self, forKey: .ragTopKAfterFiltering)
+            ?? Self.default.ragTopKAfterFiltering
+        ragRelevanceThreshold = try container.decodeIfPresent(Double.self, forKey: .ragRelevanceThreshold)
+            ?? Self.default.ragRelevanceThreshold
         isMemoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isMemoryEnabled) ?? Self.default.isMemoryEnabled
         plannerInvariants = try container.decodeIfPresent([String].self, forKey: .plannerInvariants) ?? Self.default.plannerInvariants
     }

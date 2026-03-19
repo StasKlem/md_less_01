@@ -12,6 +12,13 @@ final class SettingsViewController: NSViewController {
     private let windowLabel = NSTextField(labelWithString: "Window: 12")
     private let ragCheckbox = NSButton(checkboxWithTitle: "Enable RAG", target: nil, action: nil)
     private let ragChunkingStrategyPopup = NSPopUpButton()
+    private let ragPostFilteringCheckbox = NSButton(checkboxWithTitle: "Enable RAG post-filtering", target: nil, action: nil)
+    private let ragTopKBeforeFilteringSlider = NSSlider(value: 8, minValue: 1, maxValue: 20, target: nil, action: nil)
+    private let ragTopKBeforeFilteringLabel = NSTextField(labelWithString: "RAG top-K before filtering: 8")
+    private let ragTopKAfterFilteringSlider = NSSlider(value: 4, minValue: 1, maxValue: 20, target: nil, action: nil)
+    private let ragTopKAfterFilteringLabel = NSTextField(labelWithString: "RAG top-K after filtering: 4")
+    private let ragRelevanceThresholdSlider = NSSlider(value: 0.7, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let ragRelevanceThresholdLabel = NSTextField(labelWithString: "RAG relevance threshold: 0.70")
     private let memoryCheckbox = NSButton(checkboxWithTitle: "Save to memory", target: nil, action: nil)
     private let clearEmbeddingsButton = NSButton(title: "Clear embeddings DB", target: nil, action: nil)
     private let clearEmbeddingsStatusLabel = NSTextField(labelWithString: "")
@@ -55,6 +62,14 @@ final class SettingsViewController: NSViewController {
         ragCheckbox.action = #selector(ragToggled)
         ragChunkingStrategyPopup.target = self
         ragChunkingStrategyPopup.action = #selector(ragChunkingStrategyChanged)
+        ragPostFilteringCheckbox.target = self
+        ragPostFilteringCheckbox.action = #selector(ragPostFilteringToggled)
+        ragTopKBeforeFilteringSlider.target = self
+        ragTopKBeforeFilteringSlider.action = #selector(ragTopKBeforeFilteringChanged)
+        ragTopKAfterFilteringSlider.target = self
+        ragTopKAfterFilteringSlider.action = #selector(ragTopKAfterFilteringChanged)
+        ragRelevanceThresholdSlider.target = self
+        ragRelevanceThresholdSlider.action = #selector(ragRelevanceThresholdChanged)
         memoryCheckbox.target = self
         memoryCheckbox.action = #selector(memoryToggled)
         apiKeyField.target = self
@@ -80,6 +95,13 @@ final class SettingsViewController: NSViewController {
             windowSlider,
             ragCheckbox,
             makeRow(label: "RAG chunking", control: ragChunkingStrategyPopup),
+            ragPostFilteringCheckbox,
+            ragTopKBeforeFilteringLabel,
+            ragTopKBeforeFilteringSlider,
+            ragTopKAfterFilteringLabel,
+            ragTopKAfterFilteringSlider,
+            ragRelevanceThresholdLabel,
+            ragRelevanceThresholdSlider,
             clearEmbeddingsButton,
             clearEmbeddingsStatusLabel,
             memoryCheckbox,
@@ -112,6 +134,11 @@ final class SettingsViewController: NSViewController {
                 self.windowLabel.stringValue = "Window: \(settings.windowSize)"
                 self.ragCheckbox.state = settings.isRAGEnabled ? .on : .off
                 self.ragChunkingStrategyPopup.selectItem(withTitle: settings.ragChunkingStrategy.rawValue)
+                self.ragPostFilteringCheckbox.state = settings.isRAGPostFilteringEnabled ? .on : .off
+                self.ragTopKBeforeFilteringSlider.doubleValue = Double(settings.ragTopKBeforeFiltering)
+                self.ragTopKAfterFilteringSlider.doubleValue = Double(settings.ragTopKAfterFiltering)
+                self.ragRelevanceThresholdSlider.doubleValue = settings.ragRelevanceThreshold
+                self.updateRAGFilteringLabels(settings: settings)
                 self.memoryCheckbox.state = settings.isMemoryEnabled ? .on : .off
             }
             .store(in: &cancellables)
@@ -187,6 +214,26 @@ final class SettingsViewController: NSViewController {
     }
 
     @objc
+    private func ragPostFilteringToggled() {
+        viewModel.updateRAGPostFilteringEnabled(ragPostFilteringCheckbox.state == .on)
+    }
+
+    @objc
+    private func ragTopKBeforeFilteringChanged() {
+        viewModel.updateRAGTopKBeforeFiltering(Int(ragTopKBeforeFilteringSlider.intValue))
+    }
+
+    @objc
+    private func ragTopKAfterFilteringChanged() {
+        viewModel.updateRAGTopKAfterFiltering(Int(ragTopKAfterFilteringSlider.intValue))
+    }
+
+    @objc
+    private func ragRelevanceThresholdChanged() {
+        viewModel.updateRAGRelevanceThreshold(ragRelevanceThresholdSlider.doubleValue)
+    }
+
+    @objc
     private func apiKeyEdited() {
         viewModel.updateAPIKey(apiKeyField.stringValue)
     }
@@ -200,6 +247,15 @@ final class SettingsViewController: NSViewController {
     @objc
     private func clearEmbeddingsTapped() {
         viewModel.resetRAGEmbeddings()
+    }
+
+    private func updateRAGFilteringLabels(settings: LLMSettings) {
+        ragTopKBeforeFilteringLabel.stringValue = "RAG top-K before filtering: \(settings.ragTopKBeforeFiltering)"
+        ragTopKAfterFilteringLabel.stringValue = "RAG top-K after filtering: \(settings.ragTopKAfterFiltering)"
+        ragRelevanceThresholdLabel.stringValue = String(
+            format: "RAG relevance threshold: %.2f",
+            settings.ragRelevanceThreshold
+        )
     }
 }
 

@@ -21,11 +21,22 @@ final class SettingsModelsTests: XCTestCase {
         XCTAssertEqual(settings.windowSize, 6)
         XCTAssertTrue(settings.isRAGEnabled)
         XCTAssertEqual(settings.ragChunkingStrategy, LLMSettings.default.ragChunkingStrategy)
+        XCTAssertEqual(settings.isRAGPostFilteringEnabled, LLMSettings.default.isRAGPostFilteringEnabled)
+        XCTAssertEqual(settings.ragTopKBeforeFiltering, LLMSettings.default.ragTopKBeforeFiltering)
+        XCTAssertEqual(settings.ragTopKAfterFiltering, LLMSettings.default.ragTopKAfterFiltering)
+        XCTAssertEqual(settings.ragRelevanceThreshold, LLMSettings.default.ragRelevanceThreshold, accuracy: 0.0001)
         XCTAssertFalse(settings.isMemoryEnabled)
         XCTAssertEqual(settings.plannerInvariants, ["rule-1"])
     }
 
     func testRAGSettingsDefaultUsesBGEEmbeddingModel() {
         XCTAssertEqual(RAGSettings.default.embeddingModel, "baai/bge-m3")
+    }
+
+    func testLLMSettingsDefaultUsesExpectedRAGPostFilteringValues() {
+        XCTAssertTrue(LLMSettings.default.isRAGPostFilteringEnabled)
+        XCTAssertEqual(LLMSettings.default.ragTopKBeforeFiltering, 8)
+        XCTAssertEqual(LLMSettings.default.ragTopKAfterFiltering, 4)
+        XCTAssertEqual(LLMSettings.default.ragRelevanceThreshold, 0.70, accuracy: 0.0001)
     }
 }

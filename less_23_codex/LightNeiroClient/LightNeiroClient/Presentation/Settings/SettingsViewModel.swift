@@ -62,6 +62,26 @@ final class SettingsViewModel {
         persist()
     }
 
+    func updateRAGPostFilteringEnabled(_ enabled: Bool) {
+        settings.isRAGPostFilteringEnabled = enabled
+        persist()
+    }
+
+    func updateRAGTopKBeforeFiltering(_ value: Int) {
+        settings.ragTopKBeforeFiltering = max(1, value)
+        persist()
+    }
+
+    func updateRAGTopKAfterFiltering(_ value: Int) {
+        settings.ragTopKAfterFiltering = max(1, value)
+        persist()
+    }
+
+    func updateRAGRelevanceThreshold(_ value: Double) {
+        settings.ragRelevanceThreshold = min(1.0, max(0.0, value))
+        persist()
+    }
+
     func updateMemoryEnabled(_ enabled: Bool) {
         settings.isMemoryEnabled = enabled
         persist()

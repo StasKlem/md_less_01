@@ -721,15 +721,57 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 
         do {
             try await ensureRAGIndexIsReady(ragUseCaseFacade, strategy: settings.ragChunkingStrategy)
-            let results = try await ragUseCaseFacade.search(query: userText, topK: 4)
-            guard !results.isEmpty else { return nil }
-            return formatRAGContext(results)
+            if settings.isRAGPostFilteringEnabled {
+                let topKBeforeFiltering = max(1, settings.ragTopKBeforeFiltering)
+                let topKAfterFiltering = max(1, settings.ragTopKAfterFiltering)
+                let normalizedThreshold = normalizedRAGThreshold(settings.ragRelevanceThreshold)
+                let results = try await ragUseCaseFacade.search(query: userText, topK: topKBeforeFiltering)
+                let filtered = results.filter { Double($0.score) >= normalizedThreshold }
+                let finalResults = Array(filtered.prefix(topKAfterFiltering))
+                logRAGPostFilteringStats(
+                    total: results.count,
+                    afterThreshold: filtered.count,
+                    finalCount: finalResults.count,
+                    threshold: normalizedThreshold,
+                    topKBeforeFiltering: topKBeforeFiltering,
+                    topKAfterFiltering: topKAfterFiltering
+                )
+                guard !finalResults.isEmpty else { return nil }
+                return formatRAGContext(finalResults)
+            }
+
+            let legacyResults = try await ragUseCaseFacade.search(query: userText, topK: 4)
+            guard !legacyResults.isEmpty else { return nil }
+            return formatRAGContext(legacyResults)
         } catch {
 #if DEBUG
             print("[RAG] Контекст не собран: \(error)")
 #endif
             return nil
         }
+    }
+
+    private func normalizedRAGThreshold(_ threshold: Double) -> Double {
+        min(1.0, max(0.0, threshold))
+    }
+
+    private func logRAGPostFilteringStats(
+        total: Int,
+        afterThreshold: Int,
+        finalCount: Int,
+        threshold: Double,
+        topKBeforeFiltering: Int,
+        topKAfterFiltering: Int
+    ) {
+        let removedByThreshold = max(0, total - afterThreshold)
+        let removedByTopK = max(0, afterThreshold - finalCount)
+        let totalRemoved = max(0, total - finalCount)
+        print(
+            "[RAG] Пост-фильтрация: total=\(total), threshold>=\(String(format: "%.2f", threshold)), " +
+            "afterThreshold=\(afterThreshold), final=\(finalCount), removedByThreshold=\(removedByThreshold), " +
+            "removedByTopK=\(removedByTopK), totalFilteredOut=\(totalRemoved), " +
+            "topKBefore=\(topKBeforeFiltering), topKAfter=\(topKAfterFiltering)"
+        )
     }
 
     private func ensureRAGIndexIsReady(
