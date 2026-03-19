@@ -25,7 +25,7 @@ final class SettingsModelsTests: XCTestCase {
         XCTAssertEqual(settings.plannerInvariants, ["rule-1"])
     }
 
-    func testRAGSettingsDefaultUsesMistralEmbeddingModel() {
-        XCTAssertEqual(RAGSettings.default.embeddingModel, "mistralai/mistral-embed-2312")
+    func testRAGSettingsDefaultUsesBGEEmbeddingModel() {
+        XCTAssertEqual(RAGSettings.default.embeddingModel, "baai/bge-m3")
     }
 }

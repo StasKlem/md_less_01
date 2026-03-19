@@ -84,7 +84,7 @@ enum RAGEmbeddingProviderKind: String, Codable {
 }
 
 struct RAGSettings: Codable, Equatable {
-    static let defaultEmbeddingModel = "mistralai/mistral-embed-2312"
+    static let defaultEmbeddingModel = "baai/bge-m3"
 
     var provider: RAGEmbeddingProviderKind
     var embeddingModel: String
