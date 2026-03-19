@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swift Software Architect"
+  short_description: "Architect Swift macOS Clean Architecture apps"
+  default_prompt: "Use $swift-software-architect to design or review a Swift macOS architecture with SOLID, DRY, Clean Architecture, MVVM, and code-only AppKit UI."
