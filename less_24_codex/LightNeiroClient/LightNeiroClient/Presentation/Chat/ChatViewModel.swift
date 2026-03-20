@@ -1048,27 +1048,36 @@ struct RAGResponseDisplayFormatter {
         let answer = payload.answer.trimmingCharacters(in: .whitespacesAndNewlines)
         var blocks: [String] = [answer.isEmpty ? "Ответ отсутствует." : answer]
 
-        if !payload.sources.isEmpty {
-            let sourceLines = payload.sources.enumerated().map { index, item in
-                let section = item.section?.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let section, !section.isEmpty {
-                    return "\(index + 1). \(item.source) — раздел: \(section)"
-                }
-                return "\(index + 1). \(item.source)"
+        let sourcePairs: [(String, String)] = payload.sources.compactMap { item in
+            guard
+                let chunkID = item.chunkID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !chunkID.isEmpty
+            else {
+                return nil
             }
-            blocks.append("Источники:\n" + sourceLines.joined(separator: "\n"))
+            let section = item.section?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let section, !section.isEmpty {
+                return (chunkID, "источник : \(item.source) — \(section)")
+            }
+            return (chunkID, "источник : \(item.source)")
         }
+        let sourceByChunkID = Dictionary(uniqueKeysWithValues: sourcePairs)
 
         if !payload.quotes.isEmpty {
-            let quoteLines = payload.quotes.enumerated().map { index, item in
-                let quoteText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                let section = item.section?.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let section, !section.isEmpty {
-                    return "\(index + 1). [\(item.source), \(section)] «\(quoteText)»"
+            let evidenceBlocks = payload.quotes.map { quote in
+                let chunkID = quote.chunkID?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sourceLine: String
+                if let chunkID, !chunkID.isEmpty, let mappedSource = sourceByChunkID[chunkID] {
+                    sourceLine = mappedSource
+                } else if let section = quote.section?.trimmingCharacters(in: .whitespacesAndNewlines), !section.isEmpty {
+                    sourceLine = "источник : \(quote.source) — \(section)"
+                } else {
+                    sourceLine = "источник : \(quote.source)"
                 }
-                return "\(index + 1). [\(item.source)] «\(quoteText)»"
+                let quoteText = quote.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return "\(sourceLine)\n\(quoteText)"
             }
-            blocks.append("Цитаты:\n" + quoteLines.joined(separator: "\n"))
+            blocks.append(contentsOf: evidenceBlocks)
         }
 
         return blocks.joined(separator: "\n\n")
@@ -1084,12 +1093,27 @@ private struct RAGDisplayPayload: Decodable {
 private struct RAGDisplaySource: Decodable {
     let source: String
     let section: String?
+    let chunkID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case source
+        case section
+        case chunkID = "chunk_id"
+    }
 }
 
 private struct RAGDisplayQuote: Decodable {
     let source: String
     let section: String?
     let text: String
+    let chunkID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case source
+        case section
+        case text
+        case chunkID = "chunk_id"
+    }
 }
 
 private struct FormSubmissionPayload: Encodable {

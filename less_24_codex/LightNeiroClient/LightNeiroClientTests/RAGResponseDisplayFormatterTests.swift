@@ -2,7 +2,7 @@ import XCTest
 @testable import LightNeiroClient
 
 final class RAGResponseDisplayFormatterTests: XCTestCase {
-    func testFormatBuildsAnswerSourcesAndQuotesBlocksForAssistantJSON() {
+    func testFormatBuildsAnswerAndSourceQuoteBlocksForAssistantJSON() {
         let formatter = RAGResponseDisplayFormatter()
         let json = """
         {
@@ -20,13 +20,18 @@ final class RAGResponseDisplayFormatterTests: XCTestCase {
 
         let result = formatter.format(role: .assistant, content: json)
 
-        XCTAssertTrue(result.contains("Готовый ответ по данным контекста."))
-        XCTAssertTrue(result.contains("Источники:"))
-        XCTAssertTrue(result.contains("1. /tmp/a.md — раздел: intro"))
-        XCTAssertTrue(result.contains("2. /tmp/b.md"))
-        XCTAssertTrue(result.contains("Цитаты:"))
-        XCTAssertTrue(result.contains("1. [/tmp/a.md, intro] «Первая цитата»"))
-        XCTAssertTrue(result.contains("2. [/tmp/b.md] «Вторая цитата»"))
+        XCTAssertEqual(
+            result,
+            """
+            Готовый ответ по данным контекста.
+
+            /tmp/a.md — intro
+            Первая цитата
+
+            /tmp/b.md
+            Вторая цитата
+            """
+        )
     }
 
     func testFormatReturnsRawContentForNonJSONAssistantMessage() {

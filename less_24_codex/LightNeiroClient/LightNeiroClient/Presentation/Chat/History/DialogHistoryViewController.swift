@@ -151,14 +151,86 @@ final class DialogHistoryViewController: NSViewController {
 
     private func heightForItem(_ item: DialogHistoryItemViewState, width: CGFloat) -> CGFloat {
         let availableWidth = max(220, width - 20)
+        let contentWidth = availableWidth - 20
+
+        if item.kind == .assistant {
+            let sections = parseAssistantDisplaySections(item.text)
+            let answerHeight = textHeight(
+                sections.answer,
+                width: contentWidth,
+                font: .systemFont(ofSize: 13)
+            )
+
+            var contentHeight = answerHeight
+            if !sections.evidences.isEmpty {
+                contentHeight += 8
+                let evidenceSpacing = CGFloat(max(0, sections.evidences.count - 1)) * 8
+                let evidenceHeight = sections.evidences.reduce(CGFloat(0)) { partial, evidence in
+                    partial + evidenceCardHeight(evidence, width: contentWidth)
+                }
+                contentHeight += evidenceHeight + evidenceSpacing
+            }
+            return max(44, ceil(contentHeight) + 34)
+        }
+
         let textRect = (item.text as NSString).boundingRect(
-            with: NSSize(width: availableWidth - 20, height: .greatestFiniteMagnitude),
+            with: NSSize(width: contentWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: NSFont.systemFont(ofSize: 13)],
             context: nil
         )
         return max(44, ceil(textRect.height) + 34)
     }
+
+    private func parseAssistantDisplaySections(_ text: String) -> AssistantDisplaySections {
+        let paragraphs = text
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard let answer = paragraphs.first else {
+            return AssistantDisplaySections(answer: text, evidences: [])
+        }
+
+        let evidences = paragraphs.dropFirst().compactMap { paragraph -> AssistantEvidenceDisplay? in
+            let lines = paragraph
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard lines.count >= 2 else { return nil }
+            return AssistantEvidenceDisplay(source: lines[0], quote: lines.dropFirst().joined(separator: "\n"))
+        }
+        return AssistantDisplaySections(answer: answer, evidences: evidences)
+    }
+
+    private func evidenceCardHeight(_ evidence: AssistantEvidenceDisplay, width: CGFloat) -> CGFloat {
+        let contentWidth = max(60, width - 16)
+        let sourceWidth = max(44, contentWidth - 12)
+        let quoteWidth = max(44, contentWidth - 12)
+        let sourceHeight = textHeight(evidence.source, width: sourceWidth, font: .systemFont(ofSize: 12, weight: .semibold))
+        let quoteHeight = textHeight(evidence.quote, width: quoteWidth, font: .systemFont(ofSize: 12))
+        return 8 + (sourceHeight + 12) + 4 + (quoteHeight + 12) + 8
+    }
+
+    private func textHeight(_ text: String, width: CGFloat, font: NSFont) -> CGFloat {
+        let rect = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        return ceil(rect.height)
+    }
+}
+
+private struct AssistantDisplaySections {
+    let answer: String
+    let evidences: [AssistantEvidenceDisplay]
+}
+
+private struct AssistantEvidenceDisplay {
+    let source: String
+    let quote: String
 }
 
 extension DialogHistoryViewController: NSCollectionViewDelegateFlowLayout {
