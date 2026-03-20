@@ -4,7 +4,8 @@ enum RAGModuleFactory {
     static let defaultDocumentRelativePaths: [String] = [
 //        "README.md",
 //        "LightNeiroClient/LightNeiroClient/Doc/mobile_system_design_guide.md"
-        "LightNeiroClient/LightNeiroClient/Doc/ai.md"
+        "LightNeiroClient/LightNeiroClient/Doc/ai.md",
+        "LightNeiroClient/LightNeiroClient/Doc/habr.md"
     ]
 
     static func defaultDocumentURLs(baseDirectory: URL) -> [URL] {
