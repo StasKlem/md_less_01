@@ -1,10 +1,13 @@
 import XCTest
 @testable import LightNeiroClient
 
+@MainActor
 final class SendMessageUseCaseRAGStartupTests: XCTestCase {
     func testExecuteSkipsReindexWhenStartupStrategyAlreadyIndexed() async throws {
         let llmClient = LLMClientSpy()
-        let ragSpy = RAGFacadeSpy()
+        let ragSpy = RAGFacadeSpy(
+            searchResults: [Self.makeSearchResult(content: "stub context", score: 0.9)]
+        )
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
         let sessionID = UUID()
@@ -61,7 +64,10 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         let lastSearchTopK = await ragSpy.lastSearchTopK
         XCTAssertEqual(lastSearchTopK, 6)
 
-        let request = try XCTUnwrap(await llmClient.capturedRequest())
+        let capturedRequest = await llmClient.capturedRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertTrue(request.systemPrompt.contains("Верни ТОЛЬКО валидный JSON"))
+        XCTAssertTrue(request.systemPrompt.contains("chunk_id="))
         XCTAssertTrue(request.systemPrompt.contains("релевантный-1"))
         XCTAssertFalse(request.systemPrompt.contains("шум"))
         XCTAssertFalse(request.systemPrompt.contains("релевантный-2"))
@@ -95,6 +101,41 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
 
         let lastSearchTopK = await ragSpy.lastSearchTopK
         XCTAssertEqual(lastSearchTopK, 4)
+    }
+
+    func testExecuteReturnsNeedsClarificationJSONAndSkipsLLMWhenRelevanceBelowThreshold() async throws {
+        let llmClient = LLMClientSpy()
+        let ragSpy = RAGFacadeSpy(
+            searchResults: [Self.makeSearchResult(content: "слабое совпадение", score: 0.21)]
+        )
+        let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
+
+        let sessionID = UUID()
+        let branchID = UUID()
+        var settings = LLMSettings.default
+        settings.isRAGEnabled = true
+        settings.isMemoryEnabled = false
+        settings.isRAGPostFilteringEnabled = true
+        settings.ragTopKBeforeFiltering = 5
+        settings.ragTopKAfterFiltering = 3
+        settings.ragRelevanceThreshold = 0.95
+        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+
+        let assistant = try await sut.useCase.execute(
+            sessionID: sessionID,
+            branchID: branchID,
+            userText: "Сформулируй ответ",
+            assistantInstruction: nil
+        )
+
+        let payload = try XCTUnwrap(Self.decodePayload(from: assistant.content))
+        XCTAssertTrue(payload.answer.lowercased().contains("не знаю"))
+        XCTAssertTrue(payload.answer.lowercased().contains("уточните"))
+        XCTAssertTrue(payload.sources.isEmpty)
+        XCTAssertTrue(payload.quotes.isEmpty)
+
+        let sendCalls = await llmClient.sendCallCount()
+        XCTAssertEqual(sendCalls, 0)
     }
 
     private func makeUseCase(
@@ -157,6 +198,11 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         )
         return SearchResult(chunk: chunk, score: score)
     }
+
+    private static func decodePayload(from json: String) -> TestRAGPayload? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(TestRAGPayload.self, from: data)
+    }
 }
 
 private actor RAGFacadeSpy: RAGUseCaseFacadeProtocol {
@@ -165,7 +211,7 @@ private actor RAGFacadeSpy: RAGUseCaseFacadeProtocol {
     private(set) var lastSearchTopK: Int?
     private let searchResults: [SearchResult]
 
-    init(searchResults: [SearchResult] = [SendMessageUseCaseRAGStartupTests.makeSearchResult(content: "stub context", score: 0.9)]) {
+    init(searchResults: [SearchResult]) {
         self.searchResults = searchResults
     }
 
@@ -201,12 +247,13 @@ private actor RAGFacadeSpy: RAGUseCaseFacadeProtocol {
 
 private actor LLMClientSpy: LLMClientProtocol {
     private var request: LLMRequest?
+    private var calls = 0
 
     func send(request: LLMRequest) async throws -> LLMResponse {
         self.request = request
-        let lastUserText = request.shortTermMessages.last(where: { $0.role == .user })?.content ?? ""
+        calls += 1
         return LLMResponse(
-            content: "Reply: \(lastUserText)",
+            content: "Reply",
             inputTokens: 10,
             outputTokens: 6,
             latencyMs: 40
@@ -215,5 +262,41 @@ private actor LLMClientSpy: LLMClientProtocol {
 
     func capturedRequest() -> LLMRequest? {
         request
+    }
+
+    func sendCallCount() -> Int {
+        calls
+    }
+}
+
+private struct TestRAGPayload: Decodable {
+    let answer: String
+    let sources: [TestRAGSource]
+    let quotes: [TestRAGQuote]
+}
+
+private struct TestRAGSource: Decodable {
+    let source: String
+    let section: String?
+    let chunkID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case source
+        case section
+        case chunkID = "chunk_id"
+    }
+}
+
+private struct TestRAGQuote: Decodable {
+    let chunkID: String
+    let source: String
+    let section: String?
+    let text: String
+
+    private enum CodingKeys: String, CodingKey {
+        case chunkID = "chunk_id"
+        case source
+        case section
+        case text
     }
 }

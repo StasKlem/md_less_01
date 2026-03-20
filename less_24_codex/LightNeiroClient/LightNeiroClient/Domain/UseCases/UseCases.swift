@@ -636,18 +636,54 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         // 6) Собираем единый memory context из всех слоев памяти.
         // Этот контекст отправится в модель вместе с system prompt и настройками.
         let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
-        let ragContextBlock = await buildRAGContextIfEnabled(settings: settings, userText: userText)
-        log(ragContextBlock)
-        let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction, ragContextBlock: ragContextBlock)
-        let request = LLMRequest(
-            systemPrompt: systemPrompt,
-            shortTermMessages: context.shortTermMessages,
-            workingMemory: context.workingMemory,
-            longTermMemory: context.longTermMemory,
-            settings: settings
-        )
-        // 7) Запрашиваем ответ у LLM. На этом этапе модель уже видит актуализированную память.
-        let response = try await llmClient.send(request: request)
+        let ragDecision = await buildRAGDecision(settings: settings, userText: userText)
+        let systemPrompt = makeSystemPrompt(extraInstruction: assistantInstruction, ragDecision: ragDecision)
+
+        let response: LLMResponse
+        switch ragDecision {
+        case .needsClarification:
+            response = LLMResponse(
+                content: makeNeedsClarificationPayloadJSON(),
+                inputTokens: 0,
+                outputTokens: 0,
+                latencyMs: 0
+            )
+        case .answerWithEvidence(let retrieval):
+            let request = LLMRequest(
+                systemPrompt: systemPrompt,
+                shortTermMessages: context.shortTermMessages,
+                workingMemory: context.workingMemory,
+                longTermMemory: context.longTermMemory,
+                settings: settings
+            )
+            // 7) Запрашиваем ответ у LLM. На этом этапе модель уже видит актуализированную память.
+            let llmResponse = try await llmClient.send(request: request)
+            let finalizedContent = finalizeRAGResponseContent(rawContent: llmResponse.content, retrieval: retrieval)
+            response = LLMResponse(
+                content: finalizedContent,
+                inputTokens: llmResponse.inputTokens,
+                outputTokens: llmResponse.outputTokens,
+                latencyMs: llmResponse.latencyMs
+            )
+        case .disabledOrUnavailable:
+            if settings.isRAGEnabled {
+                response = LLMResponse(
+                    content: makeNeedsClarificationPayloadJSON(),
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    latencyMs: 0
+                )
+            } else {
+                let request = LLMRequest(
+                    systemPrompt: systemPrompt,
+                    shortTermMessages: context.shortTermMessages,
+                    workingMemory: context.workingMemory,
+                    longTermMemory: context.longTermMemory,
+                    settings: settings
+                )
+                response = try await llmClient.send(request: request)
+            }
+        }
 
         // 8) Преобразуем ответ модели в доменную сущность сообщения ассистента
         // и сохраняем его в историю ветки.
@@ -696,7 +732,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         return assistantMessage
     }
 
-    private func makeSystemPrompt(extraInstruction: String?, ragContextBlock: String?) -> String {
+    private func makeSystemPrompt(extraInstruction: String?, ragDecision: RAGDecision) -> String {
         // Базовое поведение ассистента по умолчанию.
         let base = "You are a helpful assistant."
 
@@ -709,23 +745,25 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             }
         }
 
-        if let ragContextBlock {
-            blocks.append(ragContextBlock)
+        if case .answerWithEvidence(let retrieval) = ragDecision {
+            blocks.append(ragJSONContractBlock())
+            blocks.append(formatRAGEvidenceBlock(retrieval))
         }
 
         return blocks.joined(separator: "\n\n")
     }
 
-    private func buildRAGContextIfEnabled(settings: LLMSettings, userText: String) async -> String? {
-        guard settings.isRAGEnabled, let ragUseCaseFacade else { return nil }
+    private func buildRAGDecision(settings: LLMSettings, userText: String) async -> RAGDecision {
+        guard settings.isRAGEnabled, let ragUseCaseFacade else { return .disabledOrUnavailable }
 
         do {
             try await ensureRAGIndexIsReady(ragUseCaseFacade, strategy: settings.ragChunkingStrategy)
+            let normalizedThreshold = normalizedRAGThreshold(settings.ragRelevanceThreshold)
             if settings.isRAGPostFilteringEnabled {
                 let topKBeforeFiltering = max(1, settings.ragTopKBeforeFiltering)
                 let topKAfterFiltering = max(1, settings.ragTopKAfterFiltering)
-                let normalizedThreshold = normalizedRAGThreshold(settings.ragRelevanceThreshold)
                 let results = try await ragUseCaseFacade.search(query: userText, topK: topKBeforeFiltering)
+                let maxScore = Double(results.map(\.score).max() ?? 0)
                 let filtered = results.filter { Double($0.score) >= normalizedThreshold }
                 let finalResults = Array(filtered.prefix(topKAfterFiltering))
                 logRAGPostFilteringStats(
@@ -736,18 +774,23 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                     topKBeforeFiltering: topKBeforeFiltering,
                     topKAfterFiltering: topKAfterFiltering
                 )
-                guard !finalResults.isEmpty else { return nil }
-                return formatRAGContext(finalResults)
+                guard !finalResults.isEmpty, maxScore >= normalizedThreshold else {
+                    return .needsClarification
+                }
+                return .answerWithEvidence(retrieval: finalResults)
             }
 
             let legacyResults = try await ragUseCaseFacade.search(query: userText, topK: 4)
-            guard !legacyResults.isEmpty else { return nil }
-            return formatRAGContext(legacyResults)
+            let maxScore = Double(legacyResults.map(\.score).max() ?? 0)
+            guard !legacyResults.isEmpty, maxScore >= normalizedThreshold else {
+                return .needsClarification
+            }
+            return .answerWithEvidence(retrieval: legacyResults)
         } catch {
 #if DEBUG
             print("[RAG] Контекст не собран: \(error)")
 #endif
-            return nil
+            return .disabledOrUnavailable
         }
     }
 
@@ -791,20 +834,179 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         await ragIndexState.markReady(for: strategy)
     }
 
-    private func formatRAGContext(_ results: [SearchResult]) -> String {
+    private func formatRAGEvidenceBlock(_ results: [SearchResult]) -> String {
         var lines: [String] = [
-            "Use these retrieved context snippets if relevant to the user question:",
+            "RAG_EVIDENCE:",
         ]
 
         for (index, result) in results.enumerated() {
-            let source = URL(fileURLWithPath: result.chunk.source).lastPathComponent
-            let section = result.chunk.section ?? "-"
+            let source = result.chunk.source
+            let section = result.chunk.section ?? "null"
             let text = result.chunk.content
                 .replacingOccurrences(of: "\n", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            lines.append("[\(index + 1)] source=\(source) section=\(section) offset=\(result.chunk.offset) text=\(text)")
+            lines.append("[\(index + 1)] chunk_id=\(result.chunk.id.uuidString) source=\(source) section=\(section) text=\(text)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func ragJSONContractBlock() -> String {
+        """
+        Верни ТОЛЬКО валидный JSON без markdown и без пояснений.
+        Схема JSON:
+        {
+          "answer": "string",
+          "sources": [
+            { "source": "string", "section": "string|null", "chunk_id": "string" }
+          ],
+          "quotes": [
+            { "chunk_id": "string", "source": "string", "section": "string|null", "text": "string" }
+          ]
+        }
+        Правила:
+        - Используй только фрагменты из блока RAG_EVIDENCE.
+        - Для каждого элемента quotes chunk_id обязан существовать в sources.
+        - Для ответа по данным RAG массивы sources и quotes должны быть непустыми.
+        - Не добавляй дополнительные поля.
+        """
+    }
+
+    private func makeNeedsClarificationPayloadJSON() -> String {
+        let payload = RAGResponsePayload(
+            answer: "не знаю. Пожалуйста, уточните вопрос.",
+            sources: [],
+            quotes: []
+        )
+        return encodeRAGPayload(payload)
+    }
+
+    private func finalizeRAGResponseContent(rawContent: String, retrieval: [SearchResult]) -> String {
+        if let decoded = decodeRAGPayload(from: rawContent), isValidRAGPayload(decoded, requireEvidence: true) {
+            return encodeRAGPayload(decoded)
+        }
+
+        // Детерминированный ремонт ответа по retrieval, чтобы соблюсти контракт без повторного вызова LLM.
+        let repaired = repairRAGPayload(from: rawContent, retrieval: retrieval)
+        return encodeRAGPayload(repaired)
+    }
+
+    private func decodeRAGPayload(from rawContent: String) -> RAGResponsePayload? {
+        let cleaned = rawContent
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let data = cleaned.data(using: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+        return try? decoder.decode(RAGResponsePayload.self, from: data)
+    }
+
+    private func isValidRAGPayload(_ payload: RAGResponsePayload, requireEvidence: Bool) -> Bool {
+        guard !payload.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+
+        if !requireEvidence {
+            return true
+        }
+
+        guard !payload.sources.isEmpty, !payload.quotes.isEmpty else {
+            return false
+        }
+
+        let sourceChunkIDs = Set(payload.sources.map(\.chunkID))
+        guard !sourceChunkIDs.isEmpty else {
+            return false
+        }
+
+        for source in payload.sources {
+            if source.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return false
+            }
+            if source.chunkID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return false
+            }
+        }
+
+        for quote in payload.quotes {
+            if quote.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return false
+            }
+            if !sourceChunkIDs.contains(quote.chunkID) {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func repairRAGPayload(from rawContent: String, retrieval: [SearchResult]) -> RAGResponsePayload {
+        var seenChunkIDs = Set<String>()
+        var sources: [RAGSourceItem] = []
+
+        for result in retrieval {
+            let chunkID = result.chunk.id.uuidString
+            guard seenChunkIDs.insert(chunkID).inserted else { continue }
+            sources.append(
+                RAGSourceItem(
+                    source: result.chunk.source,
+                    section: result.chunk.section,
+                    chunkID: chunkID
+                )
+            )
+        }
+
+        let quotes: [RAGQuoteItem] = retrieval.prefix(3).map { result in
+            RAGQuoteItem(
+                chunkID: result.chunk.id.uuidString,
+                source: result.chunk.source,
+                section: result.chunk.section,
+                text: normalizedQuoteText(result.chunk.content)
+            )
+        }
+
+        let fallbackAnswer = makeFallbackRAGAnswer(rawContent: rawContent, quotes: quotes)
+        return RAGResponsePayload(
+            answer: fallbackAnswer,
+            sources: sources,
+            quotes: quotes
+        )
+    }
+
+    private func makeFallbackRAGAnswer(rawContent: String, quotes: [RAGQuoteItem]) -> String {
+        let candidate = rawContent
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !candidate.isEmpty, !candidate.hasPrefix("{"), !candidate.hasPrefix("[") {
+            return String(candidate.prefix(280))
+        }
+
+        guard let firstQuote = quotes.first?.text, !firstQuote.isEmpty else {
+            return "Ответ сформирован на основе найденных источников."
+        }
+        return "Согласно найденным источникам: \(String(firstQuote.prefix(240)))"
+    }
+
+    private func normalizedQuoteText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func encodeRAGPayload(_ payload: RAGResponsePayload) -> String {
+        let encoder = JSONEncoder()
+        if #available(macOS 10.13, *) {
+            encoder.outputFormatting = [.sortedKeys]
+        }
+
+        guard let data = try? encoder.encode(payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return #"{"answer":"не знаю. Пожалуйста, уточните вопрос.","sources":[],"quotes":[]}"#
+        }
+        return json
     }
 
     /// Добавляет системные сообщения о событиях записи памяти.
@@ -835,6 +1037,44 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
             content: "Память [\(event.layer.rawValue)] \(event.details)"
         )
         try await messageRepository.saveMessage(systemMessage)
+    }
+}
+
+private enum RAGDecision {
+    case answerWithEvidence(retrieval: [SearchResult])
+    case needsClarification
+    case disabledOrUnavailable
+}
+
+private struct RAGResponsePayload: Codable, Equatable {
+    let answer: String
+    let sources: [RAGSourceItem]
+    let quotes: [RAGQuoteItem]
+}
+
+private struct RAGSourceItem: Codable, Equatable {
+    let source: String
+    let section: String?
+    let chunkID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case source
+        case section
+        case chunkID = "chunk_id"
+    }
+}
+
+private struct RAGQuoteItem: Codable, Equatable {
+    let chunkID: String
+    let source: String
+    let section: String?
+    let text: String
+
+    private enum CodingKeys: String, CodingKey {
+        case chunkID = "chunk_id"
+        case source
+        case section
+        case text
     }
 }
 
