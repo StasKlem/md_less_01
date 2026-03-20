@@ -59,6 +59,7 @@ final class ChatViewModel {
     private var lastHackerNewsTaskAgentState: HackerNewsTaskAgentState?
     private var counterTimerTask: Task<Void, Never>?
     private var isCounterTickInFlight = false
+    private let ragResponseDisplayFormatter = RAGResponseDisplayFormatter()
 
     init(
         session: ChatSession,
@@ -168,7 +169,7 @@ final class ChatViewModel {
                 assistantState = DialogHistoryItemViewState(
                     id: assistantID,
                     kind: .assistant,
-                    text: response.content,
+                    text: formattedDisplayText(for: .assistant, content: response.content),
                     status: .sent
                 )
                 self.replaceDialogItem(assistantState)
@@ -768,11 +769,15 @@ final class ChatViewModel {
             DialogHistoryItemViewState(
                 id: message.id,
                 kind: kind(for: message.role),
-                text: message.content,
+                text: formattedDisplayText(for: message.role, content: message.content),
                 status: .sent,
                 createdAt: message.createdAt
             )
         }
+    }
+
+    private func formattedDisplayText(for role: MessageRole, content: String) -> String {
+        ragResponseDisplayFormatter.format(role: role, content: content)
     }
 
     private func kind(for role: MessageRole) -> DialogMessageKind {
@@ -1032,6 +1037,59 @@ final class ChatViewModel {
             return nil
         }
     }
+}
+
+struct RAGResponseDisplayFormatter {
+    func format(role: MessageRole, content: String) -> String {
+        guard role == .assistant else { return content }
+        guard let data = content.data(using: .utf8) else { return content }
+        guard let payload = try? JSONDecoder().decode(RAGDisplayPayload.self, from: data) else { return content }
+
+        let answer = payload.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        var blocks: [String] = [answer.isEmpty ? "Ответ отсутствует." : answer]
+
+        if !payload.sources.isEmpty {
+            let sourceLines = payload.sources.enumerated().map { index, item in
+                let section = item.section?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let section, !section.isEmpty {
+                    return "\(index + 1). \(item.source) — раздел: \(section)"
+                }
+                return "\(index + 1). \(item.source)"
+            }
+            blocks.append("Источники:\n" + sourceLines.joined(separator: "\n"))
+        }
+
+        if !payload.quotes.isEmpty {
+            let quoteLines = payload.quotes.enumerated().map { index, item in
+                let quoteText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let section = item.section?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let section, !section.isEmpty {
+                    return "\(index + 1). [\(item.source), \(section)] «\(quoteText)»"
+                }
+                return "\(index + 1). [\(item.source)] «\(quoteText)»"
+            }
+            blocks.append("Цитаты:\n" + quoteLines.joined(separator: "\n"))
+        }
+
+        return blocks.joined(separator: "\n\n")
+    }
+}
+
+private struct RAGDisplayPayload: Decodable {
+    let answer: String
+    let sources: [RAGDisplaySource]
+    let quotes: [RAGDisplayQuote]
+}
+
+private struct RAGDisplaySource: Decodable {
+    let source: String
+    let section: String?
+}
+
+private struct RAGDisplayQuote: Decodable {
+    let source: String
+    let section: String?
+    let text: String
 }
 
 private struct FormSubmissionPayload: Encodable {
