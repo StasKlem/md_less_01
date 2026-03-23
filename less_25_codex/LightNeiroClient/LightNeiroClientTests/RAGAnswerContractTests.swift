@@ -34,7 +34,7 @@ final class RAGAnswerContractTests: XCTestCase {
         }
     }
 
-    func testRAGContractReturnsNeedClarificationWhenRelevanceBelowThreshold() async throws {
+    func testRAGContractFallsBackToLLMWhenRelevanceBelowThreshold() async throws {
         let llmClient = ContractLLMClientSpy(responseContent: "{invalid-json")
         let lowResult = Self.makeSearchResult(
             content: "Нерелевантный общий текст",
@@ -58,16 +58,10 @@ final class RAGAnswerContractTests: XCTestCase {
             assistantInstruction: nil
         )
 
-        let payload = try XCTUnwrap(Self.decodePayload(from: assistant.content))
-        XCTAssertTrue(payload.answer.lowercased().contains("не знаю"))
-        XCTAssertTrue(payload.answer.lowercased().contains("уточните"))
-        XCTAssertFalse(payload.sources.isEmpty)
-        XCTAssertFalse(payload.quotes.isEmpty)
-        XCTAssertEqual(payload.sources.first?.source, "rag://no-matches")
-        XCTAssertEqual(payload.quotes.first?.source, "rag://no-matches")
+        XCTAssertEqual(assistant.content, "{invalid-json")
 
         let llmCalls = await llmClient.sendCallCount()
-        XCTAssertEqual(llmCalls, 0)
+        XCTAssertEqual(llmCalls, 1)
     }
 
     private func makeUseCase(

@@ -25,7 +25,7 @@ enum SendMessageRAGCoordinatorFactory {
 
 enum SendMessageRAGDecision {
     case answerWithEvidence(retrieval: [SearchResult])
-    case needsClarification
+    case fallbackToLLM
     case disabledOrUnavailable
 }
 
@@ -87,7 +87,7 @@ fileprivate final class SendMessageRAGCoordinator: SendMessageRAGCoordinating {
                     topKAfterFiltering: topKAfterFiltering
                 )
                 guard !finalResults.isEmpty, maxScore >= normalizedThreshold else {
-                    return .needsClarification
+                    return .fallbackToLLM
                 }
                 return .answerWithEvidence(retrieval: finalResults)
             }
@@ -95,7 +95,7 @@ fileprivate final class SendMessageRAGCoordinator: SendMessageRAGCoordinating {
             let legacyResults = try await ragUseCaseFacade.search(query: userText, topK: 4)
             let maxScore = Double(legacyResults.map(\.score).max() ?? 0)
             guard !legacyResults.isEmpty, maxScore >= normalizedThreshold else {
-                return .needsClarification
+                return .fallbackToLLM
             }
             return .answerWithEvidence(retrieval: legacyResults)
         } catch {

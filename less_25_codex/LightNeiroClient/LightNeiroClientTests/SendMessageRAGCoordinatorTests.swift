@@ -56,7 +56,7 @@ final class SendMessageRAGCoordinatorTests: XCTestCase {
         XCTAssertEqual(topK, 4)
     }
 
-    func testBuildDecisionReturnsNeedsClarificationWhenScoresBelowThreshold() async {
+    func testBuildDecisionFallsBackToLLMWhenScoresBelowThreshold() async {
         let ragSpy = RAGFacadeCoordinatorSpy(
             searchResults: [Self.makeSearchResult(content: "низкая релевантность", score: 0.2)]
         )
@@ -73,10 +73,10 @@ final class SendMessageRAGCoordinatorTests: XCTestCase {
 
         let decision = await coordinator.buildDecision(settings: settings, userText: "Запрос")
 
-        if case .needsClarification = decision {
+        if case .fallbackToLLM = decision {
             XCTAssertTrue(true)
         } else {
-            XCTFail("Ожидалось решение needsClarification")
+            XCTFail("Ожидалось решение fallbackToLLM")
         }
     }
 

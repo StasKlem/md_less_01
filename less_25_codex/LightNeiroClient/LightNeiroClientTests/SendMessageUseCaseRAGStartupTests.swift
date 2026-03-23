@@ -91,7 +91,7 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         XCTAssertEqual(lastSearchTopK, 4)
     }
 
-    func testExecuteReturnsNeedsClarificationJSONAndSkipsLLMWhenRelevanceBelowThreshold() async throws {
+    func testExecuteFallsBackToLLMWhenRAGHasNoRelevantAnswer() async throws {
         let llmClient = LLMClientSpy()
         let ragSpy = RAGFacadeSpy(
             searchResults: [Self.makeSearchResult(content: "слабое совпадение", score: 0.21)]
@@ -112,16 +112,15 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
             assistantInstruction: nil
         )
 
-        let payload = try XCTUnwrap(Self.decodePayload(from: assistant.content))
-        XCTAssertTrue(payload.answer.lowercased().contains("не знаю"))
-        XCTAssertTrue(payload.answer.lowercased().contains("уточните"))
-        XCTAssertFalse(payload.sources.isEmpty)
-        XCTAssertFalse(payload.quotes.isEmpty)
-        XCTAssertEqual(payload.sources.first?.source, "rag://no-matches")
-        XCTAssertEqual(payload.quotes.first?.source, "rag://no-matches")
+        XCTAssertEqual(assistant.content, "Reply")
 
         let sendCalls = await llmClient.sendCallCount()
-        XCTAssertEqual(sendCalls, 0)
+        XCTAssertEqual(sendCalls, 1)
+
+        let capturedRequest = await llmClient.capturedRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertFalse(request.systemPrompt.contains("RAG_EVIDENCE"))
+        XCTAssertFalse(request.systemPrompt.contains("Верни ТОЛЬКО валидный JSON"))
     }
 
     func testExecuteKeepsTaskStateAndSourcesAcrossLongScenarioOne() async throws {

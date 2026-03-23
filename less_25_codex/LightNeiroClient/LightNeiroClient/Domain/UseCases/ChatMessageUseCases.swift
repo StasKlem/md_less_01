@@ -183,13 +183,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 
         let response: LLMResponse
         switch ragDecision {
-        case .needsClarification:
-            response = LLMResponse(
-                content: ragPayloadCodec.makeNeedsClarificationPayloadJSON(),
-                inputTokens: 0,
-                outputTokens: 0,
-                latencyMs: 0
-            )
         case .answerWithEvidence(let retrieval):
             let request = LLMRequest(
                 systemPrompt: systemPrompt,
@@ -210,25 +203,16 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                 outputTokens: llmResponse.outputTokens,
                 latencyMs: llmResponse.latencyMs
             )
-        case .disabledOrUnavailable:
-            if settings.isRAGEnabled {
-                response = LLMResponse(
-                    content: ragPayloadCodec.makeNeedsClarificationPayloadJSON(),
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    latencyMs: 0
-                )
-            } else {
-                let request = LLMRequest(
-                    systemPrompt: systemPrompt,
-                    shortTermMessages: context.shortTermMessages,
-                    workingMemory: context.workingMemory,
-                    longTermMemory: context.longTermMemory,
-                    settings: settings,
-                    taskState: context.taskState
-                )
-                response = try await llmClient.send(request: request)
-            }
+        case .fallbackToLLM, .disabledOrUnavailable:
+            let request = LLMRequest(
+                systemPrompt: systemPrompt,
+                shortTermMessages: context.shortTermMessages,
+                workingMemory: context.workingMemory,
+                longTermMemory: context.longTermMemory,
+                settings: settings,
+                taskState: context.taskState
+            )
+            response = try await llmClient.send(request: request)
         }
 
         let assistantMessage = ChatMessage(
