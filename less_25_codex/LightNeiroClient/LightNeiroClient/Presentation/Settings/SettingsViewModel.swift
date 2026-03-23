@@ -11,23 +11,20 @@ final class SettingsViewModel {
 
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
-    private let session: ChatSession
-    private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
+        private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
     private let resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
     private let saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
 
     init(
-        session: ChatSession,
         fetchSettingsUseCase: FetchSettingsUseCaseProtocol,
         applySettingsUseCase: ApplySettingsUseCaseProtocol,
         resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol,
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
-        self.session = session
-        self.fetchSettingsUseCase = fetchSettingsUseCase
+                self.fetchSettingsUseCase = fetchSettingsUseCase
         self.applySettingsUseCase = applySettingsUseCase
         self.resetRAGEmbeddingsUseCase = resetRAGEmbeddingsUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
@@ -141,7 +138,7 @@ final class SettingsViewModel {
     private func persist() {
         let next = settings
         Task {
-            try? await applySettingsUseCase.execute(sessionID: session.id, settings: next)
+            try? await applySettingsUseCase.execute(settings: next)
             onSettingsChanged?(next)
         }
     }
@@ -158,11 +155,11 @@ final class SettingsViewModel {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let loaded = try await fetchSettingsUseCase.execute(sessionID: session.id)
+                let loaded = try await fetchSettingsUseCase.execute()
                 settings = loaded
                 plannerInvariantsText = loaded.plannerInvariants.joined(separator: "\n")
                 onSettingsChanged?(loaded)
-                try await applySettingsUseCase.execute(sessionID: session.id, settings: loaded)
+                try await applySettingsUseCase.execute(settings: loaded)
             } catch {
                 apiKeyStatus = "Не удалось загрузить настройки: \(error.localizedDescription)"
             }

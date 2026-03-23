@@ -20,12 +20,11 @@ struct HackerNewsLLMSummaryService: HackerNewsLLMSummaryServiceProtocol {
             return "Нет статей для сводки."
         }
 
-        let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
+        let settings = try await settingsRepository.fetchSettings()
         let request = LLMRequest(
             systemPrompt: "Ты помощник, который кратко суммирует новости Hacker News на русском языке. Дай 2-3 предложения без markdown.",
             shortTermMessages: [
                 ChatMessage(
-                    branchID: UUID(),
                     role: .user,
                     content: makePrompt(stories: recentStories)
                 )

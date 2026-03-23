@@ -19,40 +19,46 @@ actor FileLongTermMemoryRepository: LongTermMemoryRepositoryProtocol {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     }
 
-    func fetch(sessionID: UUID, namespaces: [LongTermMemoryNamespace]?) async throws -> [LongTermMemoryItem] {
-        let items = try load(sessionID: sessionID)
+    func fetch(namespaces: [LongTermMemoryNamespace]?) async throws -> [LongTermMemoryItem] {
+        let items = try load()
         guard let namespaces, !namespaces.isEmpty else { return items }
         let namespaceSet = Set(namespaces)
         return items.filter { namespaceSet.contains($0.namespace) }
     }
 
-    func upsert(sessionID: UUID, items: [LongTermMemoryItem]) async throws {
-        var current = try load(sessionID: sessionID)
-        for item in items where item.sessionID == sessionID {
+    func upsert(items: [LongTermMemoryItem]) async throws {
+        var current = try load()
+        for item in items {
             current.removeAll { $0.namespace == item.namespace && $0.key == item.key }
             current.append(item)
         }
-        try persist(items: current, sessionID: sessionID)
+        try persist(items: current)
     }
 
-    func delete(sessionID: UUID, keys: [String]) async throws {
+    func delete(keys: [String]) async throws {
         guard !keys.isEmpty else { return }
-        var current = try load(sessionID: sessionID)
+        var current = try load()
         let keySet = Set(keys)
         current.removeAll { keySet.contains($0.key) }
-        try persist(items: current, sessionID: sessionID)
+        try persist(items: current)
     }
 
-    private func load(sessionID: UUID) throws -> [LongTermMemoryItem] {
-        let fileURL = fileURL(for: sessionID)
+    func clearAll() async throws {
+        let url = fileURL()
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try fileManager.removeItem(at: url)
+    }
+
+    private func load() throws -> [LongTermMemoryItem] {
+        let fileURL = fileURL()
         guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
         let data = try Data(contentsOf: fileURL)
         return try decoder.decode([LongTermMemoryItem].self, from: data)
     }
 
-    private func persist(items: [LongTermMemoryItem], sessionID: UUID) throws {
+    private func persist(items: [LongTermMemoryItem]) throws {
         try ensureDirectoryExists()
-        let fileURL = fileURL(for: sessionID)
+        let fileURL = fileURL()
         let data = try encoder.encode(items)
         try data.write(to: fileURL, options: .atomic)
     }
@@ -63,8 +69,8 @@ actor FileLongTermMemoryRepository: LongTermMemoryRepositoryProtocol {
         }
     }
 
-    private func fileURL(for sessionID: UUID) -> URL {
-        rootDirectoryURL.appendingPathComponent("\(sessionID.uuidString).json", isDirectory: false)
+    private func fileURL() -> URL {
+        rootDirectoryURL.appendingPathComponent("global.json", isDirectory: false)
     }
 
     private static func defaultRootDirectoryURL(fileManager: FileManager) -> URL {

@@ -5,6 +5,7 @@ struct AppEnvironment {
 
     let sendMessageUseCase: SendMessageUseCaseProtocol
     let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
+    let clearDialogUseCase: ClearDialogUseCaseProtocol
     let applySettingsUseCase: ApplySettingsUseCaseProtocol
     let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     let resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol
@@ -28,19 +29,19 @@ struct AppEnvironment {
     let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol
     let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol
     let ragUseCaseFacade: RAGUseCaseFacadeProtocol
+    private static let globalSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
+    private static let globalBranchID = UUID(uuidString: "00000000-0000-0000-0000-000000000002") ?? UUID()
 
     static func bootstrap() async -> AppEnvironment {
         AppLogger.shared.info("Начало bootstrap окружения приложения", category: "app.bootstrap")
-        let sessionRepository = MockChatSessionRepository()
-        let branchRepository = MockBranchRepository()
-        let messageRepository = MockMessageRepository()
-        let shortTermRepository = MockShortTermMemoryRepository()
-        let workingMemoryRepository = MockWorkingMemoryRepository()
+        let messageRepository = FileMessageRepository()
+        let shortTermRepository = FileShortTermMemoryRepository()
+        let workingMemoryRepository = FileWorkingMemoryRepository()
         let longTermMemoryRepository = FileLongTermMemoryRepository()
-        let factsRepository = MockFactsRepository()
+        let factsRepository = FileFactsRepository()
         let settingsRepository = UserDefaultsSettingsRepository()
         let ragIndexReadinessRepository = UserDefaultsRAGIndexReadinessRepository()
-        let metricsRepository = MockMetricsRepository()
+        let metricsRepository = FileMetricsRepository()
         let vacationStateRepository = FileVacationPlanningStateRepository()
         let vacationPlanRepository = FileVacationPlanRepository()
         let mockTaskAgentStateRepository = FileMockTaskAgentStateRepository()
@@ -48,8 +49,8 @@ struct AppEnvironment {
         let hackerNewsTaskAgentStateRepository = FileHackerNewsTaskAgentStateRepository()
         let apiKeyStore = KeychainAPIKeyStore()
         let mcpToolDiscoveryService = MCPToolDiscoveryService(
-            hackerNewsTranslateEnvironmentProvider: { sessionID in
-                let settings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
+            hackerNewsTranslateEnvironmentProvider: { _ in
+                let settings = (try? await settingsRepository.fetchSettings()) ?? .default
                 var environmentOverrides: [String: String] = [
                     "HACKERNEWS_TRANSLATE_OPENAI_MODEL": settings.model.rawValue,
                     "HACKERNEWS_TRANSLATE_OPENAI_BASE_URL": Self.routerAICompatibleBaseURL(
@@ -115,6 +116,13 @@ struct AppEnvironment {
             )
         )
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
+        let clearDialog = ClearDialogUseCase(
+            messageRepository: messageRepository,
+            shortTermRepository: shortTermRepository,
+            workingMemoryRepository: workingMemoryRepository,
+            longTermMemoryRepository: longTermMemoryRepository,
+            metricsRepository: metricsRepository
+        )
         let applySettings = ApplySettingsUseCase(settingsRepository: settingsRepository)
         let fetchSettings = FetchSettingsUseCase(settingsRepository: settingsRepository)
         let resetRAGEmbeddings = ResetRAGEmbeddingsUseCase(
@@ -181,27 +189,14 @@ struct AppEnvironment {
         let getHackerNewsTaskAgentStatus = GetHackerNewsTaskAgentStatusUseCase(
             stateRepository: hackerNewsTaskAgentStateRepository
         )
-        let sessionID = UUID()
-        let branchID = UUID()
-
         let rootSession = ChatSession(
-            id: sessionID,
+            id: Self.globalSessionID,
             title: "New Chat",
-            activeBranchID: branchID,
+            activeBranchID: Self.globalBranchID,
             createdAt: Date()
         )
-        let rootBranch = ChatBranch(
-            id: branchID,
-            sessionID: sessionID,
-            parentCheckpointID: nil,
-            name: "main",
-            createdAt: Date()
-        )
-
-        try? await sessionRepository.saveSession(rootSession)
-        try? await branchRepository.saveBranch(rootBranch)
-        let initialSettings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
-        try? await settingsRepository.saveSettings(sessionID: sessionID, settings: initialSettings)
+        let initialSettings = (try? await settingsRepository.fetchSettings()) ?? .default
+        try? await settingsRepository.saveSettings(settings: initialSettings)
         let ragDocuments = defaultRAGDocumentURLs()
         let startupIndexedRAGStrategy = await preloadRAGIndexOnStartup(
             ragUseCaseFacade: ragUseCaseFacade,
@@ -230,6 +225,7 @@ struct AppEnvironment {
             session: rootSession,
             sendMessageUseCase: sendMessage,
             fetchMessagesUseCase: fetchMessages,
+            clearDialogUseCase: clearDialog,
             applySettingsUseCase: applySettings,
             fetchSettingsUseCase: fetchSettings,
             resetRAGEmbeddingsUseCase: resetRAGEmbeddings,

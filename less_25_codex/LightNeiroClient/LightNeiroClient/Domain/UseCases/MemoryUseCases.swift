@@ -22,20 +22,18 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
     }
 
     func execute(
-        sessionID: UUID,
-        branchID: UUID,
         settings: LLMSettings
     ) async throws -> MemoryContext {
-        let snapshot = try await shortTermRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID)
-        let nonSystemMessages = try await fetchNonSystemMessages(branchID: branchID)
+        let snapshot = try await shortTermRepository.fetchSnapshot()
+        let nonSystemMessages = try await fetchNonSystemMessages()
         let shortTermMessages = selectShortTermMessages(
             snapshot: snapshot,
             fallbackMessages: nonSystemMessages,
             windowSize: settings.windowSize
         )
 
-        let workingMemory = try await workingMemoryRepository.fetchActive(sessionID: sessionID, branchID: branchID)
-        let longTermMemory = try await prioritizedLongTermMemory(sessionID: sessionID)
+        let workingMemory = try await workingMemoryRepository.fetchActive()
+        let longTermMemory = try await prioritizedLongTermMemory()
 
         return MemoryContext(
             shortTermMessages: shortTermMessages,
@@ -44,8 +42,8 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
         )
     }
 
-    private func fetchNonSystemMessages(branchID: UUID) async throws -> [ChatMessage] {
-        let branchMessages = try await messageRepository.fetchMessages(branchID: branchID)
+    private func fetchNonSystemMessages() async throws -> [ChatMessage] {
+        let branchMessages = try await messageRepository.fetchMessages()
         return branchMessages.filter { $0.role != .system }
     }
 
@@ -58,8 +56,8 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
         return Array(sourceMessages.suffix(max(1, windowSize)))
     }
 
-    private func prioritizedLongTermMemory(sessionID: UUID) async throws -> [LongTermMemoryItem] {
-        let items = try await longTermMemoryRepository.fetch(sessionID: sessionID, namespaces: nil)
+    private func prioritizedLongTermMemory() async throws -> [LongTermMemoryItem] {
+        let items = try await longTermMemoryRepository.fetch(namespaces: nil)
         let namespacePriority: [LongTermMemoryNamespace: Int] = [
             .profile: 0,
             .decisions: 1,
@@ -94,16 +92,14 @@ final class UpdateShortTermMemoryUseCase: UpdateShortTermMemoryUseCaseProtocol {
         self.shortTermRepository = shortTermRepository
     }
 
-    func execute(sessionID: UUID, branchID: UUID, windowSize: Int) async throws -> MemoryWriteEvent? {
-        let previous = try await shortTermRepository.fetchSnapshot(sessionID: sessionID, branchID: branchID)
-        let allMessages = try await messageRepository.fetchMessages(branchID: branchID)
+    func execute(windowSize: Int) async throws -> MemoryWriteEvent? {
+        let previous = try await shortTermRepository.fetchSnapshot()
+        let allMessages = try await messageRepository.fetchMessages()
             .filter { $0.role != .system }
 
         let normalizedWindowSize = max(1, windowSize)
         let currentMessages = Array(allMessages.suffix(normalizedWindowSize))
         let snapshot = ShortTermMemorySnapshot(
-            sessionID: sessionID,
-            branchID: branchID,
             messages: currentMessages,
             windowSize: normalizedWindowSize,
             updatedAt: Date()
@@ -138,25 +134,23 @@ final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
     }
 
     func execute(
-        sessionID: UUID,
-        branchID: UUID,
         latestUserMessage: String,
         latestAssistantMessage: String?
     ) async throws -> [MemoryWriteEvent] {
         let userText = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !userText.isEmpty else { return [] }
 
-        let active = try await workingMemoryRepository.fetchActive(sessionID: sessionID, branchID: branchID)
+        let active = try await workingMemoryRepository.fetchActive()
         let extracted = extractCandidates(from: userText, assistantText: latestAssistantMessage ?? "")
-        let mergeResult = merge(active: active, with: extracted, sessionID: sessionID, branchID: branchID)
+        let mergeResult = merge(active: active, with: extracted)
         let merged = mergeResult.items
         if !merged.isEmpty {
-            try await workingMemoryRepository.upsert(sessionID: sessionID, branchID: branchID, items: merged)
+            try await workingMemoryRepository.upsert(items: merged)
         }
 
         let resolvedKeys = resolveKeys(from: userText, assistantText: latestAssistantMessage ?? "")
         if !resolvedKeys.isEmpty {
-            try await workingMemoryRepository.resolve(sessionID: sessionID, branchID: branchID, keys: resolvedKeys)
+            try await workingMemoryRepository.resolve(keys: resolvedKeys)
         }
 
         guard !mergeResult.changedEntries.isEmpty else { return [] }
@@ -195,13 +189,11 @@ final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
 
     private func merge(
         active: [WorkingMemoryItem],
-        with candidates: [WorkingMemoryCandidate],
-        sessionID: UUID,
-        branchID: UUID
+        with candidates: [WorkingMemoryCandidate]
     ) -> (items: [WorkingMemoryItem], changedEntries: [String]) {
         var map = Dictionary(uniqueKeysWithValues: active.map { ($0.key, $0) })
         let now = Date()
-        let taskID = branchID.uuidString
+        let taskID = "global"
         var changedEntries: [String] = []
 
         for candidate in candidates {
@@ -214,8 +206,6 @@ final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
             }
             map[candidate.key] = WorkingMemoryItem(
                 id: current?.id ?? UUID(),
-                sessionID: sessionID,
-                branchID: branchID,
                 taskID: taskID,
                 key: candidate.key,
                 value: trimmedValue,
@@ -269,18 +259,18 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
         self.legacyFactsRepository = legacyFactsRepository
     }
 
-    func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws -> [MemoryWriteEvent] {
+    func execute(latestUserMessage: String, settings: LLMSettings) async throws -> [MemoryWriteEvent] {
         let trimmed = latestUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        try await migrateStickyFactsIfNeeded(sessionID: sessionID)
-        let existing = try await longTermRepository.fetch(sessionID: sessionID, namespaces: nil)
-        let extractionMessages = try await buildExtractionMessages(branchID: branchID, latestUserMessage: trimmed)
+        try await migrateStickyFactsIfNeeded()
+        let existing = try await longTermRepository.fetch(namespaces: nil)
+        let extractionMessages = try await buildExtractionMessages(latestUserMessage: trimmed)
         let extracted = try await extractMemoryUsingLLM(messages: extractionMessages, settings: settings)
-        let mergeResult = mergeMemory(existing: existing, with: extracted, sessionID: sessionID)
+        let mergeResult = mergeMemory(existing: existing, with: extracted)
         let merged = mergeResult.items
         if !merged.isEmpty {
-            try await longTermRepository.upsert(sessionID: sessionID, items: merged)
+            try await longTermRepository.upsert(items: merged)
         }
         guard !mergeResult.changedEntries.isEmpty else { return [] }
         let entries = mergeResult.changedEntries.sorted().joined(separator: " | ")
@@ -318,8 +308,8 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
         return decoded.candidates
     }
 
-    private func buildExtractionMessages(branchID: UUID, latestUserMessage: String) async throws -> [ChatMessage] {
-        let history = try await messageRepository.fetchMessages(branchID: branchID)
+    private func buildExtractionMessages(latestUserMessage: String) async throws -> [ChatMessage] {
+        let history = try await messageRepository.fetchMessages()
         let assistantReply = history
             .last(where: { $0.role == .assistant })?
             .content
@@ -333,8 +323,8 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
         }
 
         return [
-            ChatMessage(branchID: branchID, role: .assistant, content: assistantContent),
-            ChatMessage(branchID: branchID, role: .user, content: latestUserMessage)
+            ChatMessage(role: .assistant, content: assistantContent),
+            ChatMessage(role: .user, content: latestUserMessage)
         ]
     }
 
@@ -348,8 +338,7 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
 
     private func mergeMemory(
         existing: [LongTermMemoryItem],
-        with extracted: [LongTermMemoryCandidate],
-        sessionID: UUID
+        with extracted: [LongTermMemoryCandidate]
     ) -> (items: [LongTermMemoryItem], changedEntries: [String]) {
         var map = Dictionary(uniqueKeysWithValues: existing.map { ("\($0.namespace.rawValue)|\($0.key)", $0) })
         let now = Date()
@@ -366,7 +355,6 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
             }
             map[mapKey] = LongTermMemoryItem(
                 id: current?.id ?? UUID(),
-                sessionID: sessionID,
                 namespace: candidate.namespace,
                 key: candidate.key,
                 value: value,
@@ -385,16 +373,16 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
         return (sorted, Array(Set(changedEntries)))
     }
 
-    private func migrateStickyFactsIfNeeded(sessionID: UUID) async throws {
+    private func migrateStickyFactsIfNeeded() async throws {
         guard let legacyFactsRepository else { return }
-        let existing = try await longTermRepository.fetch(sessionID: sessionID, namespaces: nil)
+        let existing = try await longTermRepository.fetch(namespaces: nil)
         guard existing.isEmpty else { return }
 
-        let stickyFacts = try await legacyFactsRepository.fetchFacts(sessionID: sessionID)
+        let stickyFacts = try await legacyFactsRepository.fetchFacts()
         guard !stickyFacts.isEmpty else { return }
 
         let converted = stickyFacts.map(LongTermMemoryItem.init(stickyFact:))
-        try await longTermRepository.upsert(sessionID: sessionID, items: converted)
+        try await longTermRepository.upsert(items: converted)
     }
 }
 

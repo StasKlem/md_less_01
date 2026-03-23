@@ -10,26 +10,20 @@ final class SessionInfoViewModel {
         lastLatencyMs: 0
     )
 
-    private let session: ChatSession
-    private let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
+        private let collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
 
     /// Создаёт ViewModel метрик для конкретной сессии и активной ветки.
     init(
-        session: ChatSession,
         collectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol
     ) {
-        self.session = session
-        self.collectSessionMetricsUseCase = collectSessionMetricsUseCase
+                self.collectSessionMetricsUseCase = collectSessionMetricsUseCase
     }
 
     /// Запрашивает и публикует актуальный snapshot метрик для текущей ветки.
     func refresh() {
         Task { [weak self] in
             guard let self else { return }
-            if let value = try? await self.collectSessionMetricsUseCase.execute(
-                sessionID: self.session.id,
-                branchID: self.session.activeBranchID
-            ) {
+            if let value = try? await self.collectSessionMetricsUseCase.execute() {
                 self.snapshot = value
             }
         }

@@ -2,10 +2,10 @@ import Foundation
 
 protocol MemoryEventAppending {
     /// Добавляет системные сообщения для набора событий записи памяти.
-    func appendEvents(branchID: UUID, events: [MemoryWriteEvent]) async throws
+    func appendEvents(events: [MemoryWriteEvent]) async throws
 
     /// Добавляет одно системное сообщение о событии записи памяти.
-    func appendEvent(branchID: UUID, event: MemoryWriteEvent) async throws
+    func appendEvent(event: MemoryWriteEvent) async throws
 }
 
 enum MemoryEventAppenderFactory {
@@ -22,15 +22,14 @@ fileprivate final class MemoryEventAppender: MemoryEventAppending {
         self.messageRepository = messageRepository
     }
 
-    func appendEvents(branchID: UUID, events: [MemoryWriteEvent]) async throws {
+    func appendEvents(events: [MemoryWriteEvent]) async throws {
         for event in events {
-            try await appendEvent(branchID: branchID, event: event)
+            try await appendEvent(event: event)
         }
     }
 
-    func appendEvent(branchID: UUID, event: MemoryWriteEvent) async throws {
+    func appendEvent(event: MemoryWriteEvent) async throws {
         let systemMessage = ChatMessage(
-            branchID: branchID,
             role: .system,
             content: "Память [\(event.layer.rawValue)] \(event.details)"
         )

@@ -10,17 +10,13 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         )
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
-        let sessionID = UUID()
-        let branchID = UUID()
-        var settings = LLMSettings.default
+                var settings = LLMSettings.default
         settings.isRAGEnabled = true
         settings.isMemoryEnabled = false
         settings.ragChunkingStrategy = .structural
-        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+        try await sut.settingsRepository.saveSettings(settings: settings)
 
         _ = try await sut.useCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
             userText: "Где хранится индекс?",
             assistantInstruction: nil
         )
@@ -42,9 +38,7 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         )
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
-        let sessionID = UUID()
-        let branchID = UUID()
-        var settings = LLMSettings.default
+                var settings = LLMSettings.default
         settings.isRAGEnabled = true
         settings.isMemoryEnabled = false
         settings.ragChunkingStrategy = .structural
@@ -52,11 +46,9 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         settings.ragTopKBeforeFiltering = 6
         settings.ragTopKAfterFiltering = 1
         settings.ragRelevanceThreshold = 0.80
-        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+        try await sut.settingsRepository.saveSettings(settings: settings)
 
         _ = try await sut.useCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
             userText: "Найди контекст",
             assistantInstruction: nil
         )
@@ -80,9 +72,7 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         )
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
-        let sessionID = UUID()
-        let branchID = UUID()
-        var settings = LLMSettings.default
+                var settings = LLMSettings.default
         settings.isRAGEnabled = true
         settings.isMemoryEnabled = false
         settings.ragChunkingStrategy = .structural
@@ -90,11 +80,9 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         settings.ragTopKBeforeFiltering = 12
         settings.ragTopKAfterFiltering = 2
         settings.ragRelevanceThreshold = 0.99
-        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+        try await sut.settingsRepository.saveSettings(settings: settings)
 
         _ = try await sut.useCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
             userText: "Покажи legacy режим",
             assistantInstruction: nil
         )
@@ -110,20 +98,16 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         )
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
-        let sessionID = UUID()
-        let branchID = UUID()
-        var settings = LLMSettings.default
+                var settings = LLMSettings.default
         settings.isRAGEnabled = true
         settings.isMemoryEnabled = false
         settings.isRAGPostFilteringEnabled = true
         settings.ragTopKBeforeFiltering = 5
         settings.ragTopKAfterFiltering = 3
         settings.ragRelevanceThreshold = 0.95
-        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+        try await sut.settingsRepository.saveSettings(settings: settings)
 
         let assistant = try await sut.useCase.execute(
-            sessionID: sessionID,
-            branchID: branchID,
             userText: "Сформулируй ответ",
             assistantInstruction: nil
         )
@@ -131,8 +115,10 @@ final class SendMessageUseCaseRAGStartupTests: XCTestCase {
         let payload = try XCTUnwrap(Self.decodePayload(from: assistant.content))
         XCTAssertTrue(payload.answer.lowercased().contains("не знаю"))
         XCTAssertTrue(payload.answer.lowercased().contains("уточните"))
-        XCTAssertTrue(payload.sources.isEmpty)
-        XCTAssertTrue(payload.quotes.isEmpty)
+        XCTAssertFalse(payload.sources.isEmpty)
+        XCTAssertFalse(payload.quotes.isEmpty)
+        XCTAssertEqual(payload.sources.first?.source, "rag://no-matches")
+        XCTAssertEqual(payload.quotes.first?.source, "rag://no-matches")
 
         let sendCalls = await llmClient.sendCallCount()
         XCTAssertEqual(sendCalls, 0)

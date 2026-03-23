@@ -8,20 +8,17 @@ final class RAGAnswerContractTests: XCTestCase {
         let ragSpy = ContractRAGFacadeSpy(resultsByQuery: makeTop10QueryResults())
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
-        let sessionID = UUID()
-        var settings = LLMSettings.default
+                var settings = LLMSettings.default
         settings.isRAGEnabled = true
         settings.isMemoryEnabled = false
         settings.isRAGPostFilteringEnabled = true
         settings.ragTopKBeforeFiltering = 6
         settings.ragTopKAfterFiltering = 3
         settings.ragRelevanceThreshold = 0.70
-        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+        try await sut.settingsRepository.saveSettings(settings: settings)
 
         for query in Self.top10Questions {
             let assistant = try await sut.useCase.execute(
-                sessionID: sessionID,
-                branchID: UUID(),
                 userText: query,
                 assistantInstruction: nil
             )
@@ -47,28 +44,27 @@ final class RAGAnswerContractTests: XCTestCase {
         let ragSpy = ContractRAGFacadeSpy(resultsByQuery: ["Какой режим SQLite рекомендуется для производительности записи?": [lowResult]])
         let sut = makeUseCase(llmClient: llmClient, ragSpy: ragSpy)
 
-        let sessionID = UUID()
-        var settings = LLMSettings.default
+                var settings = LLMSettings.default
         settings.isRAGEnabled = true
         settings.isMemoryEnabled = false
         settings.isRAGPostFilteringEnabled = true
         settings.ragTopKBeforeFiltering = 4
         settings.ragTopKAfterFiltering = 2
         settings.ragRelevanceThreshold = 0.90
-        try await sut.settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+        try await sut.settingsRepository.saveSettings(settings: settings)
 
         let assistant = try await sut.useCase.execute(
-            sessionID: sessionID,
-            branchID: UUID(),
-            userText: "Какой режим SQLite рекомендуется для производительности записи?",
+                userText: "Какой режим SQLite рекомендуется для производительности записи?",
             assistantInstruction: nil
         )
 
         let payload = try XCTUnwrap(Self.decodePayload(from: assistant.content))
         XCTAssertTrue(payload.answer.lowercased().contains("не знаю"))
         XCTAssertTrue(payload.answer.lowercased().contains("уточните"))
-        XCTAssertTrue(payload.sources.isEmpty)
-        XCTAssertTrue(payload.quotes.isEmpty)
+        XCTAssertFalse(payload.sources.isEmpty)
+        XCTAssertFalse(payload.quotes.isEmpty)
+        XCTAssertEqual(payload.sources.first?.source, "rag://no-matches")
+        XCTAssertEqual(payload.quotes.first?.source, "rag://no-matches")
 
         let llmCalls = await llmClient.sendCallCount()
         XCTAssertEqual(llmCalls, 0)

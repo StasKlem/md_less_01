@@ -35,6 +35,7 @@ final class ChatViewModel {
     private let session: ChatSession
     private let sendMessageUseCase: SendMessageUseCaseProtocol
     private let fetchMessagesUseCase: FetchMessagesUseCaseProtocol
+    private let clearDialogUseCase: ClearDialogUseCaseProtocol
     private let startVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol?
     private let handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol?
     private let getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol?
@@ -65,6 +66,7 @@ final class ChatViewModel {
         session: ChatSession,
         sendMessageUseCase: SendMessageUseCaseProtocol,
         fetchMessagesUseCase: FetchMessagesUseCaseProtocol,
+        clearDialogUseCase: ClearDialogUseCaseProtocol,
         startVacationPlanningUseCase: StartVacationPlanningUseCaseProtocol? = nil,
         handleVacationPlanningEventUseCase: HandleVacationPlanningEventUseCaseProtocol? = nil,
         getVacationPlanningStatusUseCase: GetVacationPlanningStatusUseCaseProtocol? = nil,
@@ -85,6 +87,7 @@ final class ChatViewModel {
         self.session = session
         self.sendMessageUseCase = sendMessageUseCase
         self.fetchMessagesUseCase = fetchMessagesUseCase
+        self.clearDialogUseCase = clearDialogUseCase
         self.startVacationPlanningUseCase = startVacationPlanningUseCase
         self.handleVacationPlanningEventUseCase = handleVacationPlanningEventUseCase
         self.getVacationPlanningStatusUseCase = getVacationPlanningStatusUseCase
@@ -160,8 +163,6 @@ final class ChatViewModel {
 
             do {
                 let response = try await self.sendMessageUseCase.execute(
-                    sessionID: self.session.id,
-                    branchID: self.session.activeBranchID,
                     userText: trimmed,
                     assistantInstruction: nil
                 )
@@ -219,6 +220,22 @@ final class ChatViewModel {
     func approvePlan() {
         guard chatMode == .vacationPlanner, lastPlannerState == .awaitingPlanApproval else { return }
         send(text: "approve")
+    }
+
+    func clearDialog() {
+        guard !isSending else { return }
+        isSending = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isSending = false }
+            do {
+                try await clearDialogUseCase.execute()
+                try await loadDialog()
+                onDidSendMessage?()
+            } catch {
+                appendSystemMessage("Не удалось очистить диалог: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func handleAgentCommand(text: String) -> Bool {
@@ -764,7 +781,7 @@ final class ChatViewModel {
     }
 
     private func loadDialog() async throws {
-        let messages = try await fetchMessagesUseCase.execute(branchID: session.activeBranchID)
+        let messages = try await fetchMessagesUseCase.execute()
         dialogItems = messages.map { message in
             DialogHistoryItemViewState(
                 id: message.id,

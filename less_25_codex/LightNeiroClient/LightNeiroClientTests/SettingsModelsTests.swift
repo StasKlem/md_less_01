@@ -34,6 +34,7 @@ final class SettingsModelsTests: XCTestCase {
     }
 
     func testLLMSettingsDefaultUsesExpectedRAGPostFilteringValues() {
+        XCTAssertTrue(LLMSettings.default.isRAGEnabled)
         XCTAssertTrue(LLMSettings.default.isRAGPostFilteringEnabled)
         XCTAssertEqual(LLMSettings.default.ragTopKBeforeFiltering, 8)
         XCTAssertEqual(LLMSettings.default.ragTopKAfterFiltering, 4)

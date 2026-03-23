@@ -49,8 +49,10 @@ final class RAGPayloadCodecTests: XCTestCase {
 
         XCTAssertTrue((payload?.answer.lowercased().contains("не знаю")) ?? false)
         XCTAssertTrue((payload?.answer.lowercased().contains("уточните")) ?? false)
-        XCTAssertEqual(payload?.sources.count, 0)
-        XCTAssertEqual(payload?.quotes.count, 0)
+        XCTAssertEqual(payload?.sources.count, 1)
+        XCTAssertEqual(payload?.quotes.count, 1)
+        XCTAssertEqual(payload?.sources.first?.source, "rag://no-matches")
+        XCTAssertEqual(payload?.quotes.first?.source, "rag://no-matches")
     }
 
     private func decodePayload(from json: String) throws -> TestRAGPayload {

@@ -31,12 +31,6 @@ final class SettingsViewModelEmbeddingsTests: XCTestCase {
         resetUseCase: ResetRAGEmbeddingsUseCaseProtocol
     ) -> SettingsViewModel {
         SettingsViewModel(
-            session: ChatSession(
-                id: UUID(),
-                title: "Тест",
-                activeBranchID: UUID(),
-                createdAt: Date()
-            ),
             fetchSettingsUseCase: FetchSettingsUseCaseStub(),
             applySettingsUseCase: ApplySettingsUseCaseStub(),
             resetRAGEmbeddingsUseCase: resetUseCase,
@@ -87,15 +81,13 @@ private actor ResetRAGEmbeddingsUseCaseSpy: ResetRAGEmbeddingsUseCaseProtocol {
 }
 
 private struct FetchSettingsUseCaseStub: FetchSettingsUseCaseProtocol {
-    func execute(sessionID: UUID) async throws -> LLMSettings {
-        _ = sessionID
+    func execute() async throws -> LLMSettings {
         return .default
     }
 }
 
 private struct ApplySettingsUseCaseStub: ApplySettingsUseCaseProtocol {
-    func execute(sessionID: UUID, settings: LLMSettings) async throws {
-        _ = sessionID
+    func execute(settings: LLMSettings) async throws {
         _ = settings
     }
 }

@@ -30,26 +30,14 @@ struct UserDefaultsSettingsRepository: SettingsRepositoryProtocol {
         self.decoder = decoder
     }
 
-    func fetchSettings(sessionID: UUID) async throws -> LLMSettings {
-        guard let data = userDefaults.data(forKey: key(for: sessionID)) else {
-            // Backward compatibility: if old value was stored without session scoping, reuse it.
-            guard let legacyData = userDefaults.data(forKey: storageKey) else {
-                return .default
-            }
-            return try decode(legacyData)
-        }
+    func fetchSettings() async throws -> LLMSettings {
+        guard let data = userDefaults.data(forKey: storageKey) else { return .default }
         return try decode(data)
     }
 
-    func saveSettings(sessionID: UUID, settings: LLMSettings) async throws {
+    func saveSettings(settings: LLMSettings) async throws {
         let data = try encoder.encode(settings)
-        userDefaults.set(data, forKey: key(for: sessionID))
-        // Keep the latest settings under a global key as a fallback for a new session.
         userDefaults.set(data, forKey: storageKey)
-    }
-
-    private func key(for sessionID: UUID) -> String {
-        "\(storageKey).\(sessionID.uuidString.lowercased())"
     }
 
     private func decode(_ data: Data) throws -> LLMSettings {

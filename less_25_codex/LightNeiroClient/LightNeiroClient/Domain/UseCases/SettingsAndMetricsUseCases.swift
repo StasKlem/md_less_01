@@ -8,9 +8,9 @@ final class ApplySettingsUseCase: ApplySettingsUseCaseProtocol {
         self.settingsRepository = settingsRepository
     }
 
-    /// Сохраняет настройки модели и контекста для сессии.
-    func execute(sessionID: UUID, settings: LLMSettings) async throws {
-        try await settingsRepository.saveSettings(sessionID: sessionID, settings: settings)
+    /// Сохраняет настройки модели и контекста.
+    func execute(settings: LLMSettings) async throws {
+        try await settingsRepository.saveSettings(settings: settings)
     }
 }
 
@@ -22,9 +22,9 @@ final class FetchSettingsUseCase: FetchSettingsUseCaseProtocol {
         self.settingsRepository = settingsRepository
     }
 
-    /// Возвращает актуальные настройки LLM для сессии.
-    func execute(sessionID: UUID) async throws -> LLMSettings {
-        try await settingsRepository.fetchSettings(sessionID: sessionID)
+    /// Возвращает актуальные настройки LLM.
+    func execute() async throws -> LLMSettings {
+        try await settingsRepository.fetchSettings()
     }
 }
 
@@ -51,23 +51,22 @@ final class ResetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol {
 final class CollectSessionMetricsUseCase: CollectSessionMetricsUseCaseProtocol {
     private let metricsRepository: MetricsRepositoryProtocol
 
-    /// Создаёт use case агрегирования метрик ветки.
+    /// Создаёт use case агрегирования метрик глобального диалога.
     init(metricsRepository: MetricsRepositoryProtocol) {
         self.metricsRepository = metricsRepository
     }
 
-    /// Возвращает сводку метрик по выбранной ветке текущей сессии.
-    func execute(sessionID: UUID, branchID: UUID) async throws -> SessionInfoSnapshot {
-        let metrics = try await metricsRepository.fetchMetrics(sessionID: sessionID)
-        let branchMetrics = metrics.filter { $0.branchID == branchID }
-        let totalIn = branchMetrics.reduce(0) { $0 + $1.inputTokens }
-        let totalOut = branchMetrics.reduce(0) { $0 + $1.outputTokens }
-        let lastLatency = branchMetrics.last?.latencyMs ?? 0
+    /// Возвращает сводку метрик по всему диалогу.
+    func execute() async throws -> SessionInfoSnapshot {
+        let metrics = try await metricsRepository.fetchMetrics()
+        let totalIn = metrics.reduce(0) { $0 + $1.inputTokens }
+        let totalOut = metrics.reduce(0) { $0 + $1.outputTokens }
+        let lastLatency = metrics.last?.latencyMs ?? 0
 
         return SessionInfoSnapshot(
             totalInputTokens: totalIn,
             totalOutputTokens: totalOut,
-            totalRequests: branchMetrics.count,
+            totalRequests: metrics.count,
             lastLatencyMs: lastLatency
         )
     }

@@ -17,13 +17,10 @@ enum RAGPayloadCodecFactory {
 
 fileprivate final class RAGPayloadCodec: RAGPayloadCoding {
     private let decoder = JSONDecoder()
+    private let noMatchesChunkID = "00000000-0000-0000-0000-000000000000"
 
     func makeNeedsClarificationPayloadJSON() -> String {
-        let payload = RAGResponsePayload(
-            answer: "не знаю. Пожалуйста, уточните вопрос.",
-            sources: [],
-            quotes: []
-        )
+        let payload = makeNoMatchesPayload(answer: "не знаю. Пожалуйста, уточните вопрос.")
         return encodeRAGPayload(payload)
     }
 
@@ -111,6 +108,9 @@ fileprivate final class RAGPayloadCodec: RAGPayloadCoding {
         }
 
         let fallbackAnswer = makeFallbackRAGAnswer(rawContent: rawContent, quotes: quotes)
+        if sources.isEmpty || quotes.isEmpty {
+            return makeNoMatchesPayload(answer: fallbackAnswer)
+        }
         return RAGResponsePayload(
             answer: fallbackAnswer,
             sources: sources,
@@ -152,6 +152,21 @@ fileprivate final class RAGPayloadCodec: RAGPayloadCoding {
             return #"{"answer":"не знаю. Пожалуйста, уточните вопрос.","sources":[],"quotes":[]}"#
         }
         return json
+    }
+
+    private func makeNoMatchesPayload(answer: String) -> RAGResponsePayload {
+        let source = RAGSourceItem(
+            source: "rag://no-matches",
+            section: "retrieval",
+            chunkID: noMatchesChunkID
+        )
+        let quote = RAGQuoteItem(
+            chunkID: noMatchesChunkID,
+            source: "rag://no-matches",
+            section: "retrieval",
+            text: "Релевантный контекст в базе не найден."
+        )
+        return RAGResponsePayload(answer: answer, sources: [source], quotes: [quote])
     }
 }
 

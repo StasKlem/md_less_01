@@ -39,10 +39,9 @@ final class AppLoggerTests: XCTestCase {
     }
 
     func testStringifyObjectReturnsDescription() {
-        let logger = AppLogger.shared
         let payload = SamplePayload(id: 7, title: "logger")
 
-        let text = logger.stringify(payload)
+        let text = stringify(payload)
 
         XCTAssertEqual(text, "SamplePayload(id: 7, title: logger)")
     }

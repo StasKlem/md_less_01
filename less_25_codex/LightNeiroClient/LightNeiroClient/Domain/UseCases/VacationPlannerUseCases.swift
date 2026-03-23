@@ -802,7 +802,7 @@ final class VacationPlanningOrchestrator {
         initialEvent: VacationPlanningEvent
     ) async throws -> VacationPlanningTurnResult {
         var snapshot = try await loadSnapshot(sessionID: sessionID, branchID: branchID)
-        let settings = (try? await settingsRepository.fetchSettings(sessionID: sessionID)) ?? .default
+        let settings = (try? await settingsRepository.fetchSettings()) ?? .default
         var queue: [VacationPlanningEvent] = [initialEvent]
         var messages: [String] = []
 

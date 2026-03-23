@@ -4,14 +4,10 @@ import Foundation
 protocol SendMessageUseCaseProtocol {
     /// Выполняет полный цикл отправки сообщения и генерации ответа.
     /// - Parameters:
-    ///   - sessionID: Идентификатор чат-сессии.
-    ///   - branchID: Идентификатор активной ветки диалога.
     ///   - userText: Текст пользовательского сообщения.
     ///   - assistantInstruction: Дополнительная системная инструкция для ассистента.
     /// - Returns: Сообщение ассистента, сохраненное в истории.
     func execute(
-        sessionID: UUID,
-        branchID: UUID,
         userText: String,
         assistantInstruction: String?
     ) async throws -> ChatMessage
@@ -20,14 +16,10 @@ protocol SendMessageUseCaseProtocol {
 extension SendMessageUseCaseProtocol {
     /// Упрощенный вызов без дополнительной инструкции ассистенту.
     /// - Parameters:
-    ///   - sessionID: Идентификатор чат-сессии.
-    ///   - branchID: Идентификатор активной ветки диалога.
     ///   - userText: Текст пользовательского сообщения.
     /// - Returns: Сообщение ассистента, сохраненное в истории.
-    func execute(sessionID: UUID, branchID: UUID, userText: String) async throws -> ChatMessage {
+    func execute(userText: String) async throws -> ChatMessage {
         try await execute(
-            sessionID: sessionID,
-            branchID: branchID,
             userText: userText,
             assistantInstruction: nil
         )
@@ -38,44 +30,41 @@ extension SendMessageUseCaseProtocol {
 protocol BuildMemoryContextUseCaseProtocol {
     /// Формирует короткую, рабочую и долговременную память в единую структуру.
     /// - Parameters:
-    ///   - sessionID: Идентификатор чат-сессии.
-    ///   - branchID: Идентификатор активной ветки диалога.
     ///   - settings: Текущие настройки модели.
     /// - Returns: Сформированный memory context.
-    func execute(sessionID: UUID, branchID: UUID, settings: LLMSettings) async throws -> MemoryContext
+    func execute(settings: LLMSettings) async throws -> MemoryContext
 }
 
 /// Читает историю сообщений выбранной ветки.
 protocol FetchMessagesUseCaseProtocol {
-    /// Возвращает сообщения ветки в порядке хранения.
-    /// - Parameter branchID: Идентификатор ветки.
+    /// Возвращает сообщения глобального диалога в порядке хранения.
     /// - Returns: Массив сообщений.
-    func execute(branchID: UUID) async throws -> [ChatMessage]
+    func execute() async throws -> [ChatMessage]
+}
+
+/// Очищает историю глобального диалога и связанные слои памяти.
+protocol ClearDialogUseCaseProtocol {
+    /// Выполняет полную очистку диалога.
+    func execute() async throws
 }
 
 /// Обновляет short-term memory на основе последних сообщений.
 protocol UpdateShortTermMemoryUseCaseProtocol {
     /// Пересчитывает окно short-term memory и возвращает событие записи при изменениях.
     /// - Parameters:
-    ///   - sessionID: Идентификатор чат-сессии.
-    ///   - branchID: Идентификатор ветки.
     ///   - windowSize: Размер окна последних сообщений.
     /// - Returns: Событие записи памяти или `nil`, если изменений нет.
-    func execute(sessionID: UUID, branchID: UUID, windowSize: Int) async throws -> MemoryWriteEvent?
+    func execute(windowSize: Int) async throws -> MemoryWriteEvent?
 }
 
 /// Обновляет рабочую память на основе последнего обмена сообщениями.
 protocol UpdateWorkingMemoryUseCaseProtocol {
     /// Выделяет и сохраняет рабочие факты, а также резолвит закрытые элементы.
     /// - Parameters:
-    ///   - sessionID: Идентификатор чат-сессии.
-    ///   - branchID: Идентификатор ветки.
     ///   - latestUserMessage: Последнее сообщение пользователя.
     ///   - latestAssistantMessage: Последний ответ ассистента.
     /// - Returns: Список событий записи в память.
     func execute(
-        sessionID: UUID,
-        branchID: UUID,
         latestUserMessage: String,
         latestAssistantMessage: String?
     ) async throws -> [MemoryWriteEvent]
@@ -85,29 +74,25 @@ protocol UpdateWorkingMemoryUseCaseProtocol {
 protocol UpdateLongTermMemoryUseCaseProtocol {
     /// Извлекает долговременные факты и сохраняет их в репозиторий.
     /// - Parameters:
-    ///   - sessionID: Идентификатор чат-сессии.
-    ///   - branchID: Идентификатор ветки.
     ///   - latestUserMessage: Последнее сообщение пользователя.
     ///   - settings: Текущие настройки модели.
     /// - Returns: Список событий записи в память.
-    func execute(sessionID: UUID, branchID: UUID, latestUserMessage: String, settings: LLMSettings) async throws -> [MemoryWriteEvent]
+    func execute(latestUserMessage: String, settings: LLMSettings) async throws -> [MemoryWriteEvent]
 }
 
 /// Применяет настройки модели к текущей сессии.
 protocol ApplySettingsUseCaseProtocol {
     /// Сохраняет обновленные настройки сессии.
     /// - Parameters:
-    ///   - sessionID: Идентификатор сессии.
     ///   - settings: Новые настройки LLM.
-    func execute(sessionID: UUID, settings: LLMSettings) async throws
+    func execute(settings: LLMSettings) async throws
 }
 
 /// Загружает настройки модели для сессии.
 protocol FetchSettingsUseCaseProtocol {
     /// Возвращает актуальные настройки LLM.
-    /// - Parameter sessionID: Идентификатор сессии.
     /// - Returns: Настройки модели.
-    func execute(sessionID: UUID) async throws -> LLMSettings
+    func execute() async throws -> LLMSettings
 }
 
 /// Очищает хранилище embeddings RAG.
@@ -118,12 +103,9 @@ protocol ResetRAGEmbeddingsUseCaseProtocol {
 
 /// Собирает агрегированную статистику по сессии.
 protocol CollectSessionMetricsUseCaseProtocol {
-    /// Возвращает snapshot метрик по выбранной ветке.
-    /// - Parameters:
-    ///   - sessionID: Идентификатор сессии.
-    ///   - branchID: Идентификатор ветки.
+    /// Возвращает snapshot метрик глобального диалога.
     /// - Returns: Снимок метрик сессии.
-    func execute(sessionID: UUID, branchID: UUID) async throws -> SessionInfoSnapshot
+    func execute() async throws -> SessionInfoSnapshot
 }
 
 /// Загружает API key из защищенного хранилища.

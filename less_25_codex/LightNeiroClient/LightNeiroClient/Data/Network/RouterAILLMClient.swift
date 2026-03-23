@@ -248,7 +248,7 @@ final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
     ) async throws -> QuestionnaireExtractionResult {
         let request = LLMRequest(
             systemPrompt: extractionSystemPrompt(schema: schema, state: currentState, settings: settings),
-            shortTermMessages: [ChatMessage(branchID: UUID(), role: .user, content: userText)],
+            shortTermMessages: [ChatMessage(role: .user, content: userText)],
             workingMemory: [],
             longTermMemory: [],
             settings: settings
@@ -474,7 +474,7 @@ final class LLMQuestionGenerationService: QuestionGenerationServiceProtocol {
             response = try await llmClient.send(
                 request: LLMRequest(
                     systemPrompt: questionSystemPrompt(field: targetField, context: context),
-                    shortTermMessages: [ChatMessage(branchID: UUID(), role: .user, content: context.latestUserMessage ?? "")],
+                    shortTermMessages: [ChatMessage(role: .user, content: context.latestUserMessage ?? "")],
                     workingMemory: [],
                     longTermMemory: [],
                     settings: context.settings

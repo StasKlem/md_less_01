@@ -9,8 +9,40 @@ final class FetchMessagesUseCase: FetchMessagesUseCaseProtocol {
     }
 
     /// Возвращает все сообщения указанной ветки.
-    func execute(branchID: UUID) async throws -> [ChatMessage] {
-        try await messageRepository.fetchMessages(branchID: branchID)
+    func execute() async throws -> [ChatMessage] {
+        try await messageRepository.fetchMessages()
+    }
+}
+
+final class ClearDialogUseCase: ClearDialogUseCaseProtocol {
+    private let messageRepository: MessageRepositoryProtocol
+    private let shortTermRepository: ShortTermMemoryRepositoryProtocol
+    private let workingMemoryRepository: WorkingMemoryRepositoryProtocol
+    private let longTermMemoryRepository: LongTermMemoryRepositoryProtocol
+    private let metricsRepository: MetricsRepositoryProtocol
+
+    /// Создаёт use case полной очистки диалога.
+    init(
+        messageRepository: MessageRepositoryProtocol,
+        shortTermRepository: ShortTermMemoryRepositoryProtocol,
+        workingMemoryRepository: WorkingMemoryRepositoryProtocol,
+        longTermMemoryRepository: LongTermMemoryRepositoryProtocol,
+        metricsRepository: MetricsRepositoryProtocol
+    ) {
+        self.messageRepository = messageRepository
+        self.shortTermRepository = shortTermRepository
+        self.workingMemoryRepository = workingMemoryRepository
+        self.longTermMemoryRepository = longTermMemoryRepository
+        self.metricsRepository = metricsRepository
+    }
+
+    /// Очищает сообщения, память и метрики глобального диалога.
+    func execute() async throws {
+        try await messageRepository.clearAll()
+        try await shortTermRepository.clear()
+        try await workingMemoryRepository.clearAll()
+        try await longTermMemoryRepository.clearAll()
+        try await metricsRepository.clearAll()
     }
 }
 
@@ -118,42 +150,34 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
     ///   - userText: текст сообщения пользователя.
     /// - Returns: сохраненное сообщение ассистента.
     func execute(
-        sessionID: UUID,
-        branchID: UUID,
         userText: String,
         assistantInstruction: String?
     ) async throws -> ChatMessage {
-        let userMessage = ChatMessage(branchID: branchID, role: .user, content: userText)
+        let userMessage = ChatMessage(role: .user, content: userText)
         try await messageRepository.saveMessage(userMessage)
 
-        let settings = try await settingsRepository.fetchSettings(sessionID: sessionID)
+        let settings = try await settingsRepository.fetchSettings()
         if settings.isMemoryEnabled {
             if let event = try await updateShortTermMemoryUseCase.execute(
-                sessionID: sessionID,
-                branchID: branchID,
                 windowSize: settings.windowSize
             ) {
-                try await memoryEventAppender.appendEvent(branchID: branchID, event: event)
+                try await memoryEventAppender.appendEvent(event: event)
             }
 
             let workingUserEvents = (try? await updateWorkingMemoryUseCase.execute(
-                sessionID: sessionID,
-                branchID: branchID,
                 latestUserMessage: userText,
                 latestAssistantMessage: nil
             )) ?? []
-            try await memoryEventAppender.appendEvents(branchID: branchID, events: workingUserEvents)
+            try await memoryEventAppender.appendEvents(events: workingUserEvents)
 
             let longTermEvents = (try? await updateLongTermMemoryUseCase.execute(
-                sessionID: sessionID,
-                branchID: branchID,
                 latestUserMessage: userText,
                 settings: settings
             )) ?? []
-            try await memoryEventAppender.appendEvents(branchID: branchID, events: longTermEvents)
+            try await memoryEventAppender.appendEvents(events: longTermEvents)
         }
 
-        let context = try await buildMemoryContextUseCase.execute(sessionID: sessionID, branchID: branchID, settings: settings)
+        let context = try await buildMemoryContextUseCase.execute(settings: settings)
         let ragDecision = await ragCoordinator.buildDecision(settings: settings, userText: userText)
         let systemPrompt = ragCoordinator.makeSystemPrompt(extraInstruction: assistantInstruction, ragDecision: ragDecision)
 
@@ -206,7 +230,6 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
         }
 
         let assistantMessage = ChatMessage(
-            branchID: branchID,
             role: .assistant,
             content: response.content,
             inputTokens: response.inputTokens,
@@ -217,26 +240,21 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
 
         if settings.isMemoryEnabled {
             if let event = try await updateShortTermMemoryUseCase.execute(
-                sessionID: sessionID,
-                branchID: branchID,
                 windowSize: settings.windowSize
             ) {
-                try await memoryEventAppender.appendEvent(branchID: branchID, event: event)
+                try await memoryEventAppender.appendEvent(event: event)
             }
 
             let workingAssistantEvents = (try? await updateWorkingMemoryUseCase.execute(
-                sessionID: sessionID,
-                branchID: branchID,
                 latestUserMessage: userText,
                 latestAssistantMessage: assistantMessage.content
             )) ?? []
-            try await memoryEventAppender.appendEvents(branchID: branchID, events: workingAssistantEvents)
+            try await memoryEventAppender.appendEvents(events: workingAssistantEvents)
         }
 
         let metric = RequestMetric(
             id: UUID(),
             messageID: assistantMessage.id,
-            branchID: branchID,
             startedAt: Date().addingTimeInterval(-Double(response.latencyMs) / 1000.0),
             endedAt: Date(),
             latencyMs: response.latencyMs,

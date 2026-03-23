@@ -1,8 +1,6 @@
 import Foundation
 
 struct ShortTermMemorySnapshot: Codable, Equatable {
-    let sessionID: UUID
-    let branchID: UUID
     let messages: [ChatMessage]
     let windowSize: Int
     let updatedAt: Date
@@ -16,8 +14,6 @@ enum WorkingMemoryStatus: String, Codable, Equatable {
 
 struct WorkingMemoryItem: Identifiable, Codable, Equatable {
     let id: UUID
-    let sessionID: UUID
-    let branchID: UUID
     let taskID: String
     let key: String
     let value: String
@@ -34,7 +30,6 @@ enum LongTermMemoryNamespace: String, Codable, CaseIterable, Equatable {
 
 struct LongTermMemoryItem: Identifiable, Codable, Equatable {
     let id: UUID
-    let sessionID: UUID
     let namespace: LongTermMemoryNamespace
     let key: String
     let value: String
@@ -64,7 +59,6 @@ extension LongTermMemoryItem {
     init(stickyFact: StickyFact) {
         self.init(
             id: stickyFact.id,
-            sessionID: stickyFact.sessionID,
             namespace: .knowledge,
             key: stickyFact.key,
             value: stickyFact.value,

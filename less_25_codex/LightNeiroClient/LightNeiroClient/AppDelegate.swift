@@ -57,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 session: environment.session,
                 sendMessageUseCase: environment.sendMessageUseCase,
                 fetchMessagesUseCase: environment.fetchMessagesUseCase,
+                clearDialogUseCase: environment.clearDialogUseCase,
                 startVacationPlanningUseCase: environment.startVacationPlanningUseCase,
                 handleVacationPlanningEventUseCase: environment.handleVacationPlanningEventUseCase,
                 getVacationPlanningStatusUseCase: environment.getVacationPlanningStatusUseCase,
@@ -74,7 +75,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 getHackerNewsTaskAgentStatusUseCase: environment.getHackerNewsTaskAgentStatusUseCase
             )
             let settingsViewModel = SettingsViewModel(
-                session: environment.session,
                 fetchSettingsUseCase: environment.fetchSettingsUseCase,
                 applySettingsUseCase: environment.applySettingsUseCase,
                 resetRAGEmbeddingsUseCase: environment.resetRAGEmbeddingsUseCase,
@@ -82,7 +82,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 saveAPIKeyUseCase: environment.saveAPIKeyUseCase
             )
             let sessionInfoViewModel = SessionInfoViewModel(
-                session: environment.session,
                 collectSessionMetricsUseCase: environment.collectSessionMetricsUseCase
             )
             let mainViewModel = MainViewModel(

@@ -63,6 +63,7 @@ final class ChatSidebarViewController: NSViewController {
     private let dialogHistoryViewController = DialogHistoryViewController(config: .default)
     private let inputTextView = ChatInputTextView()
     private let inputScrollView = NSScrollView()
+    private let clearDialogButton = NSButton(title: "Очистить", target: nil, action: nil)
     private let sendButton = NSButton(title: "Отправить", target: nil, action: nil)
     private let approvePlanButton = NSButton(title: "Approve", target: nil, action: nil)
     private let taskAgentsTitleLabel = NSTextField(labelWithString: "Task Agents")
@@ -95,6 +96,8 @@ final class ChatSidebarViewController: NSViewController {
     }
 
     private func setupUI() {
+        clearDialogButton.target = self
+        clearDialogButton.action = #selector(clearDialogTapped)
         sendButton.target = self
         sendButton.action = #selector(sendTapped)
         approvePlanButton.target = self
@@ -115,7 +118,7 @@ final class ChatSidebarViewController: NSViewController {
         controlsPanel.orientation = .vertical
         controlsPanel.spacing = 4
 
-        let inputRow = NSStackView(views: [inputScrollView, approvePlanButton, sendButton])
+        let inputRow = NSStackView(views: [inputScrollView, clearDialogButton, approvePlanButton, sendButton])
         inputRow.orientation = .horizontal
         inputRow.alignment = .bottom
         inputRow.spacing = 8
@@ -136,6 +139,7 @@ final class ChatSidebarViewController: NSViewController {
             root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            clearDialogButton.widthAnchor.constraint(equalToConstant: 88),
             approvePlanButton.widthAnchor.constraint(equalToConstant: 88),
             sendButton.widthAnchor.constraint(equalToConstant: 88),
             inputScrollView.heightAnchor.constraint(equalToConstant: inputHeightForThreeLines()),
@@ -219,6 +223,7 @@ final class ChatSidebarViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sending in
                 self?.sendButton.isEnabled = !sending
+                self?.clearDialogButton.isEnabled = !sending
                 self?.approvePlanButton.isEnabled = !sending && (self?.viewModel.canApprovePlan ?? false)
                 self?.updateTaskAgentLaunchButtons(isEnabled: !sending)
                 self?.updateControlButtonsAvailability(isEnabled: !sending)
@@ -258,6 +263,12 @@ final class ChatSidebarViewController: NSViewController {
         let text = inputTextView.string
         inputTextView.string = ""
         viewModel.send(text: text)
+    }
+
+    @objc
+    private func clearDialogTapped() {
+        inputTextView.string = ""
+        viewModel.clearDialog()
     }
 
     @objc

@@ -8,7 +8,6 @@ enum MessageRole: String, Codable {
 
 struct ChatMessage: Identifiable, Codable, Equatable {
     let id: UUID
-    let branchID: UUID
     let role: MessageRole
     let content: String
     let createdAt: Date
@@ -18,7 +17,6 @@ struct ChatMessage: Identifiable, Codable, Equatable {
 
     init(
         id: UUID = UUID(),
-        branchID: UUID,
         role: MessageRole,
         content: String,
         createdAt: Date = Date(),
@@ -27,7 +25,6 @@ struct ChatMessage: Identifiable, Codable, Equatable {
         latencyMs: Int = 0
     ) {
         self.id = id
-        self.branchID = branchID
         self.role = role
         self.content = content
         self.createdAt = createdAt
@@ -37,34 +34,18 @@ struct ChatMessage: Identifiable, Codable, Equatable {
     }
 }
 
-struct ChatCheckpoint: Identifiable, Codable, Equatable {
+struct StickyFact: Identifiable, Codable, Equatable {
     let id: UUID
-    let branchID: UUID
-    let messageID: UUID
-    let name: String
-    let createdAt: Date
+    let key: String
+    let value: String
+    let confidence: Double
+    let updatedAt: Date
 }
 
-struct ChatBranch: Identifiable, Codable, Equatable {
-    let id: UUID
-    let sessionID: UUID
-    let parentCheckpointID: UUID?
-    let name: String
-    let createdAt: Date
-}
-
+/// Контекст идентификаторов для legacy-модулей task-агентов.
 struct ChatSession: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
     var activeBranchID: UUID
     let createdAt: Date
-}
-
-struct StickyFact: Identifiable, Codable, Equatable {
-    let id: UUID
-    let sessionID: UUID
-    let key: String
-    let value: String
-    let confidence: Double
-    let updatedAt: Date
 }

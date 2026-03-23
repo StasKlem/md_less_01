@@ -25,10 +25,10 @@ final class RAGResponseDisplayFormatterTests: XCTestCase {
             """
             Готовый ответ по данным контекста.
 
-            /tmp/a.md — intro
+            источник : /tmp/a.md — intro
             Первая цитата
 
-            /tmp/b.md
+            источник : /tmp/b.md
             Вторая цитата
             """
         )

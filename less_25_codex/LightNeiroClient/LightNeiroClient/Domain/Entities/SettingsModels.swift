@@ -27,7 +27,7 @@ struct LLMSettings: Codable, Equatable {
         model: .seed20Mini,
         temperature: 0.4,
         windowSize: 3,
-        isRAGEnabled: false,
+        isRAGEnabled: true,
         ragChunkingStrategy: .structural,
         isRAGPostFilteringEnabled: true,
         ragTopKBeforeFiltering: 8,
@@ -114,7 +114,6 @@ struct LLMSettings: Codable, Equatable {
 struct RequestMetric: Identifiable, Codable, Equatable {
     let id: UUID
     let messageID: UUID
-    let branchID: UUID
     let startedAt: Date
     let endedAt: Date
     let latencyMs: Int

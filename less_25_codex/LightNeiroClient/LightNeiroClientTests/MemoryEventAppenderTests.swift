@@ -5,13 +5,12 @@ final class MemoryEventAppenderTests: XCTestCase {
     func testAppendEventsWritesSystemMessagesInOrder() async throws {
         let repository = MessageRepositorySpy()
         let appender = MemoryEventAppenderFactory.make(messageRepository: repository)
-        let branchID = UUID()
         let events = [
             MemoryWriteEvent(layer: .shortTerm, details: "сохранено: user: привет"),
             MemoryWriteEvent(layer: .working, details: "сохранено: task.goal=написать тест")
         ]
 
-        try await appender.appendEvents(branchID: branchID, events: events)
+        try await appender.appendEvents(events: events)
 
         let messages = await repository.savedMessages
         XCTAssertEqual(messages.count, 2)
@@ -24,10 +23,8 @@ final class MemoryEventAppenderTests: XCTestCase {
     func testAppendEventWritesSingleSystemMessage() async throws {
         let repository = MessageRepositorySpy()
         let appender = MemoryEventAppenderFactory.make(messageRepository: repository)
-        let branchID = UUID()
 
         try await appender.appendEvent(
-            branchID: branchID,
             event: MemoryWriteEvent(layer: .longTerm, details: "сохранено: knowledge.summary=факт")
         )
 
@@ -41,8 +38,8 @@ final class MemoryEventAppenderTests: XCTestCase {
 private actor MessageRepositorySpy: MessageRepositoryProtocol {
     private(set) var savedMessages: [ChatMessage] = []
 
-    func fetchMessages(branchID: UUID) async throws -> [ChatMessage] {
-        savedMessages.filter { $0.branchID == branchID }
+    func fetchMessages() async throws -> [ChatMessage] {
+        savedMessages
     }
 
     func saveMessage(_ message: ChatMessage) async throws {

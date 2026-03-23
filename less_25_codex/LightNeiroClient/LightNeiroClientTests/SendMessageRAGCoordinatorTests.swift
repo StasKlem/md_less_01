@@ -24,7 +24,8 @@ final class SendMessageRAGCoordinatorTests: XCTestCase {
 
         let decision = await coordinator.buildDecision(settings: settings, userText: "Запрос")
 
-        XCTAssertEqual(await ragSpy.lastSearchTopK, 7)
+        let topK = await ragSpy.lastSearchTopK
+        XCTAssertEqual(topK, 7)
         switch decision {
         case .answerWithEvidence(let retrieval):
             XCTAssertEqual(retrieval.count, 1)
@@ -51,7 +52,8 @@ final class SendMessageRAGCoordinatorTests: XCTestCase {
 
         _ = await coordinator.buildDecision(settings: settings, userText: "legacy")
 
-        XCTAssertEqual(await ragSpy.lastSearchTopK, 4)
+        let topK = await ragSpy.lastSearchTopK
+        XCTAssertEqual(topK, 4)
     }
 
     func testBuildDecisionReturnsNeedsClarificationWhenScoresBelowThreshold() async {
@@ -96,7 +98,8 @@ final class SendMessageRAGCoordinatorTests: XCTestCase {
         } else {
             XCTFail("Ожидалось решение disabledOrUnavailable")
         }
-        XCTAssertEqual(await ragSpy.searchCallCount, 0)
+        let searchCalls = await ragSpy.searchCallCount
+        XCTAssertEqual(searchCalls, 0)
     }
 
     private static func makeSearchResult(content: String, score: Float) -> SearchResult {
