@@ -1,6 +1,6 @@
 # LightNeiroClient
 
-- [Подробная цепочка обработки пользовательского сообщения](./LightNeiroClient/Doc/message_processing_pipeline.md)
+- [Подробная цепочка обработки пользовательского сообщения](./LightNeiroClient/LightNeiroClient/Doc/message_processing_pipeline.md)
 
 LightNeiroClient — macOS-приложение на Swift для диалогов с LLM. Интерфейс построен на AppKit, архитектура следует MVVM и Clean Architecture, UI собран полностью кодом без SwiftUI, Storyboards и XIB.
 
