@@ -4,6 +4,8 @@ import Foundation
 struct LLMRequest {
     /// Системный промпт для модели.
     let systemPrompt: String
+    /// Структурированная память задачи с целью, уточнениями и ограничениями.
+    let taskState: TaskStateMemory?
     /// Короткий контекст переписки.
     let shortTermMessages: [ChatMessage]
     /// Текущие элементы рабочей памяти.
@@ -12,6 +14,22 @@ struct LLMRequest {
     let longTermMemory: [LongTermMemoryItem]
     /// Настройки модели.
     let settings: LLMSettings
+
+    init(
+        systemPrompt: String,
+        shortTermMessages: [ChatMessage],
+        workingMemory: [WorkingMemoryItem],
+        longTermMemory: [LongTermMemoryItem],
+        settings: LLMSettings,
+        taskState: TaskStateMemory? = nil
+    ) {
+        self.systemPrompt = systemPrompt
+        self.taskState = taskState
+        self.shortTermMessages = shortTermMessages
+        self.workingMemory = workingMemory
+        self.longTermMemory = longTermMemory
+        self.settings = settings
+    }
 }
 
 /// Модель ответа от LLM-клиента.

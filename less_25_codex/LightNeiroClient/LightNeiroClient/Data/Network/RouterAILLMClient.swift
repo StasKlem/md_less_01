@@ -107,6 +107,10 @@ final class RouterAILLMClient: LLMClientProtocol {
             messages.append(.init(role: .system, content: systemPrompt))
         }
 
+        if let taskState = request.taskState, !taskState.isEmpty {
+            messages.append(.init(role: .system, content: formatTaskStateBlock(taskState)))
+        }
+
         if !request.workingMemory.isEmpty {
             let workingBlock = request.workingMemory
                 .map { "\($0.key): \($0.value)" }
@@ -127,6 +131,31 @@ final class RouterAILLMClient: LLMClientProtocol {
         })
 
         return messages
+    }
+
+    private func formatTaskStateBlock(_ taskState: TaskStateMemory) -> String {
+        var lines: [String] = ["TASK_STATE:"]
+
+        if let goal = taskState.goal, !goal.isEmpty {
+            lines.append("goal: \(goal)")
+        }
+
+        if !taskState.clarifiedFacts.isEmpty {
+            lines.append("clarified:")
+            lines.append(contentsOf: taskState.clarifiedFacts.map { "- \($0)" })
+        }
+
+        if !taskState.constraints.isEmpty {
+            lines.append("constraints:")
+            lines.append(contentsOf: taskState.constraints.map { "- \($0)" })
+        }
+
+        if !taskState.terms.isEmpty {
+            lines.append("terms:")
+            lines.append(contentsOf: taskState.terms.map { "- \($0)" })
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     private func parseAPIErrorMessage(from data: Data) -> String {

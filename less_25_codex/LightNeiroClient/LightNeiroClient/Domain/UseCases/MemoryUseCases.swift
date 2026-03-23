@@ -33,10 +33,12 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
         )
 
         let workingMemory = try await workingMemoryRepository.fetchActive()
+        let taskState = buildTaskState(from: workingMemory)
         let longTermMemory = try await prioritizedLongTermMemory()
 
         return MemoryContext(
             shortTermMessages: shortTermMessages,
+            taskState: taskState,
             workingMemory: workingMemory,
             longTermMemory: longTermMemory
         )
@@ -77,6 +79,55 @@ final class BuildMemoryContextUseCase: BuildMemoryContextUseCaseProtocol {
         }
 
         return Array(sorted.prefix(maxLongTermItems))
+    }
+
+    private func buildTaskState(from workingMemory: [WorkingMemoryItem]) -> TaskStateMemory? {
+        let activeItems = workingMemory.filter { $0.status == .active }
+        guard !activeItems.isEmpty else { return nil }
+
+        let grouped = Dictionary(grouping: activeItems, by: \.key)
+        let goal = grouped["task.goal"]?.sorted(by: { $0.updatedAt > $1.updatedAt }).first?.value
+        let clarifiedFacts = splitTaskSegments(grouped["task.clarified_facts"])
+        let constraints = splitTaskSegments(grouped["task.constraints"])
+        let terms = splitTaskSegments(grouped["task.terms"])
+        let updatedAt = activeItems.map(\.updatedAt).max() ?? Date()
+
+        let snapshot = TaskStateMemory(
+            goal: {
+                let normalizedGoal = normalizedMemoryValue(goal)
+                return normalizedGoal.isEmpty ? nil : normalizedGoal
+            }(),
+            clarifiedFacts: clarifiedFacts,
+            constraints: constraints,
+            terms: terms,
+            updatedAt: updatedAt
+        )
+
+        return snapshot.isEmpty ? nil : snapshot
+    }
+
+    private func splitTaskSegments(_ items: [WorkingMemoryItem]?) -> [String] {
+        guard let items, !items.isEmpty else { return [] }
+
+        let values = items
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .flatMap { $0.value.split(separator: "|", omittingEmptySubsequences: true).map(String.init) }
+        return deduplicatedTaskSegments(values)
+    }
+
+    private func deduplicatedTaskSegments(_ values: [String]) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+
+        for value in values {
+            let trimmed = normalizedMemoryValue(value)
+            guard !trimmed.isEmpty else { continue }
+            let normalizedKey = trimmed.lowercased()
+            guard seen.insert(normalizedKey).inserted else { continue }
+            result.append(trimmed)
+        }
+
+        return result
     }
 }
 
@@ -168,8 +219,16 @@ final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
             result.append(.init(key: "task.goal", value: userText, confidence: 0.75))
         }
 
-        if let value = extractValue(in: userText, prefixes: ["constraint:", "ограничение:"]) {
+        if let value = extractValue(in: userText, prefixes: ["constraint:", "constraints:", "ограничение:", "ограничения:"]) {
             result.append(.init(key: "task.constraints", value: value, confidence: 0.85))
+        }
+
+        if let value = extractValue(in: userText, prefixes: ["clarified:", "уточнено:", "already clarified:", "уже уточнено:"]) {
+            result.append(.init(key: "task.clarified_facts", value: value, confidence: 0.82))
+        }
+
+        if let value = extractValue(in: userText, prefixes: ["term:", "terms:", "термин:", "термины:"]) {
+            result.append(.init(key: "task.terms", value: value, confidence: 0.82))
         }
 
         if let value = extractValue(in: userText, prefixes: ["step:", "шаг:"]) {
@@ -195,20 +254,26 @@ final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
         let now = Date()
         let taskID = "global"
         var changedEntries: [String] = []
+        let accumulatingKeys: Set<String> = ["task.constraints", "task.clarified_facts", "task.terms"]
 
         for candidate in candidates {
             let trimmedValue = candidate.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedValue.isEmpty else { continue }
 
             let current = map[candidate.key]
-            if current?.value != trimmedValue || current?.status != .active {
-                changedEntries.append("\(candidate.key)=\(normalizeMemoryText(trimmedValue))")
+            let mergedValue = mergeMemoryValue(
+                currentValue: current?.value,
+                incomingValue: trimmedValue,
+                accumulate: accumulatingKeys.contains(candidate.key)
+            )
+            if current?.value != mergedValue || current?.status != .active {
+                changedEntries.append("\(candidate.key)=\(normalizeMemoryText(mergedValue))")
             }
             map[candidate.key] = WorkingMemoryItem(
                 id: current?.id ?? UUID(),
                 taskID: taskID,
                 key: candidate.key,
-                value: trimmedValue,
+                value: mergedValue,
                 status: .active,
                 confidence: candidate.confidence,
                 updatedAt: now
@@ -216,6 +281,22 @@ final class UpdateWorkingMemoryUseCase: UpdateWorkingMemoryUseCaseProtocol {
         }
 
         return (map.values.sorted { $0.key < $1.key }, Array(Set(changedEntries)))
+    }
+
+    private func mergeMemoryValue(currentValue: String?, incomingValue: String, accumulate: Bool) -> String {
+        let normalizedIncoming = normalizedMemoryValue(incomingValue)
+        guard accumulate else { return normalizedIncoming }
+
+        guard let currentValue else { return normalizedIncoming }
+        let existingSegments = currentValue
+            .split(separator: "|", omittingEmptySubsequences: true)
+            .map { normalizedMemoryValue(String($0)) }
+        guard !existingSegments.contains(where: { $0.caseInsensitiveCompare(normalizedIncoming) == .orderedSame }) else {
+            return existingSegments.joined(separator: " | ")
+        }
+
+        let combined = existingSegments + [normalizedIncoming]
+        return combined.joined(separator: " | ")
     }
 
     private func resolveKeys(from userText: String, assistantText: String) -> [String] {
@@ -426,4 +507,14 @@ private func normalizeMemoryText(_ text: String, maxLength: Int = 120) -> String
         .trimmingCharacters(in: .whitespacesAndNewlines)
     guard flattened.count > maxLength else { return flattened }
     return String(flattened.prefix(maxLength)) + "..."
+}
+
+private func normalizedMemoryValue(_ text: String?) -> String {
+    normalizedMemoryValue(text ?? "")
+}
+
+private func normalizedMemoryValue(_ text: String) -> String {
+    text
+        .replacingOccurrences(of: "\n", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }

@@ -14,6 +14,18 @@ actor InMemoryChatStore {
     var vacationPlans: [String: VacationPlan] = [:]
 
     private init() {}
+
+    func reset() {
+        messages = []
+        shortTermSnapshot = nil
+        workingMemory = []
+        longTermMemory = []
+        facts = []
+        settings = .default
+        metrics = []
+        vacationSnapshots = [:]
+        vacationPlans = [:]
+    }
 }
 
 struct MockMessageRepository: MessageRepositoryProtocol {

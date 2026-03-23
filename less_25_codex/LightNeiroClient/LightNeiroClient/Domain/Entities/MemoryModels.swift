@@ -6,6 +6,18 @@ struct ShortTermMemorySnapshot: Codable, Equatable {
     let updatedAt: Date
 }
 
+struct TaskStateMemory: Equatable {
+    let goal: String?
+    let clarifiedFacts: [String]
+    let constraints: [String]
+    let terms: [String]
+    let updatedAt: Date
+
+    var isEmpty: Bool {
+        goal == nil && clarifiedFacts.isEmpty && constraints.isEmpty && terms.isEmpty
+    }
+}
+
 enum WorkingMemoryStatus: String, Codable, Equatable {
     case active
     case resolved
@@ -40,8 +52,21 @@ struct LongTermMemoryItem: Identifiable, Codable, Equatable {
 
 struct MemoryContext: Equatable {
     let shortTermMessages: [ChatMessage]
+    let taskState: TaskStateMemory?
     let workingMemory: [WorkingMemoryItem]
     let longTermMemory: [LongTermMemoryItem]
+
+    init(
+        shortTermMessages: [ChatMessage],
+        taskState: TaskStateMemory? = nil,
+        workingMemory: [WorkingMemoryItem],
+        longTermMemory: [LongTermMemoryItem]
+    ) {
+        self.shortTermMessages = shortTermMessages
+        self.taskState = taskState
+        self.workingMemory = workingMemory
+        self.longTermMemory = longTermMemory
+    }
 }
 
 enum MemoryLayer: String, Equatable {

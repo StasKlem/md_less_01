@@ -196,7 +196,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                 shortTermMessages: context.shortTermMessages,
                 workingMemory: context.workingMemory,
                 longTermMemory: context.longTermMemory,
-                settings: settings
+                settings: settings,
+                taskState: context.taskState
             )
             let llmResponse = try await llmClient.send(request: request)
             let finalizedContent = ragPayloadCodec.finalizeRAGResponseContent(
@@ -223,7 +224,8 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                     shortTermMessages: context.shortTermMessages,
                     workingMemory: context.workingMemory,
                     longTermMemory: context.longTermMemory,
-                    settings: settings
+                    settings: settings,
+                    taskState: context.taskState
                 )
                 response = try await llmClient.send(request: request)
             }
