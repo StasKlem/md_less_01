@@ -1,73 +1,31 @@
 # LightNeiroClient
 
-LightNeiroClient — macOS-приложение на Swift (AppKit, MVVM, Clean Architecture) для диалогов с LLM, с поддержкой памяти, RAG-поиска по локальным документам и встроенных task-агентов.
+LightNeiroClient — macOS-приложение на Swift для диалогов с LLM. Интерфейс построен на AppKit, архитектура следует MVVM и Clean Architecture, UI собран полностью кодом без SwiftUI, Storyboards и XIB.
 
-## RAG и формат ответа (сначала главное)
-
-### Как работает RAG в runtime
-
-Когда `isRAGEnabled = true` и индекс готов, перед ответом LLM выполняется такой пайплайн:
-
-1. Retrieval кандидатов: `topK = ragTopKBeforeFiltering` (по умолчанию `8`).
-2. Пост-фильтрация по порогу: `score >= ragRelevanceThreshold` (по умолчанию `0.70`).
-3. Финальное ограничение: `ragTopKAfterFiltering` (по умолчанию `4`).
-4. Передача найденных фрагментов в блок `RAG_EVIDENCE` внутри system prompt.
-
-Если `isRAGPostFilteringEnabled = false`, используется legacy-ветка без порога (поиск сразу с `topK = 4`).
-
-### Контракт ответа от LLM в RAG-режиме
-
-В RAG-режиме модель должна вернуть **только валидный JSON** без markdown:
-
-```json
-{
-  "answer": "string",
-  "sources": [
-    { "source": "string", "section": "string|null", "chunk_id": "string" }
-  ],
-  "quotes": [
-    { "chunk_id": "string", "source": "string", "section": "string|null", "text": "string" }
-  ]
-}
-```
-
-Правила контракта:
-
-- `answer` не пустой.
-- `sources` и `quotes` для ответа по данным RAG должны быть непустыми.
-- Каждый `quotes[].chunk_id` обязан существовать в `sources[].chunk_id`.
-- Дополнительные поля не допускаются.
-
-Если модель вернула некорректный payload, приложение автоматически чинит ответ через `RAGPayloadCodec` (подставляет источники/цитаты из retrieval и формирует fallback answer).
-
-### Как ответ отображается в UI
-
-В чате JSON-пayload преобразуется в человекочитаемый вид:
-
-- первая часть: `answer`;
-- далее для каждой цитаты: строка источника (`источник : <path> — <section>`) и текст цитаты.
-
-Если ответ ассистента не JSON, он показывается как есть.
-
-## Ключевые возможности
+## Что умеет приложение
 
 - Чат с LLM через RouterAI-совместимый endpoint.
-- Session-scoped настройки модели и генерации (модель, temperature, window size и т.д.).
-- Поддержка памяти (short-term, working, long-term).
-- RAG-пайплайн с индексом в SQLite и fallback-поиском.
-- Пост-фильтрация RAG-чанков по порогу релевантности.
-- Task-агенты в UI: Vacation Planner, Mock Task Agent, Counter Task Agent, Hacker News Task Agent.
+- Настройки сессии: модель, параметры генерации, окно памяти, включение RAG.
+- Память диалога: short-term, working и long-term.
+- RAG по локальным документам с SQLite-хранилищем и fallback-поиском.
+- Task-агенты, управляемые командами в чате.
+- Экран настроек, панель сессии и основной split-view интерфейс.
 
-## Технологический стек
+## Архитектура
 
-- Swift 5
-- AppKit (без SwiftUI)
-- MVVM + Clean Architecture
-- SQLite (`rag.sqlite`) + `sqlite-vss` (если доступен)
-- Keychain для API-ключа
-- MCP-клиент для discovery/call внешних инструментов
+- `LightNeiroClient/Domain` — сущности, протоколы и use case'ы.
+- `LightNeiroClient/Data` — реализации репозиториев, сетевые клиенты, хранилища и RAG-адаптеры.
+- `LightNeiroClient/Presentation` — AppKit UI и ViewModel.
+- `LightNeiroClient/App` — bootstrap и сборка окружения приложения.
 
-## Системные требования
+Принципы проекта:
+
+- зависимости направлены внутрь;
+- бизнес-логика живет в domain/use case слоях;
+- внешние системы подключаются через абстракции;
+- код UI и логика разделены.
+
+## Требования
 
 - macOS 13.0+
 - Xcode с поддержкой Swift 5
@@ -88,37 +46,41 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 
 ## Настройка LLM
 
-Клиент использует `RouterAIConfiguration` по умолчанию:
+По умолчанию используется конфигурация RouterAI:
 
-- Endpoint: `https://routerai.ru/api/v1/chat/completions`
-- Таймаут: `120` секунд
-- API-ключ: из Keychain (через экран настроек) или из переменной окружения `ROUTERAI_API_KEY`
+- endpoint: `https://routerai.ru/api/v1/chat/completions`
+- timeout: `120` секунд
+- API key: из Keychain через экран настроек или из переменной окружения `ROUTERAI_API_KEY`
 
-При сохранении ключа в приложении используется Keychain service `StasKlem.LightNeiroClient`.
+При сохранении ключа используется Keychain service `StasKlem.LightNeiroClient`.
 
 ## RAG
 
-### Документы для индексации
+### Источники для индексации
 
-По умолчанию RAG индексирует:
+По умолчанию индексируются:
 
-- `LightNeiroClient/LightNeiroClient/Doc/ai.md`
-- `LightNeiroClient/LightNeiroClient/Doc/habr.md`
+- `LightNeiroClient/Doc/ai.md`
+- `LightNeiroClient/Doc/habr.md`
 
-Список задаётся в `RAGModuleFactory.defaultDocumentRelativePaths`.
+Список задается в `LightNeiroClient/Data/RAG/RAGModuleFactory.swift`.
 
-### Пайплайн поиска
+### Пайплайн
 
-Если RAG включен и индекс готов:
+Если RAG включен и индекс готов, приложение:
 
-1. Поиск кандидатов в vector store (`topK = ragTopKBeforeFiltering`, по умолчанию `8`).
-2. Пороговая фильтрация (`score >= ragRelevanceThreshold`, по умолчанию `0.70`).
-3. Ограничение итогового набора (`ragTopKAfterFiltering`, по умолчанию `4`).
-4. Передача финальных чанков в системный контекст запроса.
+1. Ищет кандидатов в vector store.
+2. При включенной пост-фильтрации отбрасывает чанки ниже порога релевантности.
+3. Ограничивает финальный набор по `ragTopKAfterFiltering`.
+4. Передает контекст в system prompt через блок `RAG_EVIDENCE`.
 
-Если пост-фильтрация отключена, используется legacy-режим без порога (поиск сразу с ограничением `topK = 4`).
+Если пост-фильтрация выключена, используется legacy-режим с прямым поиском по `topK = 4`.
 
-### Параметры RAG по умолчанию
+### Контракт ответа
+
+В RAG-режиме LLM должна вернуть только валидный JSON без markdown. Если payload некорректный, приложение пытается восстановить ответ через `RAGPayloadCodec`.
+
+### Значения по умолчанию
 
 - `embeddingDimension = 1024`
 - `batchSize = 150`
@@ -127,11 +89,12 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - `isRAGEnabled = false`
 - `isRAGPostFilteringEnabled = true`
 
-### Где хранится индекс
+### Хранилище
 
-- `~/Library/Application Support/LightNeiroClient/rag.sqlite`
+- база индекса: `~/Library/Application Support/LightNeiroClient/rag.sqlite`
+- `sqlite-vss` используется, если расширение доступно; иначе работает fallback-поиск
 
-### Логи RAG
+### Логи
 
 Основные категории логов:
 
@@ -139,33 +102,33 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - `app.bootstrap.rag`
 - `rag.vectorstore`
 
-## Команды task-агентов в чате
+## Task-агенты
 
 ### Vacation Planner
 
-- Запуск: `/vacation start` или `/vacation`
-- Остановка: `/vacation stop`
+- запуск: `/vacation start` или `/vacation`
+- остановка: `/vacation stop`
 
 ### Mock Task Agent
 
-- Запуск: `/task start` или `/task`
-- Остановка: `/task stop`
+- запуск: `/task start` или `/task`
+- остановка: `/task stop`
 
 ### Counter Task Agent
 
-- Запуск: `/counter start` или `/counter`
-- Запуск с интервалом: `/counter start <сек>`
-- Смена интервала: `/counter interval <сек>`
-- Остановка: `/counter stop`
+- запуск: `/counter start` или `/counter`
+- запуск с интервалом: `/counter start <сек>`
+- изменение интервала: `/counter interval <сек>`
+- остановка: `/counter stop`
 
 ### Hacker News Task Agent
 
-- Запуск: `/hn start` или `/hn`
-- Остановка: `/hn stop`
+- запуск: `/hn start` или `/hn`
+- остановка: `/hn stop`
 
 ## MCP-интеграции
 
-Для stdio-режима используются endpoint'ы вида `stdio://...` и автообнаружение локальных MCP-пакетов.
+Для stdio-режима используются alias'ы вида `stdio://...` и автообнаружение локальных MCP-пакетов.
 
 Поддерживаемые alias:
 
@@ -183,14 +146,15 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 
 ## Структура проекта
 
-- `LightNeiroClient/Domain` — сущности, протоколы, use cases
-- `LightNeiroClient/Data` — адаптеры (network, storage, rag, security)
+- `LightNeiroClient/App` — bootstrap и composition root
+- `LightNeiroClient/Domain` — доменные модели, протоколы и use case'ы
+- `LightNeiroClient/Data` — network/storage/rag/security адаптеры
 - `LightNeiroClient/Presentation` — AppKit UI и ViewModel
-- `LightNeiroClient/App` — bootstrap и сборка окружения
-- `LightNeiroClientTests` — unit-тесты по use cases, RAG и форматированию
+- `LightNeiroClient/Doc` — локальные документы для RAG и сопроводительные материалы
+- `LightNeiroClientTests` — unit-тесты для use case'ов, RAG и ViewModel
 
 ## Полезные документы
 
-- [RAG-документ: ai.md](./LightNeiroClient/Doc/ai.md)
-- [Доп. материал: habr.md](./LightNeiroClient/Doc/habr.md)
-- [System design guide](./LightNeiroClient/Doc/mobile_system_design_guide.md)
+- [ai.md](./LightNeiroClient/Doc/ai.md)
+- [habr.md](./LightNeiroClient/Doc/habr.md)
+- [mobile_system_design_guide.md](./LightNeiroClient/Doc/mobile_system_design_guide.md)
