@@ -5,6 +5,7 @@ final class SettingsViewController: NSViewController {
     private let viewModel: SettingsViewModel
     private var cancellables = Set<AnyCancellable>()
 
+    private let backendPopup = NSPopUpButton()
     private let modelPopup = NSPopUpButton()
     private let temperatureSlider = NSSlider(value: 0.4, minValue: 0, maxValue: 1.2, target: nil, action: nil)
     private let temperatureLabel = NSTextField(labelWithString: "Temperature: 0.40")
@@ -49,9 +50,12 @@ final class SettingsViewController: NSViewController {
     }
 
     private func setupUI() {
+        backendPopup.addItems(withTitles: LLMBackendKind.allCases.map { $0.title })
         modelPopup.addItems(withTitles: LLMModel.allCases.map { $0.rawValue })
         ragChunkingStrategyPopup.addItems(withTitles: ChunkingStrategyType.allCases.map { $0.rawValue })
 
+        backendPopup.target = self
+        backendPopup.action = #selector(backendChanged)
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged)
         temperatureSlider.target = self
@@ -88,6 +92,7 @@ final class SettingsViewController: NSViewController {
         clearEmbeddingsStatusLabel.maximumNumberOfLines = 2
 
         let stack = NSStackView(views: [
+            makeRow(label: "LLM backend", control: backendPopup),
             makeRow(label: "Model", control: modelPopup),
             temperatureLabel,
             temperatureSlider,
@@ -127,6 +132,7 @@ final class SettingsViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] settings in
                 guard let self else { return }
+                self.backendPopup.selectItem(withTitle: settings.backend.title)
                 self.modelPopup.selectItem(withTitle: settings.model.rawValue)
                 self.temperatureSlider.doubleValue = settings.temperature
                 self.windowSlider.doubleValue = Double(settings.windowSize)
@@ -177,6 +183,13 @@ final class SettingsViewController: NSViewController {
         row.distribution = .fillProportionally
         row.spacing = 8
         return row
+    }
+
+    @objc
+    private func backendChanged() {
+        guard let title = backendPopup.selectedItem?.title,
+              let backend = LLMBackendKind.allCases.first(where: { $0.title == title }) else { return }
+        viewModel.updateBackend(backend)
     }
 
     @objc

@@ -48,16 +48,23 @@ struct AppEnvironment {
         let counterTaskAgentStateRepository = FileCounterTaskAgentStateRepository()
         let hackerNewsTaskAgentStateRepository = FileHackerNewsTaskAgentStateRepository()
         let apiKeyStore = KeychainAPIKeyStore()
+        let llmConfigurationProvider: @Sendable () async -> RouterAIConfiguration = {
+            let settings = (try? await settingsRepository.fetchSettings()) ?? .default
+            let apiKey = try? apiKeyStore.fetchAPIKey()
+            return Self.llmConfiguration(for: settings, apiKey: apiKey)
+        }
         let mcpToolDiscoveryService = MCPToolDiscoveryService(
             hackerNewsTranslateEnvironmentProvider: { _ in
                 let settings = (try? await settingsRepository.fetchSettings()) ?? .default
+                let configuration = await llmConfigurationProvider()
                 var environmentOverrides: [String: String] = [
                     "HACKERNEWS_TRANSLATE_OPENAI_MODEL": settings.model.rawValue,
                     "HACKERNEWS_TRANSLATE_OPENAI_BASE_URL": Self.routerAICompatibleBaseURL(
-                        endpoint: RouterAIConfiguration.default.endpoint
+                        endpoint: configuration.endpoint
                     )
                 ]
-                if let apiKey = try? apiKeyStore.fetchAPIKey() {
+                if Self.requiresAPIKey(for: configuration.endpoint),
+                   let apiKey = try? apiKeyStore.fetchAPIKey() {
                     let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
                         environmentOverrides["HACKERNEWS_TRANSLATE_OPENAI_API_KEY"] = trimmed
@@ -69,13 +76,11 @@ struct AppEnvironment {
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let llmClient = RouterAILLMClient(
-            configuration: RouterAIConfiguration(
-                endpoint: RouterAIConfiguration.default.endpoint,
-                timeoutInterval: RouterAIConfiguration.default.timeoutInterval,
-                apiKeyProvider: {
-                    try? apiKeyStore.fetchAPIKey()
-                }
-            )
+            configurationProvider: {
+                let settings = (try? await settingsRepository.fetchSettings()) ?? .default
+                let apiKey = try? apiKeyStore.fetchAPIKey()
+                return Self.llmConfiguration(for: settings, apiKey: apiKey)
+            }
         )
 
         let buildMemoryContext = BuildMemoryContextUseCase(
@@ -106,13 +111,11 @@ struct AppEnvironment {
                 normalizeEmbeddings: true
             ),
             embeddingProvider: AppLLMEmbeddingProvider(
-                configuration: RouterAIConfiguration(
-                    endpoint: RouterAIConfiguration.default.endpoint,
-                    timeoutInterval: RouterAIConfiguration.default.timeoutInterval,
-                    apiKeyProvider: {
-                        try? apiKeyStore.fetchAPIKey()
-                    }
-                )
+                configurationProvider: {
+                    let settings = (try? await settingsRepository.fetchSettings()) ?? .default
+                    let apiKey = try? apiKeyStore.fetchAPIKey()
+                    return Self.llmConfiguration(for: settings, apiKey: apiKey)
+                }
             )
         )
         let fetchMessages = FetchMessagesUseCase(messageRepository: messageRepository)
@@ -260,6 +263,23 @@ struct AppEnvironment {
             components?.path = trimmedPath.isEmpty ? "/" : trimmedPath
         }
         return components?.url?.absoluteString ?? "https://api.openai.com/v1"
+    }
+
+    private static func llmConfiguration(for settings: LLMSettings, apiKey: String?) -> RouterAIConfiguration {
+        RouterAIConfiguration(
+            endpoint: settings.backend.endpoint,
+            timeoutInterval: RouterAIConfiguration.default.timeoutInterval,
+            apiKeyProvider: {
+                apiKey
+            }
+        )
+    }
+
+    private static func requiresAPIKey(for endpoint: URL) -> Bool {
+        guard let host = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)?.host?.lowercased() else {
+            return true
+        }
+        return host != "localhost" && host != "127.0.0.1" && host != "::1"
     }
 
     private static func defaultRAGDocumentURLs() -> [URL] {

@@ -6,7 +6,7 @@ protocol HTTPClientProtocol {
 
 extension URLSession: HTTPClientProtocol {}
 
-struct RouterAIConfiguration {
+struct RouterAIConfiguration: Sendable {
     let endpoint: URL
     let timeoutInterval: TimeInterval
     let apiKeyProvider: @Sendable () -> String?
@@ -27,7 +27,7 @@ enum RouterAILLMClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "Missing ROUTERAI_API_KEY environment variable."
+            return "Missing API key for the selected LLM backend."
         case .invalidHTTPResponse:
             return "Invalid HTTP response."
         case let .api(statusCode, message):
@@ -40,7 +40,7 @@ enum RouterAILLMClientError: LocalizedError {
 
 final class RouterAILLMClient: LLMClientProtocol {
     private let httpClient: HTTPClientProtocol
-    private let configuration: RouterAIConfiguration
+    private let configurationProvider: @Sendable () async -> RouterAIConfiguration
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
@@ -49,12 +49,21 @@ final class RouterAILLMClient: LLMClientProtocol {
         configuration: RouterAIConfiguration = .default
     ) {
         self.httpClient = httpClient
-        self.configuration = configuration
+        self.configurationProvider = { configuration }
+    }
+
+    init(
+        httpClient: HTTPClientProtocol = URLSession.shared,
+        configurationProvider: @escaping @Sendable () async -> RouterAIConfiguration
+    ) {
+        self.httpClient = httpClient
+        self.configurationProvider = configurationProvider
     }
 
     func send(request: LLMRequest) async throws -> LLMResponse {
-        guard let apiKey = configuration.apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !apiKey.isEmpty else {
+        let configuration = await configurationProvider()
+        let apiKey = effectiveAPIKey(for: configuration)
+        if requiresAPIKey(for: configuration.endpoint), apiKey == nil {
             throw RouterAILLMClientError.missingAPIKey
         }
 
@@ -63,7 +72,9 @@ final class RouterAILLMClient: LLMClientProtocol {
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = configuration.timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if let apiKey {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
 
         let apiMessages = toAPIMessages(from: request)
         let payload = RouterAIChatCompletionRequest(
@@ -97,6 +108,20 @@ final class RouterAILLMClient: LLMClientProtocol {
             outputTokens: outputTokens,
             latencyMs: latencyMs
         )
+    }
+
+    private func effectiveAPIKey(for configuration: RouterAIConfiguration) -> String? {
+        guard requiresAPIKey(for: configuration.endpoint) else {
+            return nil
+        }
+        return configuration.apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func requiresAPIKey(for endpoint: URL) -> Bool {
+        guard let host = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)?.host?.lowercased() else {
+            return true
+        }
+        return host != "localhost" && host != "127.0.0.1" && host != "::1"
     }
 
     private func toAPIMessages(from request: LLMRequest) -> [RouterAIMessagePayload] {

@@ -2,7 +2,7 @@ import Foundation
 
 struct AppLLMEmbeddingProvider: EmbeddingProvider {
     private let httpClient: HTTPClientProtocol
-    private let configuration: RouterAIConfiguration
+    private let configurationProvider: @Sendable () async -> RouterAIConfiguration
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
@@ -11,16 +11,26 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
         configuration: RouterAIConfiguration = .default
     ) {
         self.httpClient = httpClient
-        self.configuration = configuration
+        self.configurationProvider = { configuration }
+    }
+
+    init(
+        httpClient: HTTPClientProtocol = URLSession.shared,
+        configurationProvider: @escaping @Sendable () async -> RouterAIConfiguration
+    ) {
+        self.httpClient = httpClient
+        self.configurationProvider = configurationProvider
     }
 
     func embed(texts: [String], settings: RAGSettings) async throws -> [[Float]] {
         guard !texts.isEmpty else { return [] }
-        guard let apiKey = configuration.apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+
+        let configuration = await configurationProvider()
+        let endpoint = try embeddingEndpoint(from: configuration.endpoint)
+        let apiKey = effectiveAPIKey(for: configuration)
+        if requiresAPIKey(for: configuration.endpoint), apiKey == nil {
             throw RAGError.embeddingProviderUnavailable("Missing API key for app embedding provider")
         }
-
-        let endpoint = try embeddingEndpoint(from: configuration.endpoint)
         let batchSize = max(1, settings.batchSize)
         AppLogger.shared.info(
             "Старт запроса эмбеддингов: endpoint=\(endpoint.absoluteString), model=\(settings.embeddingModel), texts=\(texts.count), batchSize=\(batchSize), normalize=\(settings.normalizeEmbeddings)",
@@ -36,7 +46,13 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
                 "Отправка батча на эмбеддинг: range=\(batchStart)..<\(batchEnd), total=\(texts.count)",
                 category: "rag.embedding"
             )
-            let request = try makeRequest(endpoint: endpoint, apiKey: apiKey, model: settings.embeddingModel, input: batchTexts)
+            let request = try makeRequest(
+                endpoint: endpoint,
+                timeoutInterval: configuration.timeoutInterval,
+                apiKey: apiKey,
+                model: settings.embeddingModel,
+                input: batchTexts
+            )
             let (data, response) = try await httpClient.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw RouterAILLMClientError.invalidHTTPResponse
@@ -89,12 +105,20 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
         )
     }
 
-    private func makeRequest(endpoint: URL, apiKey: String, model: String, input: [String]) throws -> URLRequest {
+    private func makeRequest(
+        endpoint: URL,
+        timeoutInterval: TimeInterval,
+        apiKey: String?,
+        model: String,
+        input: [String]
+    ) throws -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = configuration.timeoutInterval
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if let apiKey {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try encoder.encode(
             EmbeddingRequest(
                 model: model,
@@ -103,6 +127,20 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
             )
         )
         return request
+    }
+
+    private func effectiveAPIKey(for configuration: RouterAIConfiguration) -> String? {
+        guard requiresAPIKey(for: configuration.endpoint) else {
+            return nil
+        }
+        return configuration.apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func requiresAPIKey(for endpoint: URL) -> Bool {
+        guard let host = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)?.host?.lowercased() else {
+            return true
+        }
+        return host != "localhost" && host != "127.0.0.1" && host != "::1"
     }
 
     private func normalize(vector: [Float]) -> [Float] {

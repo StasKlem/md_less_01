@@ -48,11 +48,16 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 
 ## Настройка LLM
 
-По умолчанию используется конфигурация RouterAI:
+В экране настроек можно выбрать backend:
 
-- endpoint: `https://routerai.ru/api/v1/chat/completions`
-- timeout: `120` секунд
-- API key: из Keychain через экран настроек или из переменной окружения `ROUTERAI_API_KEY`
+- `RouterAI`
+- `localhost`
+
+Для `RouterAI` используется endpoint `https://routerai.ru/api/v1/chat/completions`, а API key берется из Keychain через экран настроек или из переменной окружения `ROUTERAI_API_KEY`.
+
+Для `localhost` используется endpoint `http://localhost:1234/v1/chat/completions`, API key не требуется.
+
+Таймаут запроса по умолчанию: `120` секунд.
 
 При сохранении ключа используется Keychain service `StasKlem.LightNeiroClient`.
 

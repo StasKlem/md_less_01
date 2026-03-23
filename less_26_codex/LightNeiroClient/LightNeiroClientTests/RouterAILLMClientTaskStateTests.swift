@@ -57,6 +57,31 @@ final class RouterAILLMClientTaskStateTests: XCTestCase {
         XCTAssertTrue(systemContents.contains(where: { $0.contains("источник = документ") }))
     }
 
+    func testLocalhostBackendDoesNotRequireAPIKey() async throws {
+        let httpClient = TaskStateCapturingHTTPClient(responseData: makeResponseData())
+        let client = RouterAILLMClient(
+            httpClient: httpClient,
+            configuration: RouterAIConfiguration(
+                endpoint: URL(string: "http://localhost:1234/v1/chat/completions")!,
+                timeoutInterval: 30,
+                apiKeyProvider: { nil }
+            )
+        )
+
+        _ = try await client.send(
+            request: LLMRequest(
+                systemPrompt: "",
+                shortTermMessages: [ChatMessage(role: .user, content: "ping")],
+                workingMemory: [],
+                longTermMemory: [],
+                settings: .default
+            )
+        )
+
+        let authorizationHeader = httpClient.lastRequest?.value(forHTTPHeaderField: "Authorization")
+        XCTAssertNil(authorizationHeader)
+    }
+
     private func makeResponseData() -> Data {
         let assistantContent = #"{"answer":"ok","sources":[{"source":"/tmp/doc.md","section":"intro","chunk_id":"1"}],"quotes":[{"chunk_id":"1","source":"/tmp/doc.md","section":"intro","text":"цитата"}]}"#
         let payload: [String: Any] = [

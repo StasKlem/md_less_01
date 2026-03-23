@@ -372,6 +372,7 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
                 workingMemory: [],
                 longTermMemory: [],
                 settings: LLMSettings(
+                    backend: settings.backend,
                     model: settings.model,
                     temperature: 0.0,
                     windowSize: 1,

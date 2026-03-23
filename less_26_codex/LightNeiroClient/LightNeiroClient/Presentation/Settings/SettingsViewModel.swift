@@ -11,7 +11,7 @@ final class SettingsViewModel {
 
     var onSettingsChanged: ((LLMSettings) -> Void)?
 
-        private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
+    private let fetchSettingsUseCase: FetchSettingsUseCaseProtocol
     private let applySettingsUseCase: ApplySettingsUseCaseProtocol
     private let resetRAGEmbeddingsUseCase: ResetRAGEmbeddingsUseCaseProtocol
     private let loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol
@@ -24,7 +24,7 @@ final class SettingsViewModel {
         loadAPIKeyUseCase: LoadAPIKeyUseCaseProtocol,
         saveAPIKeyUseCase: SaveAPIKeyUseCaseProtocol
     ) {
-                self.fetchSettingsUseCase = fetchSettingsUseCase
+        self.fetchSettingsUseCase = fetchSettingsUseCase
         self.applySettingsUseCase = applySettingsUseCase
         self.resetRAGEmbeddingsUseCase = resetRAGEmbeddingsUseCase
         self.loadAPIKeyUseCase = loadAPIKeyUseCase
@@ -36,6 +36,11 @@ final class SettingsViewModel {
 
     func updateModel(_ model: LLMModel) {
         settings.model = model
+        persist()
+    }
+
+    func updateBackend(_ backend: LLMBackendKind) {
+        settings.backend = backend
         persist()
     }
 

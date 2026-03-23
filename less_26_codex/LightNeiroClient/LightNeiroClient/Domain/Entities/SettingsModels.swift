@@ -1,15 +1,43 @@
 import Foundation
 
+/// Поддерживаемые LLM-бэкенды.
+enum LLMBackendKind: String, CaseIterable, Codable {
+    case routerAI
+    case localhost
+
+    /// Человекочитаемое название для UI.
+    var title: String {
+        switch self {
+        case .routerAI:
+            return "RouterAI"
+        case .localhost:
+            return "localhost"
+        }
+    }
+
+    /// Совместимый с OpenAI endpoint для чата.
+    var endpoint: URL {
+        switch self {
+        case .routerAI:
+            return URL(string: "https://routerai.ru/api/v1/chat/completions")!
+        case .localhost:
+            return URL(string: "http://localhost:1234/v1/chat/completions")!
+        }
+    }
+}
+
 /// Список поддерживаемых LLM-моделей.
 enum LLMModel: String, CaseIterable, Codable {
     case seed20Mini = "bytedance-seed/seed-2.0-mini"
     case deepseekV32 = "deepseek/deepseek-v3.2"
+    case gemma34B = "google/gemma-3-4b"
     case gpt4oMini = "gpt-4o-mini"
     case gpt4o = "gpt-4o"
 }
 
 /// Пользовательские настройки LLM на уровне сессии.
 struct LLMSettings: Codable, Equatable {
+    var backend: LLMBackendKind
     var model: LLMModel
     var temperature: Double
     var windowSize: Int
@@ -24,6 +52,7 @@ struct LLMSettings: Codable, Equatable {
 
     /// Значения настроек по умолчанию для новой сессии.
     static let `default` = LLMSettings(
+        backend: .routerAI,
         model: .seed20Mini,
         temperature: 0.4,
         windowSize: 3,
@@ -45,6 +74,7 @@ struct LLMSettings: Codable, Equatable {
     )
 
     private enum CodingKeys: String, CodingKey {
+        case backend
         case model
         case temperature
         case windowSize
@@ -59,6 +89,7 @@ struct LLMSettings: Codable, Equatable {
     }
 
     init(
+        backend: LLMBackendKind,
         model: LLMModel,
         temperature: Double,
         windowSize: Int,
@@ -71,6 +102,7 @@ struct LLMSettings: Codable, Equatable {
         isMemoryEnabled: Bool = true,
         plannerInvariants: [String]
     ) {
+        self.backend = backend
         self.model = model
         self.temperature = temperature
         self.windowSize = windowSize
@@ -86,6 +118,12 @@ struct LLMSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let decodedBackend = try? container.decode(LLMBackendKind.self, forKey: .backend) {
+            backend = decodedBackend
+        } else {
+            let rawBackend = try container.decodeIfPresent(String.self, forKey: .backend)
+            backend = rawBackend.flatMap(LLMBackendKind.init(rawValue:)) ?? Self.default.backend
+        }
         if let decodedModel = try? container.decode(LLMModel.self, forKey: .model) {
             model = decodedModel
         } else {

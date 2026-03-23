@@ -5,6 +5,7 @@ final class SettingsModelsTests: XCTestCase {
     func testLLMSettingsDecodingFallsBackToDefaultModelForUnknownStoredModel() throws {
         let payload = """
         {
+          "backend": "unknown-backend",
           "model": "mistralai/mistral-embed-2312",
           "temperature": 0.5,
           "windowSize": 6,
@@ -16,6 +17,7 @@ final class SettingsModelsTests: XCTestCase {
 
         let settings = try JSONDecoder().decode(LLMSettings.self, from: Data(payload.utf8))
 
+        XCTAssertEqual(settings.backend, LLMSettings.default.backend)
         XCTAssertEqual(settings.model, LLMSettings.default.model)
         XCTAssertEqual(settings.temperature, 0.5)
         XCTAssertEqual(settings.windowSize, 6)
@@ -27,6 +29,15 @@ final class SettingsModelsTests: XCTestCase {
         XCTAssertEqual(settings.ragRelevanceThreshold, LLMSettings.default.ragRelevanceThreshold, accuracy: 0.0001)
         XCTAssertFalse(settings.isMemoryEnabled)
         XCTAssertEqual(settings.plannerInvariants, ["rule-1"])
+    }
+
+    func testLLMSettingsDefaultUsesRouterAIBackend() {
+        XCTAssertEqual(LLMSettings.default.backend, .routerAI)
+    }
+
+    func testLLMModelAllCasesIncludesGemmaModel() {
+        XCTAssertTrue(LLMModel.allCases.contains(.gemma34B))
+        XCTAssertEqual(LLMModel.gemma34B.rawValue, "google/gemma-3-4b")
     }
 
     func testRAGSettingsDefaultUsesBGEEmbeddingModel() {
