@@ -7,11 +7,15 @@ LightNeiroClient — macOS-приложение на Swift для диалого
 ## Что умеет приложение
 
 - Чат с LLM через RouterAI-совместимый endpoint.
-- Настройки сессии: модель, параметры генерации, окно памяти, включение RAG.
+- Настройки сессии: backend, модель, temperature, window size, включение памяти и RAG.
+- Настройки RAG: chunking strategy, post-filtering, top-K до и после фильтрации, порог релевантности.
+- Редактирование инвариантов планировщика поездки прямо из UI.
+- Очистка embeddings-базы из экрана настроек.
 - Память диалога: short-term, working и long-term.
 - RAG по локальным документам с SQLite-хранилищем и fallback-поиском.
-- Task-агенты, управляемые командами в чате.
-- Экран настроек, панель сессии и основной split-view интерфейс.
+- Сценарий Vacation Planner с анкетой, согласованием плана и поддержкой MCP-интеграции для погоды.
+- Встроенные task-агенты, управляемые командами в чате.
+- Экран настроек, панель session info и основной split-view интерфейс.
 
 ## Архитектура
 
@@ -19,6 +23,7 @@ LightNeiroClient — macOS-приложение на Swift для диалого
 - `LightNeiroClient/Data` — реализации репозиториев, сетевые клиенты, хранилища и RAG-адаптеры.
 - `LightNeiroClient/Presentation` — AppKit UI и ViewModel.
 - `LightNeiroClient/App` — bootstrap и сборка окружения приложения.
+- Основной интерфейс разделен на левую чат-область и правую панель с настройками, инвариантами и session info.
 
 Принципы проекта:
 
@@ -61,6 +66,29 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 
 При сохранении ключа используется Keychain service `StasKlem.LightNeiroClient`.
 
+### Дефолты сессии
+
+- `backend = RouterAI`
+- `model = bytedance-seed/seed-2.0-mini`
+- `temperature = 0.4`
+- `windowSize = 3`
+- `isRAGEnabled = true`
+- `ragChunkingStrategy = structural`
+- `isRAGPostFilteringEnabled = true`
+- `ragTopKBeforeFiltering = 8`
+- `ragTopKAfterFiltering = 4`
+- `ragRelevanceThreshold = 0.70`
+- `isMemoryEnabled = true`
+
+### Доступные модели
+
+- `bytedance-seed/seed-2.0-mini`
+- `deepseek/deepseek-v3.2`
+- `openai/gpt-5.4-nano`
+- `google/gemma-3-4b`
+- `gpt-4o-mini`
+- `gpt-4o`
+
 ## RAG
 
 ### Источники для индексации
@@ -71,6 +99,7 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - `LightNeiroClient/Doc/habr.md`
 
 Список задается в `LightNeiroClient/Data/RAG/RAGModuleFactory.swift`.
+При старте приложение пытается переиспользовать сохраненный индекс, а если его нет, выполняет стартовую индексацию этих документов.
 
 ### Пайплайн
 
@@ -89,12 +118,11 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 
 ### Значения по умолчанию
 
+- `provider = appLLM`
+- `embeddingModel = baai/bge-m3`
 - `embeddingDimension = 1024`
 - `batchSize = 150`
 - `normalizeEmbeddings = true`
-- `ragChunkingStrategy = structural`
-- `isRAGEnabled = false`
-- `isRAGPostFilteringEnabled = true`
 
 ### Хранилище
 
@@ -109,12 +137,14 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - `app.bootstrap.rag`
 - `rag.vectorstore`
 
-## Task-агенты
-
-### Vacation Planner
+## Планировщик поездки
 
 - запуск: `/vacation start` или `/vacation`
 - остановка: `/vacation stop`
+
+Планировщик использует анкету, строит план поездки и может запрашивать погоду через MCP-интеграцию.
+
+## Task-агенты
 
 ### Mock Task Agent
 
@@ -156,7 +186,7 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - `LightNeiroClient/App` — bootstrap и composition root
 - `LightNeiroClient/Domain` — доменные модели, протоколы и use case'ы
 - `LightNeiroClient/Data` — network/storage/rag/security адаптеры
-- `LightNeiroClient/Presentation` — AppKit UI и ViewModel
+- `LightNeiroClient/Presentation` — AppKit UI, ViewModel и представления правой панели
 - `LightNeiroClient/Doc` — локальные документы для RAG и сопроводительные материалы
 - `LightNeiroClientTests` — unit-тесты для use case'ов, RAG и ViewModel
 
