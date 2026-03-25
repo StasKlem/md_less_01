@@ -1078,7 +1078,9 @@ struct RAGResponseDisplayFormatter {
             }
             return (chunkID, "источник : \(item.source)")
         }
-        let sourceByChunkID = Dictionary(uniqueKeysWithValues: sourcePairs)
+        let sourceByChunkID = sourcePairs.reduce(into: [String: String]()) { result, pair in
+            result[pair.0] = result[pair.0] ?? pair.1
+        }
 
         if !payload.quotes.isEmpty {
             let evidenceBlocks = payload.quotes.map { quote in

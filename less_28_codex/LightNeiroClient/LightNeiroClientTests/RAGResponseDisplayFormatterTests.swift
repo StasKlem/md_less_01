@@ -34,6 +34,34 @@ final class RAGResponseDisplayFormatterTests: XCTestCase {
         )
     }
 
+    func testFormatIgnoresDuplicateSourceChunkIDsWithoutCrashing() {
+        let formatter = RAGResponseDisplayFormatter()
+        let json = """
+        {
+          "answer": "Готовый ответ по данным контекста.",
+          "sources": [
+            { "source": "/tmp/a.md", "section": "intro", "chunk_id": "1" },
+            { "source": "/tmp/a-duplicate.md", "section": "duplicate", "chunk_id": "1" }
+          ],
+          "quotes": [
+            { "chunk_id": "1", "source": "/tmp/a.md", "section": "intro", "text": "Первая цитата" }
+          ]
+        }
+        """
+
+        let result = formatter.format(role: .assistant, content: json)
+
+        XCTAssertEqual(
+            result,
+            """
+            Готовый ответ по данным контекста.
+
+            источник : /tmp/a.md — intro
+            Первая цитата
+            """
+        )
+    }
+
     func testFormatReturnsRawContentForNonJSONAssistantMessage() {
         let formatter = RAGResponseDisplayFormatter()
         let content = "Обычный ответ без JSON."
