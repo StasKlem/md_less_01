@@ -30,6 +30,7 @@ enum LLMBackendKind: String, CaseIterable, Codable {
 enum LLMModel: String, CaseIterable, Codable {
     case seed20Mini = "bytedance-seed/seed-2.0-mini"
     case deepseekV32 = "deepseek/deepseek-v3.2"
+    case gpt5_4_nano = "openai/gpt-5.4-nano"
     case gemma34B = "google/gemma-3-4b"
     case gpt4oMini = "gpt-4o-mini"
     case gpt4o = "gpt-4o"

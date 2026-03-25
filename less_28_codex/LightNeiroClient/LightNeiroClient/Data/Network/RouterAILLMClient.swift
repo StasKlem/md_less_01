@@ -31,7 +31,7 @@ enum RouterAILLMClientError: LocalizedError {
         case .invalidHTTPResponse:
             return "Invalid HTTP response."
         case let .api(statusCode, message):
-            return "RouterAI API error (\(statusCode)): \(message)"
+            return "API error (\(statusCode)): \(message)"
         case .invalidPayload:
             return "RouterAI response does not contain assistant message."
         }
