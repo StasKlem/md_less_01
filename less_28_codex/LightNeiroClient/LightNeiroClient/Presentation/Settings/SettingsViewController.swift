@@ -5,6 +5,10 @@ final class SettingsViewController: NSViewController {
     private let viewModel: SettingsViewModel
     private var cancellables = Set<AnyCancellable>()
 
+    private let scrollView = NSScrollView()
+    private let contentView = NSView()
+    private let contentStack = NSStackView()
+
     private let backendPopup = NSPopUpButton()
     private let modelPopup = NSPopUpButton()
     private let temperatureSlider = NSSlider(value: 0.4, minValue: 0, maxValue: 1.2, target: nil, action: nil)
@@ -91,40 +95,62 @@ final class SettingsViewController: NSViewController {
         clearEmbeddingsStatusLabel.lineBreakMode = .byWordWrapping
         clearEmbeddingsStatusLabel.maximumNumberOfLines = 2
 
-        let stack = NSStackView(views: [
-            makeRow(label: "LLM backend", control: backendPopup),
-            makeRow(label: "Model", control: modelPopup),
-            temperatureLabel,
-            temperatureSlider,
-            windowLabel,
-            windowSlider,
-            ragCheckbox,
-            makeRow(label: "RAG chunking", control: ragChunkingStrategyPopup),
-            ragPostFilteringCheckbox,
-            ragTopKBeforeFilteringLabel,
-            ragTopKBeforeFilteringSlider,
-            ragTopKAfterFilteringLabel,
-            ragTopKAfterFilteringSlider,
-            ragRelevanceThresholdLabel,
-            ragRelevanceThresholdSlider,
-            clearEmbeddingsButton,
-            clearEmbeddingsStatusLabel,
-            memoryCheckbox,
-            makeRow(label: "RouterAI API Key", control: apiKeyField),
-            saveAPIKeyButton,
-            apiKeyStatusLabel
-        ])
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(makeRow(label: "LLM backend", control: backendPopup))
+        contentStack.addArrangedSubview(makeRow(label: "Model", control: modelPopup))
+        contentStack.addArrangedSubview(temperatureLabel)
+        contentStack.addArrangedSubview(temperatureSlider)
+        contentStack.addArrangedSubview(windowLabel)
+        contentStack.addArrangedSubview(windowSlider)
+        contentStack.addArrangedSubview(ragCheckbox)
+        contentStack.addArrangedSubview(makeRow(label: "RAG chunking", control: ragChunkingStrategyPopup))
+        contentStack.addArrangedSubview(ragPostFilteringCheckbox)
+        contentStack.addArrangedSubview(ragTopKBeforeFilteringLabel)
+        contentStack.addArrangedSubview(ragTopKBeforeFilteringSlider)
+        contentStack.addArrangedSubview(ragTopKAfterFilteringLabel)
+        contentStack.addArrangedSubview(ragTopKAfterFilteringSlider)
+        contentStack.addArrangedSubview(ragRelevanceThresholdLabel)
+        contentStack.addArrangedSubview(ragRelevanceThresholdSlider)
+        contentStack.addArrangedSubview(clearEmbeddingsButton)
+        contentStack.addArrangedSubview(clearEmbeddingsStatusLabel)
+        contentStack.addArrangedSubview(memoryCheckbox)
+        contentStack.addArrangedSubview(makeRow(label: "RouterAI API Key", control: apiKeyField))
+        contentStack.addArrangedSubview(saveAPIKeyButton)
+        contentStack.addArrangedSubview(apiKeyStatusLabel)
 
-        view.addSubview(stack)
+        contentStack.orientation = .vertical
+        contentStack.spacing = 8
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(contentStack)
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(equalTo: contentView.topAnchor),
+            contentStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            contentStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            contentStack.widthAnchor.constraint(equalTo: contentView.widthAnchor)
+        ])
+
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = contentView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+
+        contentStack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        contentStack.alignment = .leading
+        contentStack.distribution = .gravityAreas
     }
 
     private func bind() {
