@@ -2,7 +2,7 @@ import XCTest
 @testable import LightNeiroClient
 
 final class RAGPayloadCodecTests: XCTestCase {
-    func testFinalizeRAGResponseContentPreservesValidPayload() {
+    func testFinalizeRAGResponseContentPreservesValidPayload() throws {
         let codec = RAGPayloadCodecFactory.make()
         let chunkID = UUID().uuidString
         let rawContent = """
@@ -13,7 +13,7 @@ final class RAGPayloadCodecTests: XCTestCase {
         }
         """
 
-        let finalized = codec.finalizeRAGResponseContent(rawContent: rawContent, retrieval: [])
+        let finalized = try codec.finalizeRAGResponseContent(rawContent: rawContent, retrieval: [])
         let payload = try? decodePayload(from: finalized)
 
         XCTAssertEqual(payload?.answer, "Готовый ответ")
@@ -23,22 +23,58 @@ final class RAGPayloadCodecTests: XCTestCase {
         XCTAssertEqual(payload?.quotes.first?.chunkID, chunkID)
     }
 
-    func testFinalizeRAGResponseContentRepairsInvalidPayloadUsingRetrieval() {
+    func testFinalizeRAGResponseContentExtractsPayloadFromFencedBlockWithPreambleAndPostamble() throws {
+        let codec = RAGPayloadCodecFactory.make()
+        let chunkID = UUID().uuidString
+        let rawContent = """
+        Вот ответ в нужном формате:
+        ```json
+        {
+          "answer": "Готовый ответ",
+          "sources": [{"source":"/tmp/doc.md","section":"intro","chunk_id":"\(chunkID)"}],
+          "quotes": [{"chunk_id":"\(chunkID)","source":"/tmp/doc.md","section":"intro","text":"цитата"}]
+        }
+        ```
+        Спасибо.
+        """
+
+        let finalized = try codec.finalizeRAGResponseContent(rawContent: rawContent, retrieval: [])
+        let payload = try? decodePayload(from: finalized)
+
+        XCTAssertEqual(payload?.answer, "Готовый ответ")
+        XCTAssertEqual(payload?.sources.first?.chunkID, chunkID)
+        XCTAssertEqual(payload?.quotes.first?.chunkID, chunkID)
+    }
+
+    func testFinalizeRAGResponseContentExtractsPayloadFromWrappedJSONObject() throws {
+        let codec = RAGPayloadCodecFactory.make()
+        let chunkID = UUID().uuidString
+        let rawContent = """
+        Ответ:
+        {"answer":"Готовый ответ","sources":[{"source":"/tmp/doc.md","section":"intro","chunk_id":"\(chunkID)"}],"quotes":[{"chunk_id":"\(chunkID)","source":"/tmp/doc.md","section":"intro","text":"цитата"}]}
+        Конец.
+        """
+
+        let finalized = try codec.finalizeRAGResponseContent(rawContent: rawContent, retrieval: [])
+        let payload = try? decodePayload(from: finalized)
+
+        XCTAssertEqual(payload?.answer, "Готовый ответ")
+        XCTAssertEqual(payload?.sources.first?.chunkID, chunkID)
+        XCTAssertEqual(payload?.quotes.first?.chunkID, chunkID)
+    }
+
+    func testFinalizeRAGResponseContentThrowsForInvalidPayload() {
         let codec = RAGPayloadCodecFactory.make()
         let retrieval = [
             Self.makeSearchResult(content: "Первая строка\nиз источника.", score: 0.92, section: "s1"),
             Self.makeSearchResult(content: "Вторая строка.", score: 0.88, section: "s2")
         ]
 
-        let finalized = codec.finalizeRAGResponseContent(rawContent: "{invalid-json", retrieval: retrieval)
-        let payload = try? decodePayload(from: finalized)
-
-        XCTAssertFalse((payload?.sources.isEmpty) ?? true)
-        XCTAssertFalse((payload?.quotes.isEmpty) ?? true)
-
-        let sourceChunkIDs = Set(payload?.sources.map(\.chunkID) ?? [])
-        XCTAssertTrue((payload?.quotes.allSatisfy { sourceChunkIDs.contains($0.chunkID) }) ?? false)
-        XCTAssertFalse((payload?.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ?? true)
+        XCTAssertThrowsError(
+            try codec.finalizeRAGResponseContent(rawContent: "{invalid-json", retrieval: retrieval)
+        ) { error in
+            XCTAssertEqual(error.localizedDescription, "LLM вернул невалидный JSON для RAG-ответа.")
+        }
     }
 
     func testMakeNeedsClarificationPayloadJSONReturnsExpectedFallbackPayload() {

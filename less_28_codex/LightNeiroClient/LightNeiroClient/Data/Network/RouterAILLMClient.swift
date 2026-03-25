@@ -324,7 +324,7 @@ final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
             )
         }
 
-        guard let rawJSON = extractJSONObject(from: response.content),
+        guard let rawJSON = JSONContentExtractor.extractJSONObject(from: response.content),
               let data = rawJSON.data(using: .utf8) else {
             return QuestionnaireExtractionResult(
                 fields: [],
@@ -475,19 +475,6 @@ final class LLMAnswerExtractionService: AnswerExtractionServiceProtocol {
         """
     }
 
-    private func extractJSONObject(from text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.first == "{", trimmed.last == "}" {
-            return trimmed
-        }
-        if let fencedStart = trimmed.range(of: "```json"),
-           let fencedEnd = trimmed.range(of: "```", range: fencedStart.upperBound..<trimmed.endIndex) {
-            return String(trimmed[fencedStart.upperBound..<fencedEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}") else { return nil }
-        return String(trimmed[start...end])
-    }
-
     private static func date(fromISODate value: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .iso8601)
@@ -538,7 +525,7 @@ final class LLMQuestionGenerationService: QuestionGenerationServiceProtocol {
             return fallbackPrompt(for: targetField)
         }
 
-        guard let json = extractJSONObject(from: response.content),
+        guard let json = JSONContentExtractor.extractJSONObject(from: response.content),
               let data = json.data(using: .utf8),
               let payload = try? decoder.decode(LLMQuestionPayload.self, from: data) else {
             return fallbackPrompt(for: targetField)
@@ -619,18 +606,6 @@ final class LLMQuestionGenerationService: QuestionGenerationServiceProtocol {
         }
     }
 
-    private func extractJSONObject(from text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.first == "{", trimmed.last == "}" {
-            return trimmed
-        }
-        if let fencedStart = trimmed.range(of: "```json"),
-           let fencedEnd = trimmed.range(of: "```", range: fencedStart.upperBound..<trimmed.endIndex) {
-            return String(trimmed[fencedStart.upperBound..<fencedEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}") else { return nil }
-        return String(trimmed[start...end])
-    }
 }
 
 private struct LLMExtractionPayload: Decodable {

@@ -384,8 +384,8 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
             )
         )
 
-        let payload = extractJSONObject(from: response.content)
-        guard let data = payload.data(using: String.Encoding.utf8) else { return [] }
+        guard let payload = JSONContentExtractor.extractJSONObject(from: response.content),
+              let data = payload.data(using: String.Encoding.utf8) else { return [] }
         let decoded = try decoder.decode(LLMLongTermExtractionResult.self, from: data)
         return decoded.candidates
     }
@@ -408,14 +408,6 @@ final class UpdateLongTermMemoryUseCase: UpdateLongTermMemoryUseCaseProtocol {
             ChatMessage(role: .assistant, content: assistantContent),
             ChatMessage(role: .user, content: latestUserMessage)
         ]
-    }
-
-    private func extractJSONObject(from text: String) -> String {
-        guard let start = text.firstIndex(of: "{"),
-              let end = text.lastIndex(of: "}") else {
-            return "{}"
-        }
-        return String(text[start...end])
     }
 
     private func mergeMemory(

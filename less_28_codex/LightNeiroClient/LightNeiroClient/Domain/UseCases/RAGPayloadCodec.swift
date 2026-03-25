@@ -4,14 +4,28 @@ protocol RAGPayloadCoding {
     /// Формирует payload, когда релевантных данных для уверенного ответа не хватает.
     func makeNeedsClarificationPayloadJSON() -> String
 
-    /// Проверяет и при необходимости чинит RAG-пayload, чтобы соблюсти контракт ответа.
-    func finalizeRAGResponseContent(rawContent: String, retrieval: [SearchResult]) -> String
+    /// Проверяет RAG-payload и возвращает нормализованный JSON.
+    func finalizeRAGResponseContent(rawContent: String, retrieval: [SearchResult]) throws -> String
 }
 
 enum RAGPayloadCodecFactory {
     /// Создает кодек RAG JSON-контракта.
     static func make() -> RAGPayloadCoding {
         RAGPayloadCodec()
+    }
+}
+
+enum RAGPayloadCodecError: LocalizedError {
+    case invalidJSON
+    case invalidContract
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidJSON:
+            return "LLM вернул невалидный JSON для RAG-ответа."
+        case .invalidContract:
+            return "LLM вернул JSON, который нарушает контракт RAG-ответа."
+        }
     }
 }
 
@@ -24,22 +38,19 @@ fileprivate final class RAGPayloadCodec: RAGPayloadCoding {
         return encodeRAGPayload(payload)
     }
 
-    func finalizeRAGResponseContent(rawContent: String, retrieval: [SearchResult]) -> String {
-        if let decoded = decodeRAGPayload(from: rawContent), isValidRAGPayload(decoded, requireEvidence: true) {
-            return encodeRAGPayload(decoded)
+    func finalizeRAGResponseContent(rawContent: String, retrieval _: [SearchResult]) throws -> String {
+        guard let decoded = decodeRAGPayload(from: rawContent) else {
+            throw RAGPayloadCodecError.invalidJSON
         }
-
-        let repaired = repairRAGPayload(from: rawContent, retrieval: retrieval)
-        return encodeRAGPayload(repaired)
+        guard isValidRAGPayload(decoded, requireEvidence: true) else {
+            throw RAGPayloadCodecError.invalidContract
+        }
+        return encodeRAGPayload(decoded)
     }
 
     private func decodeRAGPayload(from rawContent: String) -> RAGResponsePayload? {
-        let cleaned = rawContent
-            .replacingOccurrences(of: "```json", with: "")
-            .replacingOccurrences(of: "```", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let data = cleaned.data(using: .utf8) else { return nil }
+        guard let cleaned = JSONContentExtractor.extractJSONObject(from: rawContent),
+              let data = cleaned.data(using: .utf8) else { return nil }
         return try? decoder.decode(RAGResponsePayload.self, from: data)
     }
 
@@ -80,65 +91,6 @@ fileprivate final class RAGPayloadCodec: RAGPayloadCoding {
         }
 
         return true
-    }
-
-    private func repairRAGPayload(from rawContent: String, retrieval: [SearchResult]) -> RAGResponsePayload {
-        var seenChunkIDs = Set<String>()
-        var sources: [RAGSourceItem] = []
-
-        for result in retrieval {
-            let chunkID = result.chunk.id.uuidString
-            guard seenChunkIDs.insert(chunkID).inserted else { continue }
-            sources.append(
-                RAGSourceItem(
-                    source: result.chunk.source,
-                    section: result.chunk.section,
-                    chunkID: chunkID
-                )
-            )
-        }
-
-        let quotes: [RAGQuoteItem] = retrieval.prefix(3).map { result in
-            RAGQuoteItem(
-                chunkID: result.chunk.id.uuidString,
-                source: result.chunk.source,
-                section: result.chunk.section,
-                text: normalizedQuoteText(result.chunk.content)
-            )
-        }
-
-        let fallbackAnswer = makeFallbackRAGAnswer(rawContent: rawContent, quotes: quotes)
-        if sources.isEmpty || quotes.isEmpty {
-            return makeNoMatchesPayload(answer: fallbackAnswer)
-        }
-        return RAGResponsePayload(
-            answer: fallbackAnswer,
-            sources: sources,
-            quotes: quotes
-        )
-    }
-
-    private func makeFallbackRAGAnswer(rawContent: String, quotes: [RAGQuoteItem]) -> String {
-        let candidate = rawContent
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "```json", with: "")
-            .replacingOccurrences(of: "```", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if !candidate.isEmpty, !candidate.hasPrefix("{"), !candidate.hasPrefix("[") {
-            return String(candidate.prefix(280))
-        }
-
-        guard let firstQuote = quotes.first?.text, !firstQuote.isEmpty else {
-            return "Ответ сформирован на основе найденных источников."
-        }
-        return "Согласно найденным источникам: \(String(firstQuote.prefix(240)))"
-    }
-
-    private func normalizedQuoteText(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func encodeRAGPayload(_ payload: RAGResponsePayload) -> String {

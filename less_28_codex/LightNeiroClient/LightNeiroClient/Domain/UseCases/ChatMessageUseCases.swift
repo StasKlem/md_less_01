@@ -193,7 +193,7 @@ final class SendMessageUseCase: SendMessageUseCaseProtocol {
                 taskState: context.taskState
             )
             let llmResponse = try await llmClient.send(request: request)
-            let finalizedContent = ragPayloadCodec.finalizeRAGResponseContent(
+            let finalizedContent = try ragPayloadCodec.finalizeRAGResponseContent(
                 rawContent: llmResponse.content,
                 retrieval: retrieval
             )
