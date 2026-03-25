@@ -45,7 +45,7 @@ final class RouterAILLMClient: LLMClientProtocol {
     private let encoder = JSONEncoder()
 
     init(
-        httpClient: HTTPClientProtocol = URLSession.shared,
+        httpClient: HTTPClientProtocol = makeHTTPClient(),
         configuration: RouterAIConfiguration = .default
     ) {
         self.httpClient = httpClient
@@ -53,7 +53,7 @@ final class RouterAILLMClient: LLMClientProtocol {
     }
 
     init(
-        httpClient: HTTPClientProtocol = URLSession.shared,
+        httpClient: HTTPClientProtocol = makeHTTPClient(),
         configurationProvider: @escaping @Sendable () async -> RouterAIConfiguration
     ) {
         self.httpClient = httpClient

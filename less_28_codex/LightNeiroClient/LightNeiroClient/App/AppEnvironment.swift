@@ -48,6 +48,7 @@ struct AppEnvironment {
         let counterTaskAgentStateRepository = FileCounterTaskAgentStateRepository()
         let hackerNewsTaskAgentStateRepository = FileHackerNewsTaskAgentStateRepository()
         let apiKeyStore = KeychainAPIKeyStore()
+        let httpClient = makeHTTPClient()
         let llmConfigurationProvider: @Sendable () async -> RouterAIConfiguration = {
             let settings = (try? await settingsRepository.fetchSettings()) ?? .default
             let apiKey = try? apiKeyStore.fetchAPIKey()
@@ -76,6 +77,7 @@ struct AppEnvironment {
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let saveAPIKey = SaveAPIKeyUseCase(apiKeyStore: apiKeyStore)
         let llmClient = RouterAILLMClient(
+            httpClient: httpClient,
             configurationProvider: {
                 let settings = (try? await settingsRepository.fetchSettings()) ?? .default
                 let apiKey = try? apiKeyStore.fetchAPIKey()
@@ -111,6 +113,7 @@ struct AppEnvironment {
                 normalizeEmbeddings: true
             ),
             embeddingProvider: AppLLMEmbeddingProvider(
+                httpClient: httpClient,
                 configurationProvider: {
                     let settings = (try? await settingsRepository.fetchSettings()) ?? .default
                     let apiKey = try? apiKeyStore.fetchAPIKey()

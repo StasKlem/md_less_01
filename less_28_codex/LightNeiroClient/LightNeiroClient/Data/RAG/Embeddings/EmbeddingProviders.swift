@@ -7,7 +7,7 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
     private let encoder = JSONEncoder()
 
     init(
-        httpClient: HTTPClientProtocol = URLSession.shared,
+        httpClient: HTTPClientProtocol = makeHTTPClient(),
         configuration: RouterAIConfiguration = .default
     ) {
         self.httpClient = httpClient
@@ -15,7 +15,7 @@ struct AppLLMEmbeddingProvider: EmbeddingProvider {
     }
 
     init(
-        httpClient: HTTPClientProtocol = URLSession.shared,
+        httpClient: HTTPClientProtocol = makeHTTPClient(),
         configurationProvider: @escaping @Sendable () async -> RouterAIConfiguration
     ) {
         self.httpClient = httpClient
