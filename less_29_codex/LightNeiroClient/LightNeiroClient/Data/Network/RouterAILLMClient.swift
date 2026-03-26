@@ -79,6 +79,7 @@ final class RouterAILLMClient: LLMClientProtocol {
         let apiMessages = toAPIMessages(from: request)
         let payload = RouterAIChatCompletionRequest(
             model: request.settings.model.rawValue,
+            temperature: request.settings.temperature,
             maxTokens: request.settings.maxTokens,
             messages: apiMessages
         )
@@ -205,11 +206,13 @@ final class RouterAILLMClient: LLMClientProtocol {
 
 private struct RouterAIChatCompletionRequest: Encodable {
     let model: String
+    let temperature: Double
     let maxTokens: Int
     let messages: [RouterAIMessagePayload]
 
     private enum CodingKeys: String, CodingKey {
         case model
+        case temperature
         case maxTokens = "max_tokens"
         case messages
     }
