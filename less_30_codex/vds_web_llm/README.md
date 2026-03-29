@@ -1,38 +1,38 @@
 # VPS Ollama Service
 
-Go HTTP gateway for a local Ollama instance with:
+Go HTTP gateway для локального экземпляра Ollama с:
 
 - `/health`
 - `/chat`
 - `/v1/chat/completions`
 - bearer/API-key auth
-- fixed-window rate limiting
-- max-context validation
-- OpenWebUI for browser chat
+- rate limiting по фиксированному окну
+- проверкой max context
+- OpenWebUI для чата в браузере
 
-## Run locally
+## Запуск локально
 
-1. Copy `.env.example` to `.env` and set `API_KEY`.
-2. Set `WEBUI_SECRET_KEY` to a long random value.
-3. Start the stack:
+1. Скопируйте `.env.example` в `.env` и задайте `API_KEY`.
+2. Задайте `WEBUI_SECRET_KEY` как длинный случайный ключ.
+3. Запустите стек:
 
 ```bash
 docker compose up --build
 ```
 
-4. Pull the model once if it is not already present:
+4. Один раз скачайте модель, если её ещё нет:
 
 ```bash
 docker exec -it vds-web-llm-ollama ollama pull llama3.2
 ```
 
-5. Open the browser UI at:
+5. Откройте веб-интерфейс:
 
 ```text
 http://127.0.0.1:3000
 ```
 
-6. Send a request through the API if needed:
+6. При необходимости отправьте запрос через API:
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
@@ -41,44 +41,59 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   -d '{"model":"llama3.2","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## Deploy to VDS over SSH
+## Деплой на VDS через SSH
 
-1. Clone this repo on the VDS into `/srv/vds_web_llm`.
-2. Create `.env` on the VDS and set `API_KEY` and `WEBUI_SECRET_KEY`.
-3. From your local machine run:
+1. Склонируйте этот репозиторий на VDS в `/srv/vds_web_llm`.
+2. Создайте `.env` на VDS и задайте `API_KEY` и `WEBUI_SECRET_KEY`.
+3. С локальной машины выполните:
 
 ```bash
 chmod +x deploy.sh
 ./deploy.sh user@your-vds-host /srv/vds_web_llm
 ```
 
-4. Or use `make`:
+4. Либо используйте `make`:
 
 ```bash
 make deploy REMOTE=user@your-vds-host
 ```
 
-What the deploy does:
+Что делает deploy:
 
-- SSH into the VDS
-- run `git pull --ff-only`
-- rebuild the `api` image with `docker compose up -d --build --remove-orphans`
-- keep Ollama and OpenWebUI data in volumes
+- подключается к VDS по SSH
+- выполняет `git pull --ff-only`
+- пересобирает `api` через `docker compose up -d --build --remove-orphans`
+- сохраняет данные Ollama и OpenWebUI в volumes
 
-Access the UI and API from your machine via SSH tunnel:
+## Доступ к UI и API
+
+В текущей конфигурации сервисы привязаны только к `localhost` на VDS.
+Чтобы открыть их со своей машины, создайте SSH-туннель:
 
 ```bash
 ssh -L 3000:127.0.0.1:3000 -L 8080:127.0.0.1:8080 root@your-vds-host
 ```
 
-Then open:
+После этого откройте:
 
-- `http://127.0.0.1:3000` for OpenWebUI
-- `http://127.0.0.1:8080` for the API
+- `http://127.0.0.1:3000` для OpenWebUI
+- `http://127.0.0.1:8080` для API
 
-## Notes
+## Прямой доступ из интернета
 
-- Ollama is internal to the compose network.
-- The gateway refuses to start without `API_KEY`.
-- The max context check is approximate and intentionally lightweight.
-- OpenWebUI stores its data in the `open-webui-data` volume.
+Если нужно открыть сервис наружу, прочитайте [openweb.md](./openweb.md).
+
+## Обновление кода
+
+Инструкция по обновлению проекта на сервере находится в [update.md](./update.md).
+
+## Первичная настройка
+
+Пошаговая инструкция по первичной настройке VDS находится в [startup.md](./startup.md).
+
+## Примечания
+
+- Ollama работает внутри compose-сети и не публикуется наружу.
+- Gateway не стартует без `API_KEY`.
+- Проверка max context выполнена упрощённо и намеренно лёгкая.
+- OpenWebUI хранит данные в volume `open-webui-data`.
