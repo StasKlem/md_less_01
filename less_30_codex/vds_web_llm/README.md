@@ -29,7 +29,7 @@ docker exec -it vds-web-llm-ollama ollama pull llama3.2
 5. Open the browser UI at:
 
 ```text
-http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 6. Send a request through the API if needed:
@@ -64,6 +64,17 @@ What the deploy does:
 - run `git pull --ff-only`
 - rebuild the `api` image with `docker compose up -d --build --remove-orphans`
 - keep Ollama and OpenWebUI data in volumes
+
+Access the UI and API from your machine via SSH tunnel:
+
+```bash
+ssh -L 3000:127.0.0.1:3000 -L 8080:127.0.0.1:8080 root@your-vds-host
+```
+
+Then open:
+
+- `http://127.0.0.1:3000` for OpenWebUI
+- `http://127.0.0.1:8080` for the API
 
 ## Notes
 

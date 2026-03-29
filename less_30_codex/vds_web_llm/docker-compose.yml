@@ -20,7 +20,7 @@ services:
     volumes:
       - open-webui-data:/app/backend/data
     ports:
-      - "${OPEN_WEBUI_PORT:-3000}:8080"
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
     depends_on:
       - ollama
     networks:
@@ -42,7 +42,7 @@ services:
       MAX_BODY_BYTES: "${MAX_BODY_BYTES:-1048576}"
       REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-60}"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       - ollama
     networks:
