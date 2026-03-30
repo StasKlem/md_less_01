@@ -29,6 +29,33 @@ final class MCPProjectServerIntegrationTests: XCTestCase {
         XCTAssertTrue(output.contains("\"text\":\"main\""), "Ответ сервера: \(output)")
     }
 
+    func testProjectServerExposesFileListingToolAndReturnsProjectFiles() throws {
+        let packageDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("ProjectMCPServer")
+        let repositoryRoot = packageDirectory.deletingLastPathComponent()
+
+        let buildDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lnc-project-mcp-\(UUID().uuidString)", isDirectory: true)
+
+        try buildProjectMCPServer(
+            at: packageDirectory,
+            buildDirectory: buildDirectory
+        )
+
+        let executableURL = buildDirectory
+            .appendingPathComponent("debug/ProjectMCPServer")
+
+        let output = try runProjectMCPServer(
+            executableURL: executableURL,
+            repositoryRoot: repositoryRoot
+        )
+
+        XCTAssertTrue(output.contains("project_list_files"), "Ответ сервера: \(output)")
+        XCTAssertTrue(output.contains("ProjectMCPServer/Package.swift"), "Ответ сервера: \(output)")
+    }
+
     private func buildProjectMCPServer(at packageDirectory: URL, buildDirectory: URL) throws {
         try FileManager.default.createDirectory(
             at: buildDirectory,
@@ -93,6 +120,10 @@ final class MCPProjectServerIntegrationTests: XCTestCase {
                     ]
                 ]
             ),
+            makeNotification(
+                method: "notifications/initialized",
+                params: [:]
+            ),
             makeRequest(
                 id: 2,
                 method: "tools/list",
@@ -105,11 +136,19 @@ final class MCPProjectServerIntegrationTests: XCTestCase {
                     "name": "project_git_branch",
                     "arguments": [:]
                 ]
+            ),
+            makeRequest(
+                id: 4,
+                method: "tools/call",
+                params: [
+                    "name": "project_list_files",
+                    "arguments": [:]
+                ]
             )
         ]
 
         for payload in payloads {
-            try writeFramedMessage(payload, to: inputPipe.fileHandleForWriting)
+            try writeMessage(payload, to: inputPipe.fileHandleForWriting)
         }
         inputPipe.fileHandleForWriting.closeFile()
 
@@ -137,18 +176,26 @@ final class MCPProjectServerIntegrationTests: XCTestCase {
         return try! JSONSerialization.data(withJSONObject: message, options: [])
     }
 
-    private func writeFramedMessage(_ data: Data, to handle: FileHandle) throws {
-        let header = "Content-Length: \(data.count)\r\n\r\n"
-        guard let headerData = header.data(using: .utf8) else {
+    private func makeNotification(method: String, params: [String: Any]) -> Data {
+        let message: [String: Any] = [
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        ]
+        return try! JSONSerialization.data(withJSONObject: message, options: [])
+    }
+
+    private func writeMessage(_ data: Data, to handle: FileHandle) throws {
+        guard let newlineData = "\n".data(using: .utf8) else {
             throw NSError(
                 domain: "MCPProjectServerIntegrationTests",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Не удалось подготовить заголовок MCP."]
+                userInfo: [NSLocalizedDescriptionKey: "Не удалось подготовить разделитель MCP."]
             )
         }
 
-        handle.write(headerData)
         handle.write(data)
+        handle.write(newlineData)
     }
 
 }

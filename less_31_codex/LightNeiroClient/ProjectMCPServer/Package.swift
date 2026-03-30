@@ -13,9 +13,19 @@ let package = Package(
             targets: ["ProjectMCPServer"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/msventurini/swift-mcp-sdk.git", from: "0.10.2")
+    ],
     targets: [
         .executableTarget(
-            name: "ProjectMCPServer"
+            name: "ProjectMCPServer",
+            dependencies: [
+                .product(name: "MCP", package: "swift-mcp-sdk")
+            ]
+        ),
+        .testTarget(
+            name: "ProjectMCPServerTests",
+            dependencies: ["ProjectMCPServer"]
         )
     ]
 )
