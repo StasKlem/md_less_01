@@ -1,0 +1,413 @@
+import Cocoa
+import Combine
+
+final class SettingsViewController: NSViewController {
+    private let viewModel: SettingsViewModel
+    private var cancellables = Set<AnyCancellable>()
+
+    private let scrollView = NSScrollView()
+    private let contentView = NSView()
+    private let contentStack = NSStackView()
+
+    private let backendPopup = NSPopUpButton()
+    private let modelPopup = NSPopUpButton()
+    private let temperatureSlider = NSSlider(value: 0.4, minValue: 0, maxValue: 1.2, target: nil, action: nil)
+    private let temperatureLabel = NSTextField(labelWithString: "Temperature: 0.40")
+    private let windowSlider = NSSlider(value: 12, minValue: 4, maxValue: 30, target: nil, action: nil)
+    private let windowLabel = NSTextField(labelWithString: "Window: 12")
+    private let maxTokensSlider = NSSlider(
+        value: Double(LLMSettings.defaultMaxTokens),
+        minValue: 256,
+        maxValue: 8192,
+        target: nil,
+        action: nil
+    )
+    private let maxTokensLabel = NSTextField(labelWithString: "Max tokens: \(LLMSettings.defaultMaxTokens)")
+    private let ragCheckbox = NSButton(checkboxWithTitle: "Enable RAG", target: nil, action: nil)
+    private let ragChunkingStrategyPopup = NSPopUpButton()
+    private let ragPostFilteringCheckbox = NSButton(checkboxWithTitle: "Enable RAG post-filtering", target: nil, action: nil)
+    private let ragTopKBeforeFilteringSlider = NSSlider(value: 8, minValue: 1, maxValue: 20, target: nil, action: nil)
+    private let ragTopKBeforeFilteringLabel = NSTextField(labelWithString: "RAG top-K before filtering: 8")
+    private let ragTopKAfterFilteringSlider = NSSlider(value: 4, minValue: 1, maxValue: 20, target: nil, action: nil)
+    private let ragTopKAfterFilteringLabel = NSTextField(labelWithString: "RAG top-K after filtering: 4")
+    private let ragRelevanceThresholdSlider = NSSlider(value: 0.7, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let ragRelevanceThresholdLabel = NSTextField(labelWithString: "RAG relevance threshold: 0.70")
+    private let memoryCheckbox = NSButton(checkboxWithTitle: "Save to memory", target: nil, action: nil)
+    private let clearEmbeddingsButton = NSButton(title: "Clear embeddings DB", target: nil, action: nil)
+    private let clearEmbeddingsStatusLabel = NSTextField(labelWithString: "")
+    private let apiKeyField = NSSecureTextField()
+    private let saveAPIKeyButton = NSButton(title: "Save API Key", target: nil, action: nil)
+    private let apiKeyStatusLabel = NSTextField(labelWithString: "")
+
+    init(viewModel: SettingsViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        bind()
+    }
+
+    private func setupUI() {
+        backendPopup.addItems(withTitles: LLMBackendKind.allCases.map { $0.title })
+        modelPopup.addItems(withTitles: LLMModel.allCases.map { $0.rawValue })
+        ragChunkingStrategyPopup.addItems(withTitles: ChunkingStrategyType.allCases.map { $0.rawValue })
+
+        backendPopup.target = self
+        backendPopup.action = #selector(backendChanged)
+        modelPopup.target = self
+        modelPopup.action = #selector(modelChanged)
+        temperatureSlider.target = self
+        temperatureSlider.action = #selector(temperatureChanged)
+        windowSlider.target = self
+        windowSlider.action = #selector(windowChanged)
+        maxTokensSlider.target = self
+        maxTokensSlider.action = #selector(maxTokensChanged)
+        ragCheckbox.target = self
+        ragCheckbox.action = #selector(ragToggled)
+        ragChunkingStrategyPopup.target = self
+        ragChunkingStrategyPopup.action = #selector(ragChunkingStrategyChanged)
+        ragPostFilteringCheckbox.target = self
+        ragPostFilteringCheckbox.action = #selector(ragPostFilteringToggled)
+        ragTopKBeforeFilteringSlider.target = self
+        ragTopKBeforeFilteringSlider.action = #selector(ragTopKBeforeFilteringChanged)
+        ragTopKAfterFilteringSlider.target = self
+        ragTopKAfterFilteringSlider.action = #selector(ragTopKAfterFilteringChanged)
+        ragRelevanceThresholdSlider.target = self
+        ragRelevanceThresholdSlider.action = #selector(ragRelevanceThresholdChanged)
+        memoryCheckbox.target = self
+        memoryCheckbox.action = #selector(memoryToggled)
+        apiKeyField.target = self
+        apiKeyField.action = #selector(apiKeyEdited)
+        apiKeyField.placeholderString = "routerai key"
+        saveAPIKeyButton.target = self
+        saveAPIKeyButton.action = #selector(saveAPIKeyTapped)
+        clearEmbeddingsButton.target = self
+        clearEmbeddingsButton.action = #selector(clearEmbeddingsTapped)
+
+        apiKeyStatusLabel.textColor = .secondaryLabelColor
+        apiKeyStatusLabel.lineBreakMode = .byWordWrapping
+        apiKeyStatusLabel.maximumNumberOfLines = 2
+        clearEmbeddingsStatusLabel.textColor = .secondaryLabelColor
+        clearEmbeddingsStatusLabel.lineBreakMode = .byWordWrapping
+        clearEmbeddingsStatusLabel.maximumNumberOfLines = 2
+
+        contentStack.addArrangedSubview(makeRow(label: "LLM backend", control: backendPopup))
+        contentStack.addArrangedSubview(makeRow(label: "Model", control: modelPopup))
+        contentStack.addArrangedSubview(temperatureLabel)
+        contentStack.addArrangedSubview(temperatureSlider)
+        contentStack.addArrangedSubview(windowLabel)
+        contentStack.addArrangedSubview(windowSlider)
+        contentStack.addArrangedSubview(maxTokensLabel)
+        contentStack.addArrangedSubview(maxTokensSlider)
+        contentStack.addArrangedSubview(ragCheckbox)
+        contentStack.addArrangedSubview(makeRow(label: "RAG chunking", control: ragChunkingStrategyPopup))
+        contentStack.addArrangedSubview(ragPostFilteringCheckbox)
+        contentStack.addArrangedSubview(ragTopKBeforeFilteringLabel)
+        contentStack.addArrangedSubview(ragTopKBeforeFilteringSlider)
+        contentStack.addArrangedSubview(ragTopKAfterFilteringLabel)
+        contentStack.addArrangedSubview(ragTopKAfterFilteringSlider)
+        contentStack.addArrangedSubview(ragRelevanceThresholdLabel)
+        contentStack.addArrangedSubview(ragRelevanceThresholdSlider)
+        contentStack.addArrangedSubview(clearEmbeddingsButton)
+        contentStack.addArrangedSubview(clearEmbeddingsStatusLabel)
+        contentStack.addArrangedSubview(memoryCheckbox)
+        contentStack.addArrangedSubview(makeRow(label: "RouterAI API Key", control: apiKeyField))
+        contentStack.addArrangedSubview(saveAPIKeyButton)
+        contentStack.addArrangedSubview(apiKeyStatusLabel)
+
+        contentStack.orientation = .vertical
+        contentStack.spacing = 8
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(contentStack)
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(equalTo: contentView.topAnchor),
+            contentStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            contentStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            contentStack.widthAnchor.constraint(equalTo: contentView.widthAnchor)
+        ])
+
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = contentView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
+        contentStack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        contentStack.alignment = .leading
+        contentStack.distribution = .gravityAreas
+    }
+
+    private func bind() {
+        viewModel.$settings
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] settings in
+                guard let self else { return }
+                self.backendPopup.selectItem(withTitle: settings.backend.title)
+                self.modelPopup.selectItem(withTitle: settings.model.rawValue)
+                self.temperatureSlider.doubleValue = settings.temperature
+                self.windowSlider.doubleValue = Double(settings.windowSize)
+                self.temperatureLabel.stringValue = String(format: "Temperature: %.2f", settings.temperature)
+                self.windowLabel.stringValue = "Window: \(settings.windowSize)"
+                self.maxTokensSlider.doubleValue = Double(settings.maxTokens)
+                self.maxTokensLabel.stringValue = "Max tokens: \(settings.maxTokens)"
+                self.ragCheckbox.state = settings.isRAGEnabled ? .on : .off
+                self.ragChunkingStrategyPopup.selectItem(withTitle: settings.ragChunkingStrategy.rawValue)
+                self.ragPostFilteringCheckbox.state = settings.isRAGPostFilteringEnabled ? .on : .off
+                self.ragTopKBeforeFilteringSlider.doubleValue = Double(settings.ragTopKBeforeFiltering)
+                self.ragTopKAfterFilteringSlider.doubleValue = Double(settings.ragTopKAfterFiltering)
+                self.ragRelevanceThresholdSlider.doubleValue = settings.ragRelevanceThreshold
+                self.updateRAGFilteringLabels(settings: settings)
+                self.memoryCheckbox.state = settings.isMemoryEnabled ? .on : .off
+            }
+            .store(in: &cancellables)
+
+        viewModel.$apiKey
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] apiKey in
+                guard let self else { return }
+                if self.apiKeyField.stringValue != apiKey {
+                    self.apiKeyField.stringValue = apiKey
+                }
+            }
+            .store(in: &cancellables)
+
+        viewModel.$apiKeyStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.apiKeyStatusLabel.stringValue = status
+            }
+            .store(in: &cancellables)
+
+        viewModel.$ragEmbeddingsStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.clearEmbeddingsStatusLabel.stringValue = status
+            }
+            .store(in: &cancellables)
+    }
+
+    private func makeRow(label: String, control: NSView) -> NSView {
+        let title = NSTextField(labelWithString: label)
+        title.font = .systemFont(ofSize: 12, weight: .medium)
+
+        let row = NSStackView(views: [title, control])
+        row.orientation = .horizontal
+        row.distribution = .fillProportionally
+        row.spacing = 8
+        return row
+    }
+
+    @objc
+    private func backendChanged() {
+        guard let title = backendPopup.selectedItem?.title,
+              let backend = LLMBackendKind.allCases.first(where: { $0.title == title }) else { return }
+        viewModel.updateBackend(backend)
+    }
+
+    @objc
+    private func modelChanged() {
+        guard let title = modelPopup.selectedItem?.title,
+              let model = LLMModel(rawValue: title) else { return }
+        viewModel.updateModel(model)
+    }
+
+    @objc
+    private func temperatureChanged() {
+        viewModel.updateTemperature(temperatureSlider.doubleValue)
+    }
+
+    @objc
+    private func windowChanged() {
+        viewModel.updateWindowSize(Int(windowSlider.intValue))
+    }
+
+    @objc
+    private func maxTokensChanged() {
+        viewModel.updateMaxTokens(Int(maxTokensSlider.intValue))
+    }
+
+    @objc
+    private func ragToggled() {
+        viewModel.updateRAGEnabled(ragCheckbox.state == .on)
+    }
+
+    @objc
+    private func ragChunkingStrategyChanged() {
+        guard let title = ragChunkingStrategyPopup.selectedItem?.title,
+              let strategy = ChunkingStrategyType(rawValue: title) else { return }
+        viewModel.updateRAGChunkingStrategy(strategy)
+    }
+
+    @objc
+    private func memoryToggled() {
+        viewModel.updateMemoryEnabled(memoryCheckbox.state == .on)
+    }
+
+    @objc
+    private func ragPostFilteringToggled() {
+        viewModel.updateRAGPostFilteringEnabled(ragPostFilteringCheckbox.state == .on)
+    }
+
+    @objc
+    private func ragTopKBeforeFilteringChanged() {
+        viewModel.updateRAGTopKBeforeFiltering(Int(ragTopKBeforeFilteringSlider.intValue))
+    }
+
+    @objc
+    private func ragTopKAfterFilteringChanged() {
+        viewModel.updateRAGTopKAfterFiltering(Int(ragTopKAfterFilteringSlider.intValue))
+    }
+
+    @objc
+    private func ragRelevanceThresholdChanged() {
+        viewModel.updateRAGRelevanceThreshold(ragRelevanceThresholdSlider.doubleValue)
+    }
+
+    @objc
+    private func apiKeyEdited() {
+        viewModel.updateAPIKey(apiKeyField.stringValue)
+    }
+
+    @objc
+    private func saveAPIKeyTapped() {
+        viewModel.updateAPIKey(apiKeyField.stringValue)
+        viewModel.saveAPIKey()
+    }
+
+    @objc
+    private func clearEmbeddingsTapped() {
+        viewModel.resetRAGEmbeddings()
+    }
+
+    private func updateRAGFilteringLabels(settings: LLMSettings) {
+        ragTopKBeforeFilteringLabel.stringValue = "RAG top-K before filtering: \(settings.ragTopKBeforeFiltering)"
+        ragTopKAfterFilteringLabel.stringValue = "RAG top-K after filtering: \(settings.ragTopKAfterFiltering)"
+        ragRelevanceThresholdLabel.stringValue = String(
+            format: "RAG relevance threshold: %.2f",
+            settings.ragRelevanceThreshold
+        )
+    }
+}
+
+final class InvariantsSettingsViewController: NSViewController {
+    private let viewModel: SettingsViewModel
+    private var cancellables = Set<AnyCancellable>()
+
+    private let titleLabel = NSTextField(labelWithString: "Planner Invariants (Text)")
+    private let invariantsScrollView = NSScrollView()
+    private let invariantsTextView = NSTextView()
+    private let saveButton = NSButton(title: "Save Invariants", target: nil, action: nil)
+    private let statusLabel = NSTextField(labelWithString: "")
+
+    init(viewModel: SettingsViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.underPageBackgroundColor.cgColor
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        bind()
+    }
+
+    private func setupUI() {
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byWordWrapping
+        statusLabel.maximumNumberOfLines = 2
+
+        invariantsTextView.isEditable = true
+        invariantsTextView.isRichText = false
+        invariantsTextView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        invariantsTextView.isVerticallyResizable = true
+        invariantsTextView.isHorizontallyResizable = false
+        invariantsTextView.textContainer?.widthTracksTextView = true
+        invariantsTextView.textContainerInset = NSSize(width: 8, height: 8)
+
+        invariantsScrollView.borderType = .bezelBorder
+        invariantsScrollView.hasVerticalScroller = true
+        invariantsScrollView.hasHorizontalScroller = false
+        invariantsScrollView.documentView = invariantsTextView
+
+        saveButton.target = self
+        saveButton.action = #selector(saveTapped)
+
+        let stack = NSStackView(views: [titleLabel, invariantsScrollView, saveButton, statusLabel])
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            invariantsScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
+        ])
+    }
+
+    private func bind() {
+        viewModel.$plannerInvariantsText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                guard let self else { return }
+                if self.invariantsTextView.string != text {
+                    self.invariantsTextView.string = text
+                }
+            }
+            .store(in: &cancellables)
+
+        viewModel.$plannerInvariantsStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                self?.statusLabel.stringValue = text
+            }
+            .store(in: &cancellables)
+    }
+
+    @objc
+    private func saveTapped() {
+        viewModel.updatePlannerInvariantsText(invariantsTextView.string)
+        viewModel.savePlannerInvariants()
+    }
+}
