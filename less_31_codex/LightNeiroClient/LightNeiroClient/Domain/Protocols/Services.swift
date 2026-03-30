@@ -78,3 +78,11 @@ protocol APIKeyStoreProtocol {
     /// Удаляет API key из защищенного хранилища.
     nonisolated func deleteAPIKey() throws
 }
+
+/// Контракт сервиса получения контекста проекта через MCP.
+protocol ProjectGitBranchServiceProtocol {
+    /// Возвращает текущую git-ветку проекта.
+    /// - Parameter serverURL: URL MCP-сервера.
+    /// - Returns: Имя текущей ветки.
+    func fetchCurrentGitBranch(serverURL: URL) async throws -> String
+}

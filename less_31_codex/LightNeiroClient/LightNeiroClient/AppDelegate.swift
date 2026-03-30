@@ -72,7 +72,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 getCounterTaskAgentStatusUseCase: environment.getCounterTaskAgentStatusUseCase,
                 startHackerNewsTaskAgentUseCase: environment.startHackerNewsTaskAgentUseCase,
                 stopHackerNewsTaskAgentUseCase: environment.stopHackerNewsTaskAgentUseCase,
-                getHackerNewsTaskAgentStatusUseCase: environment.getHackerNewsTaskAgentStatusUseCase
+                getHackerNewsTaskAgentStatusUseCase: environment.getHackerNewsTaskAgentStatusUseCase,
+                projectHelpUseCase: environment.projectHelpUseCase
             )
             let settingsViewModel = SettingsViewModel(
                 fetchSettingsUseCase: environment.fetchSettingsUseCase,

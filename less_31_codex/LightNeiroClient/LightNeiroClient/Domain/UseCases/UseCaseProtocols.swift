@@ -124,6 +124,14 @@ protocol SaveAPIKeyUseCaseProtocol {
     func delete() throws
 }
 
+/// Отвечает на вопросы о проекте с учетом RAG и текущего контекста.
+protocol ProjectHelpUseCaseProtocol {
+    /// Формирует ответ ассистента по проекту.
+    /// - Parameter question: Текст вопроса пользователя или `nil` для общего обзора.
+    /// - Returns: Готовый ответ ассистента.
+    func execute(question: String?) async -> String
+}
+
 /// Обрабатывает ответ пользователя относительно схемы анкеты.
 protocol ProcessUserAnswerUseCaseProtocol {
     /// Извлекает поля анкеты, валидирует и формирует следующий шаг.

@@ -1,17 +1,31 @@
 import Foundation
 
 enum RAGModuleFactory {
-    static let defaultDocumentRelativePaths: [String] = [
-//        "README.md",
-//        "LightNeiroClient/LightNeiroClient/Doc/mobile_system_design_guide.md"
-        "LightNeiroClient/LightNeiroClient/Doc/ai.md",
-        "LightNeiroClient/LightNeiroClient/Doc/habr.md"
-    ]
-
     static func defaultDocumentURLs(baseDirectory: URL) -> [URL] {
-        defaultDocumentRelativePaths
-            .map { baseDirectory.appendingPathComponent($0) }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        var collected: [URL] = []
+
+        if let readmeURL = existingURL(baseDirectory.appendingPathComponent("README.md")) {
+            collected.append(readmeURL)
+        }
+
+        let documentationFolders = [
+            baseDirectory.appendingPathComponent("docs", isDirectory: true),
+            baseDirectory.appendingPathComponent("LightNeiroClient/Doc", isDirectory: true)
+        ]
+
+        for folder in documentationFolders {
+            collected.append(contentsOf: markdownFiles(in: folder))
+        }
+
+        var unique: [URL] = []
+        var seen = Set<String>()
+        for url in collected {
+            let path = url.standardizedFileURL.path
+            guard !seen.contains(path) else { continue }
+            seen.insert(path)
+            unique.append(url)
+        }
+        return unique
     }
 
     static func makeFacade(
@@ -68,5 +82,33 @@ enum RAGModuleFactory {
             compareUseCase: compareUseCase,
             resetUseCase: resetUseCase
         )
+    }
+
+    private static func existingURL(_ url: URL) -> URL? {
+        FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private static func markdownFiles(in directory: URL) -> [URL] {
+        guard FileManager.default.fileExists(atPath: directory.path) else {
+            return []
+        }
+
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var files: [URL] = []
+        for case let fileURL as URL in enumerator {
+            let ext = fileURL.pathExtension.lowercased()
+            guard ext == "md" || ext == "markdown" else { continue }
+            files.append(fileURL)
+        }
+
+        return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 }

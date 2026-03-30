@@ -51,6 +51,7 @@ final class ChatViewModel {
     private let startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol?
     private let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol?
     private let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol?
+    private let projectHelpUseCase: ProjectHelpUseCaseProtocol?
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
@@ -82,6 +83,7 @@ final class ChatViewModel {
         startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol? = nil,
         stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol? = nil,
         getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol? = nil,
+        projectHelpUseCase: ProjectHelpUseCaseProtocol? = nil,
         taskAgentCatalog: [TaskAgentDescriptor] = TaskAgentCatalog.all
     ) {
         self.session = session
@@ -103,6 +105,7 @@ final class ChatViewModel {
         self.startHackerNewsTaskAgentUseCase = startHackerNewsTaskAgentUseCase
         self.stopHackerNewsTaskAgentUseCase = stopHackerNewsTaskAgentUseCase
         self.getHackerNewsTaskAgentStatusUseCase = getHackerNewsTaskAgentStatusUseCase
+        self.projectHelpUseCase = projectHelpUseCase
         self.taskAgentCatalog = taskAgentCatalog
 
         Task { [weak self] in
@@ -123,6 +126,9 @@ final class ChatViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSending else { return }
         guard !trimmed.isEmpty else { return }
+        if handleProjectHelpCommand(text: trimmed) {
+            return
+        }
         if handleAgentCommand(text: trimmed) {
             return
         }
@@ -253,6 +259,19 @@ final class ChatViewModel {
             return handleHackerNewsTaskAgentCommand(command)
         }
         return false
+    }
+
+    private func handleProjectHelpCommand(text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized == "/help" || normalized.hasPrefix("/help ") else {
+            return false
+        }
+
+        let question = normalized
+            .dropFirst("/help".count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        startProjectHelp(question: question.isEmpty ? nil : String(question))
+        return true
     }
 
     private func handleVacationCommand(_ command: String) -> Bool {
@@ -630,6 +649,23 @@ final class ChatViewModel {
         }
     }
 
+    private func startProjectHelp(question: String?) {
+        guard let useCase = projectHelpUseCase else {
+            appendSystemMessage("Справка по проекту недоступна в этой сборке.")
+            return
+        }
+
+        isSending = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isSending = false }
+
+            let response = await useCase.execute(question: question)
+            self.appendAssistantMessage(response)
+        }
+    }
+
     private func stopHackerNewsTaskAgent() {
         guard let useCase = stopHackerNewsTaskAgentUseCase else {
             appendSystemMessage("Hacker News Task Agent недоступен в этой сборке.")
@@ -815,6 +851,16 @@ final class ChatViewModel {
                 text: text,
                 status: .sent,
                 tone: tone
+            )
+        )
+    }
+
+    private func appendAssistantMessage(_ text: String) {
+        dialogItems.append(
+            DialogHistoryItemViewState(
+                kind: .assistant,
+                text: text,
+                status: .sent
             )
         )
     }

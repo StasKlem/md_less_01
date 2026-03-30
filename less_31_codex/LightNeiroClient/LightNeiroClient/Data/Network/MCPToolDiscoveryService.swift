@@ -2,7 +2,7 @@ import Foundation
 import MCP
 import Logging
 
-final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol, MCPHackerNewsServiceProtocol {
+final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol, MCPHackerNewsServiceProtocol, ProjectGitBranchServiceProtocol {
     private let clientFactory: @Sendable () -> Client
     private let hackerNewsTranslateEnvironmentProvider: (@Sendable (UUID) async -> [String: String])?
 
@@ -25,6 +25,29 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             return result.tools
                 .map { MCPToolSummary(name: $0.name, description: $0.description) }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        } catch {
+            await client.disconnect()
+            throw error
+        }
+    }
+
+    func fetchCurrentGitBranch(serverURL: URL) async throws -> String {
+        let client = clientFactory()
+        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: nil)
+
+        do {
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(name: "project_git_branch", arguments: [:])
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP project_git_branch returned an error." : text)
+            }
+            guard !text.isEmpty else {
+                throw MCPDiscoveryError.toolCall("MCP project_git_branch returned empty response.")
+            }
+            return text
         } catch {
             await client.disconnect()
             throw error
@@ -316,9 +339,11 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             return .hackerNewsTranslate
         case "hackernews-archive", "hacker-news-archive":
             return .hackerNewsArchive
+        case "project":
+            return .project
         default:
             throw MCPDiscoveryError.configuration(
-                "Unknown stdio MCP endpoint: \(serverURL.absoluteString). Expected stdio://open-weather, stdio://hackernews, stdio://hackernews-translate, or stdio://hackernews-archive."
+                "Unknown stdio MCP endpoint: \(serverURL.absoluteString). Expected stdio://open-weather, stdio://hackernews, stdio://hackernews-translate, stdio://hackernews-archive, or stdio://project."
             )
         }
     }
@@ -356,6 +381,7 @@ private enum MCPStdioServerKind {
     case hackerNews
     case hackerNewsTranslate
     case hackerNewsArchive
+    case project
 
     var explicitPathEnv: String {
         switch self {
@@ -367,6 +393,8 @@ private enum MCPStdioServerKind {
             return "HACKERNEWS_TRANSLATE_MCP_SERVER_PATH"
         case .hackerNewsArchive:
             return "HACKERNEWS_ARCHIVE_MCP_SERVER_PATH"
+        case .project:
+            return "PROJECT_MCP_SERVER_PATH"
         }
     }
 
@@ -380,6 +408,8 @@ private enum MCPStdioServerKind {
             return "HackerNewsTranslateMCPServer"
         case .hackerNewsArchive:
             return "HackerNewsArchiveMCPServer"
+        case .project:
+            return "ProjectMCPServer"
         }
     }
 
@@ -397,6 +427,8 @@ private enum MCPStdioServerKind {
             return "HackerNewsTranslate"
         case .hackerNewsArchive:
             return "HackerNewsArchive"
+        case .project:
+            return "ProjectMCPServer"
         }
     }
 }

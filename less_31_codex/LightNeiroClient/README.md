@@ -163,6 +163,12 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - запуск: `/hn start` или `/hn`
 - остановка: `/hn stop`
 
+### Ассистент проекта
+
+- запуск: `/help`
+- запуск с вопросом: `/help <вопрос>`
+- отвечает по `README.md`, материалам из `LightNeiroClient/Doc` и текущему контексту проекта
+
 ## MCP-интеграции
 
 Для stdio-режима используются alias'ы вида `stdio://...` и автообнаружение локальных MCP-пакетов.
