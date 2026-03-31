@@ -27,7 +27,7 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
         self.ragIndexState = ProjectHelpRAGIndexState(initialStrategy: initialIndexedRAGStrategy)
     }
 
-    func execute(question: String?) async -> String {
+    func execute(question: String?) async -> ProjectHelpExecutionResult {
         let normalizedQuestion = question?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let searchQuery = normalizedQuestion.isEmpty
@@ -42,16 +42,23 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             strategy: settings.ragChunkingStrategy
         )
 
-        let branch = await branchTask
-        let projectFiles = await projectFilesTask
+        let branchContext = await branchTask
+        let projectFilesContext = await projectFilesTask
         let evidence = await evidenceTask
+        let systemMessage = makeSystemMessage(
+            branchDiagnosticMessage: branchContext.diagnosticMessage,
+            projectFilesDiagnosticMessage: projectFilesContext.diagnosticMessage
+        )
 
         if evidence.isEmpty {
-            return buildFallbackAnswer(
-                question: normalizedQuestion,
-                branch: branch,
-                projectFiles: projectFiles,
-                evidence: []
+            return ProjectHelpExecutionResult(
+                response: buildFallbackAnswer(
+                    question: normalizedQuestion,
+                    branch: branchContext.branch,
+                    projectFiles: projectFilesContext.files,
+                    evidence: []
+                ),
+                systemMessage: systemMessage
             )
         }
 
@@ -59,8 +66,8 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             let request = LLMRequest(
                 systemPrompt: makeSystemPrompt(
                     question: normalizedQuestion,
-                    branch: branch,
-                    projectFiles: projectFiles,
+                    branch: branchContext.branch,
+                    projectFiles: projectFilesContext.files,
                     evidence: evidence
                 ),
                 shortTermMessages: [],
@@ -71,46 +78,58 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             let response = try await llmClient.send(request: request)
             let content = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             if content.isEmpty {
-                return buildFallbackAnswer(
-                    question: normalizedQuestion,
-                    branch: branch,
-                    projectFiles: projectFiles,
-                    evidence: evidence
+                return ProjectHelpExecutionResult(
+                    response: buildFallbackAnswer(
+                        question: normalizedQuestion,
+                        branch: branchContext.branch,
+                        projectFiles: projectFilesContext.files,
+                        evidence: evidence
+                    ),
+                    systemMessage: systemMessage
                 )
             }
-            return content
+            return ProjectHelpExecutionResult(
+                response: content,
+                systemMessage: systemMessage
+            )
         } catch {
-            return buildFallbackAnswer(
-                question: normalizedQuestion,
-                branch: branch,
-                projectFiles: projectFiles,
-                evidence: evidence
+            return ProjectHelpExecutionResult(
+                response: buildFallbackAnswer(
+                    question: normalizedQuestion,
+                    branch: branchContext.branch,
+                    projectFiles: projectFilesContext.files,
+                    evidence: evidence
+                ),
+                systemMessage: systemMessage
             )
         }
     }
 
-    private func fetchProjectBranch() async -> String? {
+    private func fetchProjectBranch() async -> ProjectGitBranchContext {
         do {
-            let branch = try await projectContextService.fetchCurrentGitBranch(
+            let context = try await projectContextService.fetchCurrentGitBranch(
                 serverURL: projectBranchEndpointURL
             )
-            let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return context
         } catch {
-            return nil
+            return ProjectGitBranchContext(
+                branch: nil,
+                diagnosticMessage: "Не удалось получить текущую git-ветку через MCP: \(error.localizedDescription)"
+            )
         }
     }
 
-    private func fetchProjectFiles() async -> [String] {
+    private func fetchProjectFiles() async -> ProjectFilesContext {
         do {
-            let files = try await projectContextService.fetchProjectFiles(
+            let context = try await projectContextService.fetchProjectFiles(
                 serverURL: projectBranchEndpointURL
             )
-            return files
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            return context
         } catch {
-            return []
+            return ProjectFilesContext(
+                files: [],
+                diagnosticMessage: "Не удалось получить список файлов проекта через MCP: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -211,6 +230,21 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             lines.append("[\(index + 1)] source=\(item.source) section=\(sectionText) text=\(text)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func makeSystemMessage(
+        branchDiagnosticMessage: String?,
+        projectFilesDiagnosticMessage: String?
+    ) -> String? {
+        let messages = [branchDiagnosticMessage, projectFilesDiagnosticMessage]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !messages.isEmpty else {
+            return nil
+        }
+
+        return messages.joined(separator: "\n")
     }
 
     private func buildFallbackAnswer(

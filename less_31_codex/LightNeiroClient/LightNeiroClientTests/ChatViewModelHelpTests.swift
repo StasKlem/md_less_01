@@ -13,7 +13,12 @@ final class ChatViewModelHelpTests: XCTestCase {
             createdAt: Date()
         )
         let sendSpy = ChatSendMessageUseCaseSpy()
-        let helpSpy = ChatProjectHelpUseCaseSpy(response: "Справка по проекту")
+        let helpSpy = ChatProjectHelpUseCaseSpy(
+            result: ProjectHelpExecutionResult(
+                response: "Справка по проекту",
+                systemMessage: "Не удалось получить текущую git-ветку через MCP: request failed"
+            )
+        )
 
         let viewModel = ChatViewModel(
             session: session,
@@ -49,6 +54,9 @@ final class ChatViewModelHelpTests: XCTestCase {
         XCTAssertEqual(sendCount, 0)
         XCTAssertEqual(helpCount, 1)
         XCTAssertEqual(viewModel.chatMode, .default)
+        XCTAssertEqual(viewModel.dialogItems.count, 2)
+        XCTAssertEqual(viewModel.dialogItems.first?.kind, .system)
+        XCTAssertTrue(viewModel.dialogItems.first?.text.contains("Не удалось получить текущую git-ветку через MCP") == true)
         XCTAssertEqual(viewModel.dialogItems.last?.kind, .assistant)
         XCTAssertEqual(viewModel.dialogItems.last?.text, "Справка по проекту")
     }
@@ -65,14 +73,14 @@ private actor ChatSendMessageUseCaseSpy: SendMessageUseCaseProtocol {
 
 private actor ChatProjectHelpUseCaseSpy: ProjectHelpUseCaseProtocol {
     private(set) var callCount = 0
-    let response: String
+    let result: ProjectHelpExecutionResult
 
-    init(response: String) {
-        self.response = response
+    init(result: ProjectHelpExecutionResult) {
+        self.result = result
     }
 
-    func execute(question _: String?) async -> String {
+    func execute(question _: String?) async -> ProjectHelpExecutionResult {
         callCount += 1
-        return response
+        return result
     }
 }

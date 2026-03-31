@@ -661,8 +661,11 @@ final class ChatViewModel {
             guard let self else { return }
             defer { self.isSending = false }
 
-            let response = await useCase.execute(question: question)
-            self.appendAssistantMessage(response)
+            let result = await useCase.execute(question: question)
+            if let systemMessage = result.systemMessage {
+                self.appendSystemMessage(systemMessage)
+            }
+            self.appendAssistantMessage(result.response)
         }
     }
 

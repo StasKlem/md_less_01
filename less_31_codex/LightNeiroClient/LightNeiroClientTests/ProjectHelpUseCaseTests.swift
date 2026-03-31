@@ -47,9 +47,10 @@ final class ProjectHelpUseCaseTests: XCTestCase {
             initialIndexedRAGStrategy: .structural
         )
 
-        let answer = await useCase.execute(question: "Как устроен проект?")
+        let result = await useCase.execute(question: "Как устроен проект?")
 
-        XCTAssertEqual(answer, "Готовый ответ")
+        XCTAssertEqual(result.response, "Готовый ответ")
+        XCTAssertNil(result.systemMessage)
         let searchCallCount = await ragFacade.searchCallCount
         let lastTopK = await ragFacade.lastTopK
         let lastQuery = await ragFacade.lastQuery ?? ""
@@ -102,12 +103,14 @@ final class ProjectHelpUseCaseTests: XCTestCase {
             initialIndexedRAGStrategy: .structural
         )
 
-        let answer = await useCase.execute(question: nil)
+        let result = await useCase.execute(question: nil)
 
-        XCTAssertTrue(answer.contains("Краткий обзор проекта LightNeiroClient:"))
-        XCTAssertTrue(answer.contains("Текущая git-ветка: не удалось определить."))
-        XCTAssertTrue(answer.contains("README.md"))
-        XCTAssertTrue(answer.contains("ProjectMCPServer/Package.swift"))
+        XCTAssertTrue(result.response.contains("Краткий обзор проекта LightNeiroClient:"))
+        XCTAssertTrue(result.response.contains("Текущая git-ветка: не удалось определить."))
+        XCTAssertTrue(result.response.contains("README.md"))
+        XCTAssertTrue(result.response.contains("ProjectMCPServer/Package.swift"))
+        XCTAssertNotNil(result.systemMessage)
+        XCTAssertTrue(result.systemMessage?.contains("Не удалось получить текущую git-ветку через MCP") == true)
     }
 
     private static func makeSearchResult(source: String, section: String, content: String) -> SearchResult {
@@ -200,11 +203,19 @@ private actor ProjectHelpBranchServiceSpy: ProjectGitBranchServiceProtocol {
         self.projectFiles = projectFiles
     }
 
-    func fetchCurrentGitBranch(serverURL _: URL) async throws -> String {
-        try result.get()
+    func fetchCurrentGitBranch(serverURL _: URL) async throws -> ProjectGitBranchContext {
+        switch result {
+        case .success(let branch):
+            return ProjectGitBranchContext(branch: branch, diagnosticMessage: nil)
+        case .failure:
+            return ProjectGitBranchContext(
+                branch: nil,
+                diagnosticMessage: "Не удалось получить текущую git-ветку через MCP: request failed"
+            )
+        }
     }
 
-    func fetchProjectFiles(serverURL _: URL) async throws -> [String] {
-        projectFiles
+    func fetchProjectFiles(serverURL _: URL) async throws -> ProjectFilesContext {
+        ProjectFilesContext(files: projectFiles, diagnosticMessage: nil)
     }
 }

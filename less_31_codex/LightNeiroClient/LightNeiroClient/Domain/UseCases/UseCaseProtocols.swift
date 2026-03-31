@@ -125,11 +125,18 @@ protocol SaveAPIKeyUseCaseProtocol {
 }
 
 /// Отвечает на вопросы о проекте с учетом RAG и текущего контекста.
+struct ProjectHelpExecutionResult: Sendable {
+    /// Текст ответа ассистента.
+    let response: String
+    /// Системное сообщение с диагностикой, если были проблемы при сборе контекста.
+    let systemMessage: String?
+}
+
 protocol ProjectHelpUseCaseProtocol {
     /// Формирует ответ ассистента по проекту.
     /// - Parameter question: Текст вопроса пользователя или `nil` для общего обзора.
-    /// - Returns: Готовый ответ ассистента.
-    func execute(question: String?) async -> String
+    /// - Returns: Готовый ответ ассистента и системное сообщение при необходимости.
+    func execute(question: String?) async -> ProjectHelpExecutionResult
 }
 
 /// Обрабатывает ответ пользователя относительно схемы анкеты.

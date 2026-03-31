@@ -11,7 +11,8 @@ final class MCPToolDiscoveryServiceFallbackTests: XCTestCase {
 
         let branch = try await service.fetchCurrentGitBranch(serverURL: URL(string: "stdio://project")!)
 
-        XCTAssertFalse(branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        XCTAssertFalse((branch.branch ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        XCTAssertNotNil(branch.diagnosticMessage)
     }
 
     func testFetchProjectFilesFallsBackToLocalGitWhenProjectMCPPathIsInvalid() async throws {
@@ -23,8 +24,26 @@ final class MCPToolDiscoveryServiceFallbackTests: XCTestCase {
 
         let files = try await service.fetchProjectFiles(serverURL: URL(string: "stdio://project")!)
 
-        XCTAssertFalse(files.isEmpty)
-        XCTAssertTrue(files.contains("AGENTS.md"))
-        XCTAssertTrue(files.contains("LightNeiroClient/ProjectMCPServer/Package.swift"))
+        XCTAssertFalse(files.files.isEmpty)
+        XCTAssertTrue(files.files.contains("AGENTS.md"))
+        XCTAssertTrue(files.files.contains("LightNeiroClient/ProjectMCPServer/Package.swift"))
+        XCTAssertNotNil(files.diagnosticMessage)
+    }
+
+    func testFetchCurrentGitBranchAcceptsRepositoryRootAsProjectMCPPath() async throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .path
+        let service = MCPToolDiscoveryService(
+            projectEnvironmentProvider: {
+                ["PROJECT_MCP_SERVER_PATH": repositoryRoot]
+            }
+        )
+
+        let branch = try await service.fetchCurrentGitBranch(serverURL: URL(string: "stdio://project")!)
+
+        XCTAssertEqual(branch.branch, "main")
+        XCTAssertNil(branch.diagnosticMessage)
     }
 }

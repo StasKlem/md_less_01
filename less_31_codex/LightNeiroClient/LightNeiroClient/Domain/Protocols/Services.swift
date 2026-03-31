@@ -80,14 +80,29 @@ protocol APIKeyStoreProtocol {
 }
 
 /// Контракт сервиса получения контекста проекта через MCP.
+struct ProjectGitBranchContext: Sendable {
+    /// Текущая git-ветка или `nil`, если получить ее не удалось.
+    let branch: String?
+    /// Текст диагностики, если при получении ветки была ошибка или использован fallback.
+    let diagnosticMessage: String?
+}
+
+/// Контекст со списком файлов проекта и диагностикой при проблемах получения.
+struct ProjectFilesContext: Sendable {
+    /// Относительные пути файлов проекта.
+    let files: [String]
+    /// Текст диагностики, если при получении списка файлов была ошибка или использован fallback.
+    let diagnosticMessage: String?
+}
+
 protocol ProjectGitBranchServiceProtocol {
     /// Возвращает текущую git-ветку проекта.
     /// - Parameter serverURL: URL MCP-сервера.
-    /// - Returns: Имя текущей ветки.
-    func fetchCurrentGitBranch(serverURL: URL) async throws -> String
+    /// - Returns: Контекст с веткой и диагностикой.
+    func fetchCurrentGitBranch(serverURL: URL) async throws -> ProjectGitBranchContext
 
     /// Возвращает список файлов проекта через MCP.
     /// - Parameter serverURL: URL MCP-сервера.
-    /// - Returns: Список относительных путей файлов проекта.
-    func fetchProjectFiles(serverURL: URL) async throws -> [String]
+    /// - Returns: Контекст со списком файлов и диагностикой.
+    func fetchProjectFiles(serverURL: URL) async throws -> ProjectFilesContext
 }

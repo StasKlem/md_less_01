@@ -34,7 +34,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
     }
 
-    func fetchCurrentGitBranch(serverURL: URL) async throws -> String {
+    func fetchCurrentGitBranch(serverURL: URL) async throws -> ProjectGitBranchContext {
         let client = clientFactory()
         do {
             let transport = try makeTransport(
@@ -47,25 +47,47 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 
             let text = extractText(from: result.content)
             if result.isError ?? false {
-                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP project_git_branch returned an error." : text)
+                let reason = text.isEmpty ? "MCP project_git_branch returned an error." : text
+                if let fallback = localCurrentGitBranch(), !fallback.isEmpty {
+                    return ProjectGitBranchContext(
+                        branch: fallback,
+                        diagnosticMessage: "MCP project_git_branch завершился ошибкой: \(reason). Использована локальная ветка \(fallback)."
+                    )
+                }
+                return ProjectGitBranchContext(
+                    branch: nil,
+                    diagnosticMessage: "MCP project_git_branch завершился ошибкой: \(reason)"
+                )
             }
             guard !text.isEmpty else {
                 if let fallback = localCurrentGitBranch(), !fallback.isEmpty {
-                    return fallback
+                    return ProjectGitBranchContext(
+                        branch: fallback,
+                        diagnosticMessage: "MCP project_git_branch вернул пустой ответ. Использована локальная ветка \(fallback)."
+                    )
                 }
-                throw MCPDiscoveryError.toolCall("MCP project_git_branch returned empty response.")
+                return ProjectGitBranchContext(
+                    branch: nil,
+                    diagnosticMessage: "MCP project_git_branch вернул пустой ответ."
+                )
             }
-            return text
+            return ProjectGitBranchContext(branch: text, diagnosticMessage: nil)
         } catch {
             await client.disconnect()
             if let fallback = localCurrentGitBranch(), !fallback.isEmpty {
-                return fallback
+                return ProjectGitBranchContext(
+                    branch: fallback,
+                    diagnosticMessage: "Не удалось получить текущую git-ветку через MCP: \(error.localizedDescription). Использована локальная ветка \(fallback)."
+                )
             }
-            throw error
+            return ProjectGitBranchContext(
+                branch: nil,
+                diagnosticMessage: "Не удалось получить текущую git-ветку через MCP: \(error.localizedDescription)"
+            )
         }
     }
 
-    func fetchProjectFiles(serverURL: URL) async throws -> [String] {
+    func fetchProjectFiles(serverURL: URL) async throws -> ProjectFilesContext {
         let client = clientFactory()
         do {
             let transport = try makeTransport(
@@ -78,23 +100,46 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 
             let text = extractText(from: result.content)
             if result.isError ?? false {
-                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP project_list_files returned an error." : text)
+                let reason = text.isEmpty ? "MCP project_list_files returned an error." : text
+                let fallback = localProjectFiles()
+                if !fallback.isEmpty {
+                    return ProjectFilesContext(
+                        files: fallback,
+                        diagnosticMessage: "MCP project_list_files завершился ошибкой: \(reason). Использован локальный список файлов."
+                    )
+                }
+                return ProjectFilesContext(
+                    files: [],
+                    diagnosticMessage: "MCP project_list_files завершился ошибкой: \(reason)"
+                )
             }
             guard !text.isEmpty else {
                 let fallback = localProjectFiles()
                 if !fallback.isEmpty {
-                    return fallback
+                    return ProjectFilesContext(
+                        files: fallback,
+                        diagnosticMessage: "MCP project_list_files вернул пустой ответ. Использован локальный список файлов."
+                    )
                 }
-                throw MCPDiscoveryError.toolCall("MCP project_list_files returned empty response.")
+                return ProjectFilesContext(
+                    files: [],
+                    diagnosticMessage: "MCP project_list_files вернул пустой ответ."
+                )
             }
-            return parseProjectFiles(from: text)
+            return ProjectFilesContext(files: parseProjectFiles(from: text), diagnosticMessage: nil)
         } catch {
             await client.disconnect()
             let fallback = localProjectFiles()
             if !fallback.isEmpty {
-                return fallback
+                return ProjectFilesContext(
+                    files: fallback,
+                    diagnosticMessage: "Не удалось получить список файлов проекта через MCP: \(error.localizedDescription). Использован локальный список файлов."
+                )
             }
-            throw error
+            return ProjectFilesContext(
+                files: [],
+                diagnosticMessage: "Не удалось получить список файлов проекта через MCP: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -304,7 +349,12 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
 
         let serverKind = try inferStdioServerKind(from: serverURL)
-        let environment = ProcessInfo.processInfo.environment
+        var environment = ProcessInfo.processInfo.environment
+        if let environmentOverrides {
+            for (key, value) in environmentOverrides {
+                environment[key] = value
+            }
+        }
         var invalidExplicitPathMessage: String?
         if let explicitPath = environment[serverKind.explicitPathEnv]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -364,7 +414,24 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         if isDirectory.boolValue {
             let packageManifest = resolvedURL.appendingPathComponent("Package.swift")
             guard fileManager.fileExists(atPath: packageManifest.path) else {
-                return nil
+                let nestedPackageDirectory = resolvedURL
+                    .appendingPathComponent(serverKind.packageDirectoryName, isDirectory: true)
+                let nestedPackageManifest = nestedPackageDirectory.appendingPathComponent("Package.swift")
+                guard fileManager.fileExists(atPath: nestedPackageManifest.path) else {
+                    return nil
+                }
+                return .init(
+                    executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                    arguments: [
+                        "swift",
+                        "run",
+                        "--package-path",
+                        nestedPackageDirectory.path,
+                        serverKind.executableName
+                    ],
+                    currentDirectoryURL: nestedPackageDirectory,
+                    environmentOverrides: environmentOverrides
+                )
             }
             return .init(
                 executableURL: URL(fileURLWithPath: "/usr/bin/env"),
@@ -395,7 +462,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
 
         var cursor = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
-        for _ in 0...8 {
+        for _ in 0...20 {
             let candidate = cursor.appendingPathComponent(path)
             if fileManager.fileExists(atPath: candidate.path) {
                 return candidate
@@ -433,7 +500,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         let fileManager = FileManager.default
         var cursor = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
 
-        for _ in 0...8 {
+        for _ in 0...20 {
             let packageCandidate = cursor.appendingPathComponent(directoryName, isDirectory: true)
             let packageManifest = packageCandidate.appendingPathComponent("Package.swift")
             if fileManager.fileExists(atPath: packageManifest.path) {
