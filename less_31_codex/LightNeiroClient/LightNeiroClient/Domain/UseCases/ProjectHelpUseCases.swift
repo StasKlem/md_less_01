@@ -36,18 +36,21 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
         let settings = (try? await settingsRepository.fetchSettings()) ?? .default
 
         async let branchTask = fetchProjectBranch()
+        async let projectFilesTask = fetchProjectFiles()
         async let evidenceTask = collectEvidence(
             for: searchQuery,
             strategy: settings.ragChunkingStrategy
         )
 
         let branch = await branchTask
+        let projectFiles = await projectFilesTask
         let evidence = await evidenceTask
 
         if evidence.isEmpty {
             return buildFallbackAnswer(
                 question: normalizedQuestion,
                 branch: branch,
+                projectFiles: projectFiles,
                 evidence: []
             )
         }
@@ -57,6 +60,7 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
                 systemPrompt: makeSystemPrompt(
                     question: normalizedQuestion,
                     branch: branch,
+                    projectFiles: projectFiles,
                     evidence: evidence
                 ),
                 shortTermMessages: [],
@@ -70,6 +74,7 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
                 return buildFallbackAnswer(
                     question: normalizedQuestion,
                     branch: branch,
+                    projectFiles: projectFiles,
                     evidence: evidence
                 )
             }
@@ -78,6 +83,7 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             return buildFallbackAnswer(
                 question: normalizedQuestion,
                 branch: branch,
+                projectFiles: projectFiles,
                 evidence: evidence
             )
         }
@@ -92,6 +98,19 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             return trimmed.isEmpty ? nil : trimmed
         } catch {
             return nil
+        }
+    }
+
+    private func fetchProjectFiles() async -> [String] {
+        do {
+            let files = try await projectContextService.fetchProjectFiles(
+                serverURL: projectBranchEndpointURL
+            )
+            return files
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        } catch {
+            return []
         }
     }
 
@@ -132,6 +151,7 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
     private func makeSystemPrompt(
         question: String,
         branch: String?,
+        projectFiles: [String],
         evidence: [ProjectHelpEvidence]
     ) -> String {
         var blocks: [String] = [
@@ -147,6 +167,8 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
             "PROJECT_CONTEXT:\n- git branch: \(branchText)\n- repository: LightNeiroClient\n- docs: README.md, LightNeiroClient/Doc"
         )
 
+        blocks.append(makeProjectFilesBlock(projectFiles))
+
         if question.isEmpty {
             blocks.append("Вопрос пользователя: дай обзор структуры проекта и ключевых команд.")
         } else {
@@ -156,6 +178,22 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
         blocks.append(makeEvidenceBlock(evidence))
         blocks.append("В конце ответа при необходимости укажи текущую git-ветку и краткий список источников.")
         return blocks.joined(separator: "\n\n")
+    }
+
+    private func makeProjectFilesBlock(_ projectFiles: [String]) -> String {
+        guard !projectFiles.isEmpty else {
+            return "PROJECT_FILES:\n- evidence unavailable"
+        }
+
+        let previewFiles = projectFiles.prefix(40)
+        var lines: [String] = ["PROJECT_FILES (\(projectFiles.count)):"]
+        for file in previewFiles {
+            lines.append("- \(file)")
+        }
+        if projectFiles.count > previewFiles.count {
+            lines.append("- ... and \(projectFiles.count - previewFiles.count) more")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func makeEvidenceBlock(_ evidence: [ProjectHelpEvidence]) -> String {
@@ -178,6 +216,7 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
     private func buildFallbackAnswer(
         question: String,
         branch: String?,
+        projectFiles: [String],
         evidence: [ProjectHelpEvidence]
     ) -> String {
         var lines: [String] = []
@@ -196,6 +235,16 @@ final class ProjectHelpUseCase: ProjectHelpUseCaseProtocol {
 
         lines.append("Структура проекта: App, Domain, Data, Presentation и LightNeiroClientTests.")
         lines.append("Документация: README.md и материалы из LightNeiroClient/Doc.")
+
+        if !projectFiles.isEmpty {
+            lines.append("Файлы проекта:")
+            for file in projectFiles.prefix(10) {
+                lines.append("- \(file)")
+            }
+            if projectFiles.count > 10 {
+                lines.append("- ... и еще \(projectFiles.count - 10) файлов")
+            }
+        }
 
         if !question.isEmpty {
             lines.append("Вопрос: \(question)")

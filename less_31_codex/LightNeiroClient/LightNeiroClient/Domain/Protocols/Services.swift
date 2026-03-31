@@ -85,4 +85,9 @@ protocol ProjectGitBranchServiceProtocol {
     /// - Parameter serverURL: URL MCP-сервера.
     /// - Returns: Имя текущей ветки.
     func fetchCurrentGitBranch(serverURL: URL) async throws -> String
+
+    /// Возвращает список файлов проекта через MCP.
+    /// - Parameter serverURL: URL MCP-сервера.
+    /// - Returns: Список относительных путей файлов проекта.
+    func fetchProjectFiles(serverURL: URL) async throws -> [String]
 }

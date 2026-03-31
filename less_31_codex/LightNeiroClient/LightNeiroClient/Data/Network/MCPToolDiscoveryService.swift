@@ -5,13 +5,16 @@ import Logging
 final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeatherServiceProtocol, MCPHackerNewsServiceProtocol, ProjectGitBranchServiceProtocol {
     private let clientFactory: @Sendable () -> Client
     private let hackerNewsTranslateEnvironmentProvider: (@Sendable (UUID) async -> [String: String])?
+    private let projectEnvironmentProvider: (@Sendable () -> [String: String])?
 
     init(clientFactory: @escaping @Sendable () -> Client = {
         Client(name: "LightNeiroClient", version: "1.0.0")
     },
-    hackerNewsTranslateEnvironmentProvider: (@Sendable (UUID) async -> [String: String])? = nil) {
+    hackerNewsTranslateEnvironmentProvider: (@Sendable (UUID) async -> [String: String])? = nil,
+    projectEnvironmentProvider: (@Sendable () -> [String: String])? = nil) {
         self.clientFactory = clientFactory
         self.hackerNewsTranslateEnvironmentProvider = hackerNewsTranslateEnvironmentProvider
+        self.projectEnvironmentProvider = projectEnvironmentProvider
     }
 
     func fetchTools(serverURL: URL) async throws -> [MCPToolSummary] {
@@ -33,9 +36,11 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
 
     func fetchCurrentGitBranch(serverURL: URL) async throws -> String {
         let client = clientFactory()
-        let transport = try makeTransport(serverURL: serverURL, environmentOverrides: nil)
-
         do {
+            let transport = try makeTransport(
+                serverURL: serverURL,
+                environmentOverrides: projectEnvironmentProvider?()
+            )
             _ = try await client.connect(transport: transport)
             let result = try await client.callTool(name: "project_git_branch", arguments: [:])
             await client.disconnect()
@@ -45,11 +50,50 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                 throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP project_git_branch returned an error." : text)
             }
             guard !text.isEmpty else {
+                if let fallback = localCurrentGitBranch(), !fallback.isEmpty {
+                    return fallback
+                }
                 throw MCPDiscoveryError.toolCall("MCP project_git_branch returned empty response.")
             }
             return text
         } catch {
             await client.disconnect()
+            if let fallback = localCurrentGitBranch(), !fallback.isEmpty {
+                return fallback
+            }
+            throw error
+        }
+    }
+
+    func fetchProjectFiles(serverURL: URL) async throws -> [String] {
+        let client = clientFactory()
+        do {
+            let transport = try makeTransport(
+                serverURL: serverURL,
+                environmentOverrides: projectEnvironmentProvider?()
+            )
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(name: "project_list_files", arguments: [:])
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                throw MCPDiscoveryError.toolCall(text.isEmpty ? "MCP project_list_files returned an error." : text)
+            }
+            guard !text.isEmpty else {
+                let fallback = localProjectFiles()
+                if !fallback.isEmpty {
+                    return fallback
+                }
+                throw MCPDiscoveryError.toolCall("MCP project_list_files returned empty response.")
+            }
+            return parseProjectFiles(from: text)
+        } catch {
+            await client.disconnect()
+            let fallback = localProjectFiles()
+            if !fallback.isEmpty {
+                return fallback
+            }
             throw error
         }
     }
@@ -198,6 +242,43 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             return ProcessStdioMCPTransport(launchConfiguration: configuration)
         }
         return HTTPClientTransport(endpoint: serverURL, streaming: true)
+    }
+
+    private func localCurrentGitBranch() -> String? {
+        guard let repositoryRoot = findRepositoryRoot() else {
+            return nil
+        }
+
+        if let branch = runGit(arguments: ["branch", "--show-current"], currentDirectoryURL: repositoryRoot),
+           !branch.isEmpty
+        {
+            return branch
+        }
+
+        if let sha = runGit(arguments: ["rev-parse", "--short", "HEAD"], currentDirectoryURL: repositoryRoot),
+           !sha.isEmpty
+        {
+            return "detached HEAD (\(sha))"
+        }
+
+        return nil
+    }
+
+    private func localProjectFiles() -> [String] {
+        guard let repositoryRoot = findRepositoryRoot(),
+              let output = runGit(
+                arguments: ["ls-files", "--cached", "--others", "--exclude-standard"],
+                currentDirectoryURL: repositoryRoot
+              )
+        else {
+            return []
+        }
+
+        return output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     private func shouldUseStdio(serverURL: URL) -> Bool {
@@ -374,6 +455,66 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
         return nil
     }
+
+    private func findRepositoryRoot() -> URL? {
+        let fileManager = FileManager.default
+
+        if let topLevelPath = runGit(
+            arguments: ["rev-parse", "--show-toplevel"],
+            currentDirectoryURL: nil
+        ),
+        !topLevelPath.isEmpty
+        {
+            let topLevelURL = URL(fileURLWithPath: topLevelPath, isDirectory: true)
+            if fileManager.fileExists(atPath: topLevelURL.path) {
+                return topLevelURL
+            }
+        }
+
+        var cursor = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+
+        for _ in 0...10 {
+            let gitDirectory = cursor.appendingPathComponent(".git", isDirectory: true)
+            if fileManager.fileExists(atPath: gitDirectory.path) {
+                return cursor
+            }
+
+            let parent = cursor.deletingLastPathComponent()
+            if parent.path == cursor.path {
+                break
+            }
+            cursor = parent
+        }
+        return nil
+    }
+}
+
+private extension MCPToolDiscoveryService {
+    func runGit(arguments: [String], currentDirectoryURL: URL?) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = currentDirectoryURL
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 private enum MCPStdioServerKind {
@@ -480,6 +621,36 @@ private func extractText(from content: [Tool.Content]) -> String {
     }
     .filter { !$0.isEmpty }
     .joined(separator: "\n")
+}
+
+private func parseProjectFiles(from text: String) -> [String] {
+    let lines = text
+        .split(separator: "\n")
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+    guard !lines.isEmpty else {
+        return []
+    }
+
+    let candidateLines: [String]
+    if lines.first?.lowercased().hasPrefix("project files") == true {
+        candidateLines = Array(lines.dropFirst())
+    } else {
+        candidateLines = lines
+    }
+
+    return candidateLines
+        .map { line -> String in
+            var normalized = line
+            if normalized.hasPrefix("- ") {
+                normalized.removeFirst(2)
+            } else if normalized.hasPrefix("• ") {
+                normalized.removeFirst(2)
+            }
+            return normalized
+        }
+        .filter { !$0.isEmpty }
 }
 
 private actor ProcessStdioMCPTransport: Transport {

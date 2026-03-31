@@ -73,6 +73,9 @@ struct AppEnvironment {
                     }
                 }
                 return environmentOverrides
+            },
+            projectEnvironmentProvider: {
+                Self.projectMCPServerEnvironment()
             }
         )
         let loadAPIKey = LoadAPIKeyUseCase(apiKeyStore: apiKeyStore)
@@ -295,6 +298,29 @@ struct AppEnvironment {
             return true
         }
         return host != "localhost" && host != "127.0.0.1" && host != "::1"
+    }
+
+    private static func projectMCPServerEnvironment() -> [String: String] {
+        guard let packagePath = projectMCPServerPackagePath() else {
+            return [:]
+        }
+
+        return ["PROJECT_MCP_SERVER_PATH": packagePath.path]
+    }
+
+    private static func projectMCPServerPackagePath() -> URL? {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+        let appRoot = sourceURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let packageURL = appRoot.appendingPathComponent("ProjectMCPServer", isDirectory: true)
+        let manifestURL = packageURL.appendingPathComponent("Package.swift")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            return nil
+        }
+        return packageURL
     }
 
     private static func defaultRAGDocumentURLs() -> [URL] {

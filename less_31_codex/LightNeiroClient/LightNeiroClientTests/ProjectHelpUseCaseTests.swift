@@ -28,7 +28,15 @@ final class ProjectHelpUseCaseTests: XCTestCase {
                 )
             ]
         )
-        let branchService = ProjectHelpBranchServiceSpy(result: .success("main"))
+        let projectFiles = [
+            "README.md",
+            "ProjectMCPServer/Package.swift",
+            "ProjectMCPServer/Sources/ProjectMCPServer/main.swift"
+        ]
+        let branchService = ProjectHelpBranchServiceSpy(
+            result: .success("main"),
+            projectFiles: projectFiles
+        )
 
         let useCase = ProjectHelpUseCase(
             settingsRepository: settingsRepository,
@@ -54,6 +62,8 @@ final class ProjectHelpUseCaseTests: XCTestCase {
         XCTAssertTrue(request.systemPrompt.contains("main"))
         XCTAssertTrue(request.systemPrompt.contains("README.md"))
         XCTAssertTrue(request.systemPrompt.contains("LightNeiroClient/Doc"))
+        XCTAssertTrue(request.systemPrompt.contains("PROJECT_FILES"))
+        XCTAssertTrue(request.systemPrompt.contains("ProjectMCPServer/Package.swift"))
         XCTAssertTrue(request.systemPrompt.contains("Как устроен проект?"))
         XCTAssertTrue(request.systemPrompt.contains("App, Domain, Data, Presentation"))
         XCTAssertTrue(request.systemPrompt.contains("/help отвечает по документации"))
@@ -76,7 +86,11 @@ final class ProjectHelpUseCaseTests: XCTestCase {
             ]
         )
         let branchService = ProjectHelpBranchServiceSpy(
-            result: .failure(StubError.failed)
+            result: .failure(StubError.failed),
+            projectFiles: [
+                "README.md",
+                "ProjectMCPServer/Package.swift"
+            ]
         )
 
         let useCase = ProjectHelpUseCase(
@@ -93,6 +107,7 @@ final class ProjectHelpUseCaseTests: XCTestCase {
         XCTAssertTrue(answer.contains("Краткий обзор проекта LightNeiroClient:"))
         XCTAssertTrue(answer.contains("Текущая git-ветка: не удалось определить."))
         XCTAssertTrue(answer.contains("README.md"))
+        XCTAssertTrue(answer.contains("ProjectMCPServer/Package.swift"))
     }
 
     private static func makeSearchResult(source: String, section: String, content: String) -> SearchResult {
@@ -178,12 +193,18 @@ private actor ProjectHelpRAGFacadeSpy: RAGUseCaseFacadeProtocol {
 
 private actor ProjectHelpBranchServiceSpy: ProjectGitBranchServiceProtocol {
     let result: Result<String, Error>
+    let projectFiles: [String]
 
-    init(result: Result<String, Error>) {
+    init(result: Result<String, Error>, projectFiles: [String] = []) {
         self.result = result
+        self.projectFiles = projectFiles
     }
 
     func fetchCurrentGitBranch(serverURL _: URL) async throws -> String {
         try result.get()
+    }
+
+    func fetchProjectFiles(serverURL _: URL) async throws -> [String] {
+        projectFiles
     }
 }
