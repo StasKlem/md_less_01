@@ -168,10 +168,12 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - запуск: `/help`
 - запуск с вопросом: `/help <вопрос>`
 - отвечает по `README.md`, материалам из `LightNeiroClient/Doc` и текущему контексту проекта
+- если MCP-контекст недоступен, в диалог добавляется системное сообщение с причиной ошибки
 
 ## MCP-интеграции
 
 Для stdio-режима используются alias'ы вида `stdio://...` и автообнаружение локальных MCP-пакетов.
+Для `stdio://project` приложение ищет `ProjectMCPServer` в текущем дереве репозитория и принимает `PROJECT_MCP_SERVER_PATH` как путь к папке пакета или к корню репозитория, внутри которого лежит `ProjectMCPServer`.
 
 Поддерживаемые alias:
 
@@ -186,6 +188,7 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - `HACKERNEWS_MCP_SERVER_PATH`
 - `HACKERNEWS_TRANSLATE_MCP_SERVER_PATH`
 - `HACKERNEWS_ARCHIVE_MCP_SERVER_PATH`
+- `PROJECT_MCP_SERVER_PATH`
 
 ## Структура проекта
 
