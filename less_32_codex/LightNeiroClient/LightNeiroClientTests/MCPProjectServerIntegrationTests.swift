@@ -69,7 +69,7 @@ final class MCPProjectServerIntegrationTests: XCTestCase {
             "build",
             "--package-path",
             packageDirectory.path,
-            "--build-path",
+            "--scratch-path",
             buildDirectory.path,
             "-c",
             "debug"

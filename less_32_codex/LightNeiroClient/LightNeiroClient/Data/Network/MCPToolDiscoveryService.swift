@@ -371,6 +371,7 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
 
         if let packageDirectory = findPackageDirectory(named: serverKind.packageDirectoryName) {
+            let scratchPath = swiftPackageScratchPath(for: packageDirectory)
             return .init(
                 executableURL: URL(fileURLWithPath: "/usr/bin/env"),
                 arguments: [
@@ -378,6 +379,8 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                     "run",
                     "--package-path",
                     packageDirectory.path,
+                    "--scratch-path",
+                    scratchPath.path,
                     serverKind.executableName
                 ],
                 currentDirectoryURL: packageDirectory,
@@ -427,6 +430,8 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                         "run",
                         "--package-path",
                         nestedPackageDirectory.path,
+                        "--scratch-path",
+                        swiftPackageScratchPath(for: nestedPackageDirectory).path,
                         serverKind.executableName
                     ],
                     currentDirectoryURL: nestedPackageDirectory,
@@ -440,6 +445,8 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
                     "run",
                     "--package-path",
                     resolvedURL.path,
+                    "--scratch-path",
+                    swiftPackageScratchPath(for: resolvedURL).path,
                     serverKind.executableName
                 ],
                 currentDirectoryURL: resolvedURL,
@@ -553,6 +560,26 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             cursor = parent
         }
         return nil
+    }
+
+    private func swiftPackageScratchPath(for packageDirectory: URL) -> URL {
+        let scratchRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lightneiro-swiftpm", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: scratchRoot,
+            withIntermediateDirectories: true
+        )
+        let packageIdentifier = stablePathIdentifier(packageDirectory.path)
+        return scratchRoot.appendingPathComponent(packageIdentifier, isDirectory: true)
+    }
+
+    private func stablePathIdentifier(_ path: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in path.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(hash, radix: 16, uppercase: false)
     }
 }
 
