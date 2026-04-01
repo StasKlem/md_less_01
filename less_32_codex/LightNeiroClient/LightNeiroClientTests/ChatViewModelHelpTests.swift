@@ -13,10 +13,25 @@ final class ChatViewModelHelpTests: XCTestCase {
             createdAt: Date()
         )
         let sendSpy = ChatSendMessageUseCaseSpy()
-        let helpSpy = ChatProjectHelpUseCaseSpy(
-            result: ProjectHelpExecutionResult(
-                response: "Справка по проекту",
-                systemMessage: "Не удалось получить текущую git-ветку через MCP: request failed"
+        let reviewSpy = ChatProjectReviewUseCaseSpy(
+            result: ProjectReviewTaskTurnResult(
+                snapshot: ProjectReviewTaskSnapshot(
+                    schemaVersion: ProjectReviewTaskSnapshot.schemaVersionCurrent,
+                    sessionID: session.id,
+                    branchID: session.activeBranchID,
+                    state: .idle,
+                    context: ProjectReviewTaskContext(
+                        focus: "структура проекта",
+                        changedFiles: ["README.md"],
+                        diff: "diff --git a/README.md b/README.md",
+                        evidence: [],
+                        reviewText: "Ревью готово",
+                        updatedAt: Date()
+                    ),
+                    updatedAt: Date()
+                ),
+                reviewText: "Ревью готово",
+                systemMessages: []
             )
         )
 
@@ -31,7 +46,7 @@ final class ChatViewModelHelpTests: XCTestCase {
                 longTermMemoryRepository: MockLongTermMemoryRepository(),
                 metricsRepository: MockMetricsRepository()
             ),
-            projectHelpUseCase: helpSpy
+            projectReviewUseCase: reviewSpy
         )
 
         await Task.yield()
@@ -40,9 +55,9 @@ final class ChatViewModelHelpTests: XCTestCase {
         viewModel.send(text: "/help структура проекта")
 
         for _ in 0..<20 {
-            let helpCount = await helpSpy.callCount
-            if helpCount > 0,
-               viewModel.dialogItems.last?.text == "Справка по проекту"
+            let reviewCount = await reviewSpy.callCount
+            if reviewCount > 0,
+               viewModel.dialogItems.last?.text == "Ревью готово"
             {
                 break
             }
@@ -50,15 +65,15 @@ final class ChatViewModelHelpTests: XCTestCase {
         }
 
         let sendCount = await sendSpy.callCount
-        let helpCount = await helpSpy.callCount
+        let helpCount = await reviewSpy.callCount
         XCTAssertEqual(sendCount, 0)
         XCTAssertEqual(helpCount, 1)
         XCTAssertEqual(viewModel.chatMode, .default)
         XCTAssertEqual(viewModel.dialogItems.count, 2)
         XCTAssertEqual(viewModel.dialogItems.first?.kind, .system)
-        XCTAssertTrue(viewModel.dialogItems.first?.text.contains("Не удалось получить текущую git-ветку через MCP") == true)
+        XCTAssertTrue(viewModel.dialogItems.first?.text.contains("Состояния review task-агента") == true)
         XCTAssertEqual(viewModel.dialogItems.last?.kind, .assistant)
-        XCTAssertEqual(viewModel.dialogItems.last?.text, "Справка по проекту")
+        XCTAssertEqual(viewModel.dialogItems.last?.text, "Ревью готово")
     }
 }
 
@@ -71,15 +86,15 @@ private actor ChatSendMessageUseCaseSpy: SendMessageUseCaseProtocol {
     }
 }
 
-private actor ChatProjectHelpUseCaseSpy: ProjectHelpUseCaseProtocol {
+private actor ChatProjectReviewUseCaseSpy: StartProjectReviewTaskUseCaseProtocol {
     private(set) var callCount = 0
-    let result: ProjectHelpExecutionResult
+    let result: ProjectReviewTaskTurnResult
 
-    init(result: ProjectHelpExecutionResult) {
+    init(result: ProjectReviewTaskTurnResult) {
         self.result = result
     }
 
-    func execute(question _: String?) async -> ProjectHelpExecutionResult {
+    func execute(sessionID _: UUID, branchID _: UUID, focus _: String?) async -> ProjectReviewTaskTurnResult {
         callCount += 1
         return result
     }

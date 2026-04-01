@@ -95,6 +95,16 @@ struct ProjectFilesContext: Sendable {
     let diagnosticMessage: String?
 }
 
+/// Контекст со списком незакоммиченных изменений и unified diff.
+struct ProjectUncommittedChangesContext: Sendable {
+    /// Относительные пути файлов с незакоммиченными изменениями.
+    let files: [String]
+    /// Unified diff по рабочему дереву.
+    let diff: String
+    /// Текст диагностики, если при получении diff была ошибка или использован fallback.
+    let diagnosticMessage: String?
+}
+
 protocol ProjectGitBranchServiceProtocol {
     /// Возвращает текущую git-ветку проекта.
     /// - Parameter serverURL: URL MCP-сервера.
@@ -105,4 +115,9 @@ protocol ProjectGitBranchServiceProtocol {
     /// - Parameter serverURL: URL MCP-сервера.
     /// - Returns: Контекст со списком файлов и диагностикой.
     func fetchProjectFiles(serverURL: URL) async throws -> ProjectFilesContext
+
+    /// Возвращает список незакоммиченных файлов и unified diff через MCP.
+    /// - Parameter serverURL: URL MCP-сервера.
+    /// - Returns: Контекст со списком файлов, diff и диагностикой.
+    func fetchUncommittedChanges(serverURL: URL) async throws -> ProjectUncommittedChangesContext
 }

@@ -31,3 +31,19 @@ struct ListProjectFilesUseCase: ListProjectFilesUseCaseProtocol {
         try repository.listProjectFiles()
     }
 }
+
+protocol GetUncommittedChangesUseCaseProtocol: Sendable {
+    func execute() throws -> ProjectUncommittedChanges
+}
+
+struct GetUncommittedChangesUseCase: GetUncommittedChangesUseCaseProtocol {
+    private let repository: ProjectRepositoryProtocol
+
+    init(repository: ProjectRepositoryProtocol) {
+        self.repository = repository
+    }
+
+    func execute() throws -> ProjectUncommittedChanges {
+        try repository.uncommittedChanges()
+    }
+}

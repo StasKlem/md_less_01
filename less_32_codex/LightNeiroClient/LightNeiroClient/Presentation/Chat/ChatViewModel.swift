@@ -51,7 +51,7 @@ final class ChatViewModel {
     private let startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol?
     private let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol?
     private let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol?
-    private let projectHelpUseCase: ProjectHelpUseCaseProtocol?
+    private let projectReviewUseCase: StartProjectReviewTaskUseCaseProtocol?
 
     private let dialogPatchesSubject = PassthroughSubject<[DialogHistoryPatch], Never>()
     private var currentSettings: LLMSettings = .default
@@ -59,6 +59,7 @@ final class ChatViewModel {
     private var lastMockTaskAgentState: MockTaskAgentState?
     private var lastCounterTaskAgentState: CounterTaskAgentState?
     private var lastHackerNewsTaskAgentState: HackerNewsTaskAgentState?
+    private var lastProjectReviewTaskState: ProjectReviewTaskState?
     private var counterTimerTask: Task<Void, Never>?
     private var isCounterTickInFlight = false
     private let ragResponseDisplayFormatter = RAGResponseDisplayFormatter()
@@ -83,7 +84,7 @@ final class ChatViewModel {
         startHackerNewsTaskAgentUseCase: StartHackerNewsTaskAgentUseCaseProtocol? = nil,
         stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol? = nil,
         getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol? = nil,
-        projectHelpUseCase: ProjectHelpUseCaseProtocol? = nil,
+        projectReviewUseCase: StartProjectReviewTaskUseCaseProtocol? = nil,
         taskAgentCatalog: [TaskAgentDescriptor] = TaskAgentCatalog.all
     ) {
         self.session = session
@@ -105,7 +106,7 @@ final class ChatViewModel {
         self.startHackerNewsTaskAgentUseCase = startHackerNewsTaskAgentUseCase
         self.stopHackerNewsTaskAgentUseCase = stopHackerNewsTaskAgentUseCase
         self.getHackerNewsTaskAgentStatusUseCase = getHackerNewsTaskAgentStatusUseCase
-        self.projectHelpUseCase = projectHelpUseCase
+        self.projectReviewUseCase = projectReviewUseCase
         self.taskAgentCatalog = taskAgentCatalog
 
         Task { [weak self] in
@@ -126,7 +127,7 @@ final class ChatViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSending else { return }
         guard !trimmed.isEmpty else { return }
-        if handleProjectHelpCommand(text: trimmed) {
+        if handleProjectReviewCommand(text: trimmed) {
             return
         }
         if handleAgentCommand(text: trimmed) {
@@ -261,7 +262,7 @@ final class ChatViewModel {
         return false
     }
 
-    private func handleProjectHelpCommand(text: String) -> Bool {
+    private func handleProjectReviewCommand(text: String) -> Bool {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalized == "/help" || normalized.hasPrefix("/help ") else {
             return false
@@ -270,7 +271,7 @@ final class ChatViewModel {
         let question = normalized
             .dropFirst("/help".count)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        startProjectHelp(question: question.isEmpty ? nil : String(question))
+        startProjectReview(focus: question.isEmpty ? nil : String(question))
         return true
     }
 
@@ -483,13 +484,11 @@ final class ChatViewModel {
         plannerStepTitle = result.snapshot.state.title
         questionnaireState = result.snapshot.context.questionnaireState
         questionnaireProgressText = progressText(for: result.snapshot.context.questionnaireState)
-        if lastPlannerState != result.snapshot.state {
-            appendSystemMessage(
-                stateListMessage(current: result.snapshot.state),
-                tone: .stateTransition
-            )
-        }
-        lastPlannerState = result.snapshot.state
+        appendStateTransitionMessage(
+            previousState: &lastPlannerState,
+            currentState: result.snapshot.state,
+            message: stateListMessage(current: result.snapshot.state)
+        )
         updateApproveAvailability()
         if case let .failed(reason) = result.snapshot.state {
             appendSystemMessage("Ошибка инварианта/перехода планировщика: \(reason)")
@@ -503,13 +502,11 @@ final class ChatViewModel {
         plannerStepTitle = result.snapshot.state.title
         questionnaireState = .empty
         questionnaireProgressText = mockTaskAgentProgressText(for: result.snapshot)
-        if lastMockTaskAgentState != result.snapshot.state {
-            appendSystemMessage(
-                mockTaskAgentStateListMessage(current: result.snapshot.state),
-                tone: .stateTransition
-            )
-        }
-        lastMockTaskAgentState = result.snapshot.state
+        appendStateTransitionMessage(
+            previousState: &lastMockTaskAgentState,
+            currentState: result.snapshot.state,
+            message: mockTaskAgentStateListMessage(current: result.snapshot.state)
+        )
         updateApproveAvailability()
         if case let .failed(reason) = result.snapshot.state {
             appendSystemMessage("Ошибка mock task-агента: \(reason)")
@@ -596,13 +593,11 @@ final class ChatViewModel {
         plannerStepTitle = result.snapshot.state.title
         questionnaireState = .empty
         questionnaireProgressText = counterTaskAgentProgressText(for: result.snapshot)
-        if lastCounterTaskAgentState != result.snapshot.state {
-            appendSystemMessage(
-                counterTaskAgentStateListMessage(current: result.snapshot.state),
-                tone: .stateTransition
-            )
-        }
-        lastCounterTaskAgentState = result.snapshot.state
+        appendStateTransitionMessage(
+            previousState: &lastCounterTaskAgentState,
+            currentState: result.snapshot.state,
+            message: counterTaskAgentStateListMessage(current: result.snapshot.state)
+        )
         updateApproveAvailability()
         if case let .failed(reason) = result.snapshot.state {
             appendSystemMessage("Ошибка counter task-агента: \(reason)")
@@ -649,23 +644,29 @@ final class ChatViewModel {
         }
     }
 
-    private func startProjectHelp(question: String?) {
-        guard let useCase = projectHelpUseCase else {
-            appendSystemMessage("Справка по проекту недоступна в этой сборке.")
+    private func startProjectReview(focus: String?) {
+        guard let useCase = projectReviewUseCase else {
+            appendSystemMessage("Review task недоступна в этой сборке.")
             return
         }
 
         isSending = true
+        lastProjectReviewTaskState = nil
 
         Task { [weak self] in
             guard let self else { return }
             defer { self.isSending = false }
 
-            let result = await useCase.execute(question: question)
-            if let systemMessage = result.systemMessage {
-                self.appendSystemMessage(systemMessage)
+            let result = await useCase.execute(
+                sessionID: self.session.id,
+                branchID: self.session.activeBranchID,
+                focus: focus
+            )
+            self.applyProjectReviewTaskResult(result)
+            for message in result.systemMessages {
+                self.appendSystemMessage(message)
             }
-            self.appendAssistantMessage(result.response)
+            self.appendAssistantMessage(result.reviewText)
         }
     }
 
@@ -699,13 +700,11 @@ final class ChatViewModel {
         plannerStepTitle = result.snapshot.state.title
         questionnaireState = .empty
         questionnaireProgressText = hackerNewsTaskAgentProgressText(for: result.snapshot)
-        if lastHackerNewsTaskAgentState != result.snapshot.state {
-            appendSystemMessage(
-                hackerNewsTaskAgentStateListMessage(current: result.snapshot.state),
-                tone: .stateTransition
-            )
-        }
-        lastHackerNewsTaskAgentState = result.snapshot.state
+        appendStateTransitionMessage(
+            previousState: &lastHackerNewsTaskAgentState,
+            currentState: result.snapshot.state,
+            message: hackerNewsTaskAgentStateListMessage(current: result.snapshot.state)
+        )
         updateApproveAvailability()
         if case let .failed(reason) = result.snapshot.state {
             appendSystemMessage("Ошибка Hacker News task-агента: \(reason)")
@@ -715,6 +714,31 @@ final class ChatViewModel {
                 appendSystemMessage(message)
             }
         }
+    }
+
+    private func applyProjectReviewTaskResult(_ result: ProjectReviewTaskTurnResult) {
+        plannerStepTitle = result.snapshot.state.title
+        questionnaireState = .empty
+        questionnaireProgressText = nil
+        appendStateTransitionMessage(
+            previousState: &lastProjectReviewTaskState,
+            currentState: result.snapshot.state,
+            message: projectReviewTaskStateListMessage(current: result.snapshot.state)
+        )
+        if case let .failed(reason) = result.snapshot.state {
+            appendSystemMessage("Ошибка review task-агента: \(reason)")
+        }
+    }
+
+    private func appendStateTransitionMessage<State: Equatable>(
+        previousState: inout State?,
+        currentState: State,
+        message: String
+    ) {
+        if previousState != currentState {
+            appendSystemMessage(message, tone: .stateTransition)
+        }
+        previousState = currentState
     }
 
     private func replaceDialogItem(_ state: DialogHistoryItemViewState) {
@@ -1022,6 +1046,24 @@ final class ChatViewModel {
             action = "Агент не активен."
         }
         return "Возобновлен Hacker News Task Agent: \(snapshot.state.title). \(action)"
+    }
+
+    private func projectReviewTaskStateListMessage(current: ProjectReviewTaskState) -> String {
+        let ordered: [ProjectReviewTaskState] = [
+            .idle,
+            .collectingChanges,
+            .workingWithRAG,
+            .analyzingChanges
+        ]
+        var lines: [String] = ["Состояния review task-агента (текущее отмечено [x]):"]
+        for state in ordered {
+            let marker = (state == current) ? "[x]" : "[ ]"
+            lines.append("\(marker) \(state.title)")
+        }
+        if case let .failed(reason) = current {
+            lines.append("[x] Ошибка: \(reason)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func syncCounterTimer(with snapshot: CounterTaskAgentSnapshot) {

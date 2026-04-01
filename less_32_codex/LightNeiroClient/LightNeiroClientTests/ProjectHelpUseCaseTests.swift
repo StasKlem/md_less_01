@@ -218,4 +218,8 @@ private actor ProjectHelpBranchServiceSpy: ProjectGitBranchServiceProtocol {
     func fetchProjectFiles(serverURL _: URL) async throws -> ProjectFilesContext {
         ProjectFilesContext(files: projectFiles, diagnosticMessage: nil)
     }
+
+    func fetchUncommittedChanges(serverURL _: URL) async throws -> ProjectUncommittedChangesContext {
+        ProjectUncommittedChangesContext(files: [], diff: "", diagnosticMessage: nil)
+    }
 }

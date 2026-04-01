@@ -10,6 +10,7 @@ enum ProjectMCPServerApp {
             let service = ProjectToolService(
                 getCurrentGitBranchUseCase: GetCurrentGitBranchUseCase(repository: repository),
                 listProjectFilesUseCase: ListProjectFilesUseCase(repository: repository),
+                getUncommittedChangesUseCase: GetUncommittedChangesUseCase(repository: repository),
                 logger: logger
             )
 
@@ -18,7 +19,7 @@ enum ProjectMCPServerApp {
             let server = Server(
                 name: "project-mcp-server",
                 version: "1.0.0",
-                instructions: "Use project_git_branch to get the current git branch and project_list_files to get the list of project files.",
+                instructions: "Use project_git_branch, project_list_files, and project_uncommitted_changes to inspect the project.",
                 capabilities: .init(
                     tools: .init(listChanged: false)
                 )

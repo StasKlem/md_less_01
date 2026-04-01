@@ -4,15 +4,18 @@ import MCP
 struct ProjectToolService: Sendable {
     private let getCurrentGitBranchUseCase: GetCurrentGitBranchUseCaseProtocol
     private let listProjectFilesUseCase: ListProjectFilesUseCaseProtocol
+    private let getUncommittedChangesUseCase: GetUncommittedChangesUseCaseProtocol
     private let logger: StderrLogger?
 
     init(
         getCurrentGitBranchUseCase: GetCurrentGitBranchUseCaseProtocol,
         listProjectFilesUseCase: ListProjectFilesUseCaseProtocol,
+        getUncommittedChangesUseCase: GetUncommittedChangesUseCaseProtocol,
         logger: StderrLogger? = nil
     ) {
         self.getCurrentGitBranchUseCase = getCurrentGitBranchUseCase
         self.listProjectFilesUseCase = listProjectFilesUseCase
+        self.getUncommittedChangesUseCase = getUncommittedChangesUseCase
         self.logger = logger
     }
 
@@ -27,6 +30,10 @@ struct ProjectToolService: Sendable {
                 return result
             case ProjectToolCatalog.listProjectFilesToolName:
                 let result = try handleListProjectFiles(arguments: arguments)
+                logger?.info("Tool call succeeded: \(name)")
+                return result
+            case ProjectToolCatalog.uncommittedChangesToolName:
+                let result = try handleUncommittedChanges(arguments: arguments)
                 logger?.info("Tool call succeeded: \(name)")
                 return result
             default:
@@ -61,6 +68,18 @@ struct ProjectToolService: Sendable {
         return .init(content: [.text(ProjectFilesFormatter.format(files))], isError: false)
     }
 
+    private func handleUncommittedChanges(arguments: [String: Value]?) throws -> CallTool.Result {
+        if let arguments, !arguments.isEmpty {
+            throw ProjectToolError.invalidArguments(
+                "Tool \(ProjectToolCatalog.uncommittedChangesToolName) does not accept arguments."
+            )
+        }
+
+        let changes = try getUncommittedChangesUseCase.execute()
+        let payload = ProjectUncommittedChangesFormatter.format(changes)
+        return .init(content: [.text(payload)], isError: false)
+    }
+
     private static func errorResult(_ message: String) -> CallTool.Result {
         .init(content: [.text(message)], isError: true)
     }
@@ -78,6 +97,28 @@ private enum ProjectFilesFormatter {
         }
         return lines.joined(separator: "\n")
     }
+}
+
+private enum ProjectUncommittedChangesFormatter {
+    static func format(_ changes: ProjectUncommittedChanges) -> String {
+        let payload = ProjectUncommittedChangesPayload(
+            files: changes.files.map(\.relativePath),
+            diff: changes.diff
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(payload),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return "{\"files\":[],\"diff\":\"\"}"
+        }
+        return text
+    }
+}
+
+private struct ProjectUncommittedChangesPayload: Codable, Sendable {
+    let files: [String]
+    let diff: String
 }
 
 private enum ProjectToolError: Error, LocalizedError, Sendable {

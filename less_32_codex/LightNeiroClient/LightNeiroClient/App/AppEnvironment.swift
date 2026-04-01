@@ -29,6 +29,7 @@ struct AppEnvironment {
     let stopHackerNewsTaskAgentUseCase: StopHackerNewsTaskAgentUseCaseProtocol
     let getHackerNewsTaskAgentStatusUseCase: GetHackerNewsTaskAgentStatusUseCaseProtocol
     let projectHelpUseCase: ProjectHelpUseCaseProtocol
+    let projectReviewUseCase: StartProjectReviewTaskUseCaseProtocol
     let ragUseCaseFacade: RAGUseCaseFacadeProtocol
     private static let globalSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
     private static let globalBranchID = UUID(uuidString: "00000000-0000-0000-0000-000000000002") ?? UUID()
@@ -224,6 +225,19 @@ struct AppEnvironment {
             },
             initialIndexedRAGStrategy: startupIndexedRAGStrategy
         )
+        let projectReviewTaskOrchestrator = ProjectReviewTaskOrchestrator(
+            settingsRepository: settingsRepository,
+            llmClient: llmClient,
+            ragUseCaseFacade: ragUseCaseFacade,
+            projectContextService: mcpToolDiscoveryService,
+            ragDocumentsProvider: {
+                ragDocuments
+            },
+            initialIndexedRAGStrategy: startupIndexedRAGStrategy
+        )
+        let projectReviewUseCase = StartProjectReviewTaskUseCase(
+            orchestrator: projectReviewTaskOrchestrator
+        )
         let sendMessage = SendMessageUseCase(
             settingsRepository: settingsRepository,
             messageRepository: messageRepository,
@@ -269,6 +283,7 @@ struct AppEnvironment {
             stopHackerNewsTaskAgentUseCase: stopHackerNewsTaskAgent,
             getHackerNewsTaskAgentStatusUseCase: getHackerNewsTaskAgentStatus,
             projectHelpUseCase: projectHelpUseCase,
+            projectReviewUseCase: projectReviewUseCase,
             ragUseCaseFacade: ragUseCaseFacade
         )
     }

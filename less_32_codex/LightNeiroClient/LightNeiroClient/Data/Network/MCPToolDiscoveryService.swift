@@ -143,6 +143,81 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         }
     }
 
+    func fetchUncommittedChanges(serverURL: URL) async throws -> ProjectUncommittedChangesContext {
+        let client = clientFactory()
+        do {
+            let transport = try makeTransport(
+                serverURL: serverURL,
+                environmentOverrides: projectEnvironmentProvider?()
+            )
+            _ = try await client.connect(transport: transport)
+            let result = try await client.callTool(name: "project_uncommitted_changes", arguments: [:])
+            await client.disconnect()
+
+            let text = extractText(from: result.content)
+            if result.isError ?? false {
+                let reason = text.isEmpty ? "MCP project_uncommitted_changes returned an error." : text
+                let fallback = localUncommittedChanges()
+                if !fallback.files.isEmpty || !fallback.diff.isEmpty {
+                    return ProjectUncommittedChangesContext(
+                        files: fallback.files,
+                        diff: fallback.diff,
+                        diagnosticMessage: "MCP project_uncommitted_changes завершился ошибкой: \(reason). Использованы локальные незакоммиченные изменения."
+                    )
+                }
+                return ProjectUncommittedChangesContext(
+                    files: [],
+                    diff: "",
+                    diagnosticMessage: "MCP project_uncommitted_changes завершился ошибкой: \(reason)"
+                )
+            }
+            guard !text.isEmpty else {
+                let fallback = localUncommittedChanges()
+                if !fallback.files.isEmpty || !fallback.diff.isEmpty {
+                    return ProjectUncommittedChangesContext(
+                        files: fallback.files,
+                        diff: fallback.diff,
+                        diagnosticMessage: "MCP project_uncommitted_changes вернул пустой ответ. Использованы локальные незакоммиченные изменения."
+                    )
+                }
+                return ProjectUncommittedChangesContext(
+                    files: [],
+                    diff: "",
+                    diagnosticMessage: "MCP project_uncommitted_changes вернул пустой ответ."
+                )
+            }
+
+            if let payload = parseUncommittedChanges(from: text) {
+                return ProjectUncommittedChangesContext(
+                    files: payload.files,
+                    diff: payload.diff,
+                    diagnosticMessage: nil
+                )
+            }
+
+            return ProjectUncommittedChangesContext(
+                files: [],
+                diff: text,
+                diagnosticMessage: "MCP project_uncommitted_changes вернул payload в неожиданном формате."
+            )
+        } catch {
+            await client.disconnect()
+            let fallback = localUncommittedChanges()
+            if !fallback.files.isEmpty || !fallback.diff.isEmpty {
+                return ProjectUncommittedChangesContext(
+                    files: fallback.files,
+                    diff: fallback.diff,
+                    diagnosticMessage: "Не удалось получить diff и изменённые файлы через MCP: \(error.localizedDescription). Использованы локальные незакоммиченные изменения."
+                )
+            }
+            return ProjectUncommittedChangesContext(
+                files: [],
+                diff: "",
+                diagnosticMessage: "Не удалось получить diff и изменённые файлы через MCP: \(error.localizedDescription)"
+            )
+        }
+    }
+
     func fetchCurrentWeather(
         serverURL: URL,
         city: String,
@@ -324,6 +399,34 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
             .map(String.init)
             .filter { !$0.isEmpty }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private func localUncommittedChanges() -> ProjectUncommittedChangesContext {
+        guard let repositoryRoot = findRepositoryRoot() else {
+            return ProjectUncommittedChangesContext(files: [], diff: "", diagnosticMessage: nil)
+        }
+
+        let statusOutput = runGit(arguments: ["status", "--porcelain=v1"], currentDirectoryURL: repositoryRoot) ?? ""
+        let files = parseStatusFiles(from: statusOutput)
+        let stagedDiff = runGitAllowingDiffExit(
+            arguments: ["diff", "--cached", "--no-ext-diff", "--unified=3"],
+            currentDirectoryURL: repositoryRoot
+        ) ?? ""
+        let workingTreeDiff = runGitAllowingDiffExit(
+            arguments: ["diff", "--no-ext-diff", "--unified=3"],
+            currentDirectoryURL: repositoryRoot
+        ) ?? ""
+        let untrackedDiff = buildUntrackedFilesDiff(from: statusOutput, repositoryRoot: repositoryRoot)
+
+        let diffParts = [stagedDiff, workingTreeDiff, untrackedDiff]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return ProjectUncommittedChangesContext(
+            files: files,
+            diff: diffParts.joined(separator: "\n\n"),
+            diagnosticMessage: nil
+        )
     }
 
     private func shouldUseStdio(serverURL: URL) -> Bool {
@@ -562,6 +665,68 @@ final class MCPToolDiscoveryService: MCPToolDiscoveryServiceProtocol, MCPWeather
         return nil
     }
 
+    private func buildUntrackedFilesDiff(from statusOutput: String, repositoryRoot: URL) -> String {
+        let untrackedFiles = statusOutput
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+            .filter { $0.hasPrefix("?? ") }
+            .map { String($0.dropFirst(3)) }
+
+        guard !untrackedFiles.isEmpty else {
+            return ""
+        }
+
+        var blocks: [String] = []
+        for file in untrackedFiles {
+            let output = runGitAllowingDiffExit(
+                arguments: ["diff", "--no-ext-diff", "--unified=3", "--no-index", "/dev/null", file],
+                currentDirectoryURL: repositoryRoot
+            ) ?? ""
+            let normalized = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalized.isEmpty {
+                blocks.append(normalized)
+            }
+        }
+        return blocks.joined(separator: "\n\n")
+    }
+
+    private func parseUncommittedChanges(from text: String) -> ProjectUncommittedChangesContext? {
+        guard let data = text.data(using: .utf8) else {
+            return nil
+        }
+        let decoder = JSONDecoder()
+        guard let payload = try? decoder.decode(ProjectUncommittedChangesPayload.self, from: data) else {
+            return nil
+        }
+        return ProjectUncommittedChangesContext(
+            files: payload.files,
+            diff: payload.diff,
+            diagnosticMessage: nil
+        )
+    }
+
+    private func parseStatusFiles(from statusOutput: String) -> [String] {
+        let lines = statusOutput
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        var files: [String] = []
+        for line in lines {
+            guard line.count >= 4 else { continue }
+            let pathPart = String(line.dropFirst(3))
+            if line.hasPrefix("?? ") {
+                files.append(pathPart)
+            } else if let renamedRange = pathPart.range(of: " -> ") {
+                files.append(String(pathPart[renamedRange.upperBound...]))
+            } else {
+                files.append(pathPart)
+            }
+        }
+
+        return Array(Set(files))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     private func swiftPackageScratchPath(for packageDirectory: URL) -> URL {
         let scratchRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("lightneiro-swiftpm", isDirectory: true)
@@ -609,6 +774,38 @@ private extension MCPToolDiscoveryService {
         return String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    func runGitAllowingDiffExit(arguments: [String], currentDirectoryURL: URL?) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = currentDirectoryURL
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 || process.terminationStatus == 1 else {
+            return nil
+        }
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+}
+
+private struct ProjectUncommittedChangesPayload: Codable {
+    let files: [String]
+    let diff: String
 }
 
 private enum MCPStdioServerKind {
