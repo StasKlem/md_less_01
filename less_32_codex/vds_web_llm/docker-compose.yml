@@ -1,0 +1,58 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: vds-web-llm-ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - internal
+    expose:
+      - "11434"
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: vds-web-llm-open-webui
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      ENABLE_OLLAMA_API: "true"
+      WEBUI_SECRET_KEY: "${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}"
+    volumes:
+      - open-webui-data:/app/backend/data
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
+    depends_on:
+      - ollama
+    networks:
+      - internal
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vds-web-llm-api
+    environment:
+      LISTEN_ADDR: ":8080"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "llama3.2"
+      API_KEY: "${API_KEY:?set API_KEY}"
+      RATE_LIMIT_PER_MINUTE: "${RATE_LIMIT_PER_MINUTE:-60}"
+      MAX_CONTEXT_TOKENS: "${MAX_CONTEXT_TOKENS:-4096}"
+      MAX_BODY_BYTES: "${MAX_BODY_BYTES:-1048576}"
+      REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-60}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - ollama
+    networks:
+      - internal
+    restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  ollama-data:
+  open-webui-data:
