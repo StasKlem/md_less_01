@@ -21,6 +21,8 @@ final class StartProjectReviewTaskUseCase: StartProjectReviewTaskUseCaseProtocol
 }
 
 final class ProjectReviewTaskOrchestrator {
+    private static let ragLogCategory = "review.rag"
+    private static let llmLogCategory = "review.llm"
     private let settingsRepository: SettingsRepositoryProtocol
     private let llmClient: LLMClientProtocol
     private let ragUseCaseFacade: RAGUseCaseFacadeProtocol?
@@ -124,10 +126,6 @@ final class ProjectReviewTaskOrchestrator {
             diff: changes.diff,
             strategy: settings.ragChunkingStrategy
         )
-        if let diagnosticMessage = evidenceResult.diagnosticMessage {
-            systemMessages.append(diagnosticMessage)
-        }
-        let evidence = evidenceResult.evidence
 
         let evidenceState = ProjectReviewTaskSnapshot(
             schemaVersion: ProjectReviewTaskSnapshot.schemaVersionCurrent,
@@ -138,7 +136,7 @@ final class ProjectReviewTaskOrchestrator {
                 focus: reviewFocus,
                 changedFiles: changes.files,
                 diff: changes.diff,
-                evidence: evidence,
+                evidence: evidenceResult.evidence,
                 reviewText: nil,
                 updatedAt: Date()
             ),
@@ -149,13 +147,10 @@ final class ProjectReviewTaskOrchestrator {
         let generationResult = await generateReviewResult(
             focus: reviewFocus,
             changes: changes,
-            evidence: evidence,
+            evidence: evidenceResult.evidence,
+            ragState: evidenceResult,
             settings: settings
         )
-
-        if let diagnosticMessage = generationResult.diagnosticMessage {
-            systemMessages.append(diagnosticMessage)
-        }
 
         let finishedSnapshot = ProjectReviewTaskSnapshot(
             schemaVersion: ProjectReviewTaskSnapshot.schemaVersionCurrent,
@@ -166,15 +161,15 @@ final class ProjectReviewTaskOrchestrator {
                 focus: reviewFocus,
                 changedFiles: changes.files,
                 diff: changes.diff,
-                evidence: evidence,
-                reviewText: generationResult.reviewText,
+                evidence: evidenceResult.evidence,
+                reviewText: generationResult,
                 updatedAt: Date()
             ),
             updatedAt: Date()
         )
         return ProjectReviewTaskTurnResult(
             snapshot: finishedSnapshot,
-            reviewText: generationResult.reviewText,
+            reviewText: generationResult,
             systemMessages: systemMessages
         )
     }
@@ -197,27 +192,43 @@ final class ProjectReviewTaskOrchestrator {
         changedFiles: [String],
         diff: String,
         strategy: ChunkingStrategyType
-    ) async -> (evidence: [ProjectReviewEvidence], diagnosticMessage: String?) {
-        guard let ragUseCaseFacade else { return ([], nil) }
+    ) async -> ProjectReviewRAGEvidenceResult {
+        guard let ragUseCaseFacade else {
+            AppLogger.shared.warning(
+                "RAG не настроен для review-task, evidence не будет собран.",
+                category: Self.ragLogCategory
+            )
+            return .notConfigured
+        }
         do {
             try await ensureRAGIndexIsReady(ragUseCaseFacade, strategy: strategy)
             let query = buildRAGQuery(changedFiles: changedFiles, diff: diff)
             let results = try await ragUseCaseFacade.search(query: query, topK: 4)
-            return (
-                results.map { result in
-                    ProjectReviewEvidence(
-                        source: result.chunk.source,
-                        section: result.chunk.section,
-                        content: result.chunk.content
-                    )
-                },
-                nil
+            let evidence = results.map { result in
+                ProjectReviewEvidence(
+                    source: result.chunk.source,
+                    section: result.chunk.section,
+                    content: result.chunk.content
+                )
+            }
+            if evidence.isEmpty {
+                AppLogger.shared.info(
+                    "RAG не нашёл релевантных фрагментов для review-task. query=\(queryPreview(query))",
+                    category: Self.ragLogCategory
+                )
+                return .empty
+            }
+            AppLogger.shared.info(
+                "RAG вернул \(evidence.count) фрагментов для review-task. query=\(queryPreview(query))",
+                category: Self.ragLogCategory
             )
+            return .found(evidence)
         } catch {
-            return (
-                [],
-                "Не удалось получить RAG-контекст: \(error.localizedDescription)"
+            AppLogger.shared.error(
+                "RAG упал при сборе evidence для review-task: \(error.localizedDescription)",
+                category: Self.ragLogCategory
             )
+            return .failed(reason: error.localizedDescription)
         }
     }
 
@@ -267,25 +278,26 @@ final class ProjectReviewTaskOrchestrator {
         focus: String?,
         changes: ProjectUncommittedChangesContext,
         evidence: [ProjectReviewEvidence],
+        ragState: ProjectReviewRAGEvidenceResult,
         settings: LLMSettings
-    ) async -> (reviewText: String, diagnosticMessage: String?) {
+    ) async -> String {
         do {
-            let reviewText = try await generateReview(
+            return try await generateReview(
                 focus: focus,
                 changes: changes,
                 evidence: evidence,
                 settings: settings
             )
-            return (reviewText, nil)
         } catch {
-            return (
-                buildFallbackReview(
-                    focus: focus,
-                    changes: changes,
-                    evidence: evidence,
-                    diagnosticMessage: error.localizedDescription
-                ),
-                "Не удалось получить ответ LLM для ревью: \(error.localizedDescription). Использован локальный разбор изменений."
+            AppLogger.shared.error(
+                "LLM упал при генерации ревью для review-task: \(error.localizedDescription)",
+                category: Self.llmLogCategory
+            )
+            return buildFallbackReview(
+                focus: focus,
+                changes: changes,
+                evidence: evidence,
+                ragState: ragState
             )
         }
     }
@@ -294,7 +306,7 @@ final class ProjectReviewTaskOrchestrator {
         focus: String?,
         changes: ProjectUncommittedChangesContext,
         evidence: [ProjectReviewEvidence],
-        diagnosticMessage: String?
+        ragState: ProjectReviewRAGEvidenceResult
     ) -> String {
         var lines: [String] = []
 
@@ -331,16 +343,12 @@ final class ProjectReviewTaskOrchestrator {
                 }
             }
         } else {
-            lines.append("RAG-контекст недоступен или пуст.")
+            lines.append(ragState.fallbackSummary)
         }
 
         lines.append("Критические замечания: требуется ручная проверка сгенерированного диффа.")
         lines.append("Риски: автоматическая генерация ревью была недоступна, поэтому возможны упущения в деталях.")
         lines.append("Замечания: проверьте связанные тесты, миграции и места использования изменённых API.")
-
-        if let diagnosticMessage, !diagnosticMessage.isEmpty {
-            lines.append("Диагностика: \(diagnosticMessage)")
-        }
 
         lines.append("Краткий итог: локальное ревью сформировано без ответа LLM.")
         return lines.joined(separator: "\n")
@@ -445,6 +453,15 @@ final class ProjectReviewTaskOrchestrator {
         }
         return lines.joined(separator: "\n")
     }
+
+    private func queryPreview(_ query: String) -> String {
+        let normalized = query.replacingOccurrences(of: "\n", with: " ")
+        if normalized.count <= 120 {
+            return normalized
+        }
+        let prefix = normalized.prefix(117)
+        return "\(prefix)..."
+    }
 }
 
 private actor ProjectReviewRAGIndexState {
@@ -464,5 +481,34 @@ private actor ProjectReviewRAGIndexState {
 
     func markReady(for strategy: ChunkingStrategyType) {
         readyStrategies.insert(strategy)
+    }
+}
+
+private enum ProjectReviewRAGEvidenceResult: Sendable {
+    case notConfigured
+    case empty
+    case failed(reason: String)
+    case found([ProjectReviewEvidence])
+
+    var evidence: [ProjectReviewEvidence] {
+        switch self {
+        case let .found(evidence):
+            return evidence
+        case .notConfigured, .empty, .failed:
+            return []
+        }
+    }
+
+    var fallbackSummary: String {
+        switch self {
+        case .notConfigured:
+            return "RAG-контекст не настроен."
+        case .empty:
+            return "RAG-контекст не нашёл релевантных фрагментов."
+        case .failed:
+            return "RAG-контекст временно недоступен."
+        case .found:
+            return "RAG-контекст недоступен или пуст."
+        }
     }
 }
