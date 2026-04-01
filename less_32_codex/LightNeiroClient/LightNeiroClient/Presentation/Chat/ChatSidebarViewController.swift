@@ -307,6 +307,17 @@ final class ChatSidebarViewController: NSViewController {
             view.removeFromSuperview()
         }
 
+        for command in ChatSidebarCommandCatalog.generalCommands {
+            let button = AgentCommandButton(
+                title: command.title,
+                command: command.command,
+                target: self,
+                action: #selector(taskAgentCommandTapped)
+            )
+            button.isEnabled = !viewModel.isSending
+            controlsButtonsStack.addArrangedSubview(button)
+        }
+
         guard let descriptor = viewModel.activeTaskAgentDescriptor else { return }
         for control in descriptor.controls {
             let button = AgentCommandButton(
