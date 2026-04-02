@@ -147,21 +147,34 @@ final class ConfigManager {
     /// Замена переменных окружения в YAML
     private func replaceEnvVariables(in yaml: String) throws -> String {
         var result = yaml
-        let pattern = #"\$\{(\w+)\}"#
+        // Используем более надёжный паттерн с поддержкой подчёркиваний
+        let pattern = #"\$\{([A-Za-z_][A-Za-z0-9_]*)\}"#
         let regex = try NSRegularExpression(pattern: pattern)
+        
+        logger.debug("Searching for env variables in YAML...")
+        logger.debug("YAML preview: \(yaml.prefix(300))...")
 
         let matches = regex.matches(in: yaml, range: NSRange(yaml.startIndex..., in: yaml))
+        logger.debug("Found \(matches.count) potential env variables")
 
         for match in matches.reversed() {
             guard let range = Range(match.range(at: 1), in: yaml) else { continue }
             let envVar = String(yaml[range])
+            
+            logger.debug("Looking for env var: '\(envVar)'")
+            logger.debug("All env vars count: \(ProcessInfo.processInfo.environment.count)")
 
             if let envValue = ProcessInfo.processInfo.environment[envVar] {
                 guard let matchRange = Range(match.range, in: yaml) else { continue }
                 result.replaceSubrange(matchRange, with: envValue)
-                logger.debug("Environment variable '\(envVar)' replaced")
+                logger.info("✅ Environment variable '\(envVar)' replaced with value: \(envValue.prefix(10))...")
             } else {
-                logger.warning("Environment variable not found: \(envVar)")
+                logger.error("❌ Environment variable NOT found: \(envVar)")
+                // Показываем похожие переменные
+                let similarVars = ProcessInfo.processInfo.environment.keys.filter { $0.contains("ROUTER") || $0.contains("API") || $0.contains("KEY") }
+                if !similarVars.isEmpty {
+                    logger.error("Similar env vars found: \(similarVars.joined(separator: ", "))")
+                }
             }
         }
 

@@ -32,5 +32,5 @@ storage:
   knowledge_base_path: ./KnowledgeBase
 
 logging:
-  level: info  # debug | info | warn | error
+  level: debug  # debug | info | warn | error
   file: ~/Library/Logs/SupportBot/app.log
