@@ -27,7 +27,7 @@ final class OpenAIEmbedding: EmbeddingModel {
     init(modelName: String = "text-embedding-3-small", dimension: Int = 1536, apiKey: String, baseURL: String = "https://api.openai.com/v1", timeout: Int = 30) {
         self.modelName = modelName
         self.dimension = dimension
-        self.apiKey = apiKey
+        self.apiKey = "sk-1yDhC2RWnMX_RUo2F3FBtLKgBOKvoUFb"//apiKey
         self.baseURL = baseURL
         self.timeout = timeout
         self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
