@@ -1,0 +1,35 @@
+# Config/config.yaml - Конфигурация SupportBot
+
+app:
+  name: SupportBot
+  version: 1.0.0
+
+llm:
+  provider: openai  # openai | ollama | mlx
+  api_key: ${OPENAI_API_KEY}  # переменная окружения
+  model: gpt-4o-mini
+  base_url: https://api.openai.com/v1
+  timeout: 30  # секунд
+
+embeddings:
+  provider: openai  # openai | transformers
+  model: text-embedding-3-small
+  dimension: 1536
+
+rag:
+  chunk_size: 500  # символов
+  chunk_overlap: 50
+  top_k: 5
+  min_score: 0.7
+
+context:
+  max_history_messages: 10
+  ttl_seconds: 3600
+
+storage:
+  database_path: ~/Library/Application Support/SupportBot/bot.db
+  knowledge_base_path: ./KnowledgeBase
+
+logging:
+  level: info  # debug | info | warn | error
+  file: ~/Library/Logs/SupportBot/app.log

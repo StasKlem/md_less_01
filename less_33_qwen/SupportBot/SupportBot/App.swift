@@ -8,65 +8,24 @@
 import Foundation
 import TauTUI
 
-// MARK: - Models
-
-/// Сообщение чата
-struct Message {
-    let id: UUID
-    let text: String
-    let sender: Sender
-    let timestamp: Date
-
-    init(text: String, sender: Sender) {
-        self.id = UUID()
-        self.text = text
-        self.sender = sender
-        self.timestamp = Date()
-    }
-
-    var formattedTime: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: timestamp)
-    }
-}
-
-/// Отправитель сообщения
-enum Sender {
-    case user
-    case bot
-
-    var displayName: String {
-        switch self {
-        case .user: return "Вы"
-        case .bot: return "SupportBot"
-        }
-    }
-
-    var emoji: String {
-        switch self {
-        case .user: return "🔵"
-        case .bot: return "🟢"
-        }
-    }
-}
-
 // MARK: - Chat State
 
 @MainActor
 final class ChatState {
-    var messages: [Message] = []
+    var messages: [TUIMessage] = []
     var messageCount: Int { messages.count }
+    var status: String = "Готов"
+    var isTyping: Bool = false
 
     init() {
-        messages.append(Message(
+        messages.append(TUIMessage(
             text: "Добро пожаловать в SupportBot! Введите сообщение и нажмите Enter для отправки.",
             sender: .bot
         ))
     }
 
-    func addMessage(_ text: String, sender: Sender) {
-        messages.append(Message(text: text, sender: sender))
+    func addMessage(_ text: String, sender: TUISender) {
+        messages.append(TUIMessage(text: text, sender: sender))
     }
 
     func getHistoryText() -> String {
@@ -77,19 +36,28 @@ final class ChatState {
         return content
     }
 
-    func getInfoText() -> String {
+    func getInfoText(serviceStatus: ServiceStatus? = nil) -> String {
+        let statusText = isTyping ? "Печатает..." : (serviceStatus?.isKnowledgeBaseIndexed == true ? "Активен" : "Индексация...")
+        let sessionText = serviceStatus?.sessionId.map { String($0.prefix(8)) } ?? "N/A"
+        let version = "1.0.0"
+
         return """
-        ╔═══════════════════════════╗
-        ║     SupportBot Info       ║
-        ╠═══════════════════════════╣
-        ║ Сообщений: \(String(format: "%-17d", messageCount))║
-        ║ Статус: \(String(format: "%-20s", "Активен"))║
-        ║ Версия: 1.0.0\(String(format: "%-16s", ""))║
-        ╠═══════════════════════════╣
-        ║ Клавиши:                  ║
-        ║ Enter - отправить         ║
-        ║ Ctrl+C - выход            ║
-        ╚═══════════════════════════╝
+        ╔══════════════════════════════╗
+        ║     SupportBot Info          ║
+        ╠══════════════════════════════╣
+        ║ Сообщений: \(messageCount)
+        ║ Статус: \(statusText)
+        ║ Сессия: \(sessionText)
+        ║ Версия: \(version)
+        ╠══════════════════════════════╣
+        ║ Команды:                     ║
+        ║ /help - справка              ║
+        ║ /clear - очистить историю    ║
+        ║ /new - новая сессия          ║
+        ║ /index - индексировать KB    ║
+        ║ /status - статус             ║
+        ║ Ctrl+C - выход               ║
+        ╚══════════════════════════════╝
         """
     }
 }
@@ -145,24 +113,28 @@ final class HorizontalLayout: @MainActor Component {
 @MainActor
 @main
 struct SupportBotApp {
-    static let state = ChatState()
+    static var state = ChatState()
     static var chatHistory: Text!
     static var infoText: Text!
     static var inputField: Input!
     static var mainBox: Box!
     static var infoBox: Box!
+    static var supportBotService: SupportBotService!
+    static var isInitialized = false
+    static var tui: TUI!
 
-    static func main() throws {
+    static func main() {
+        print("=== SupportBot запускается ===")
+        
         let terminal = ProcessTerminal()
-        let tui = TUI(terminal: terminal)
+        let tuiInstance = TUI(terminal: terminal)
+        self.tui = tuiInstance
 
-        // Создаём историю чата
+        print("Создание UI компонентов...")
+        
+        // Создаём UI компоненты сразу
         chatHistory = Text(text: state.getHistoryText(), paddingX: 1, paddingY: 1)
-
-        // Создаём поле ввода
         inputField = Input(value: "")
-
-        // Создаём информационную панель
         infoText = Text(text: state.getInfoText(), paddingX: 1, paddingY: 1)
 
         // Основной контейнер с историей и вводом
@@ -174,13 +146,13 @@ struct SupportBotApp {
         infoBox = Box(paddingX: 1, paddingY: 1)
         infoBox.addChild(infoText)
 
-        // Горизонтальный лейаут через кастомный компонент
+        // Горизонтальный лейаут
         let horizontalLayout = HorizontalLayout()
         horizontalLayout.addChild(mainBox)
         horizontalLayout.addChild(infoBox)
 
         // Заголовок приложения
-        let title = Text(text: " SupportBot v1.0.0 - TUI Chat Application ", paddingX: 1, paddingY: 0)
+        let title = Text(text: " SupportBot v1.0.0 - AI Support Assistant with RAG ", paddingX: 1, paddingY: 0)
 
         // Верхний контейнер с заголовком
         let rootBox = Box(paddingX: 0, paddingY: 0)
@@ -195,71 +167,192 @@ struct SupportBotApp {
 
         // Обработчик Ctrl+C
         tui.onControlC = {
+            print("Получен сигнал Ctrl+C")
             tui.stop()
             exit(0)
         }
 
         // Обработчик отправки сообщения
         inputField.onSubmit = { value in
-            if !value.trimmingCharacters(in: .whitespaces).isEmpty {
-                // Добавляем сообщение пользователя
-                state.addMessage(value, sender: .user)
-                chatHistory.text = state.getHistoryText()
-                infoText.text = state.getInfoText()
+            print("Получено сообщение: \(value)")
+            handleUserInput(value)
+        }
 
-                // Очищаем поле ввода
-                inputField.setValue("")
+        print("UI создан, запуск TUI...")
 
-                // Запрашиваем перерисовку
-                tui.requestRender()
-
-                // Генерируем ответ бота
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    let botResponse = generateResponse(to: value)
-                    state.addMessage(botResponse, sender: .bot)
+        // Инициализация сервиса в Task
+        Task {
+            print("Начало инициализации сервиса...")
+            do {
+                try await initializeService()
+                print("✓ SupportBot готов к работе!")
+            } catch {
+                print("✗ Ошибка инициализации: \(error)")
+                await MainActor.run {
+                    state.addMessage("Ошибка инициализации: \(error.localizedDescription)", sender: .bot)
                     chatHistory.text = state.getHistoryText()
-                    infoText.text = state.getInfoText()
-                    tui.requestRender()
+                    tui?.requestRender()
                 }
             }
         }
 
         // Запускаем TUI
-        try tui.start()
-        RunLoop.main.run()
-    }
-
-    /// Генерация ответа бота
-    static func generateResponse(to message: String) -> String {
-        let lowercased = message.lowercased()
-
-        if lowercased.contains("привет") || lowercased.contains("здравствуй") {
-            return "Здравствуйте! Чем я могу вам помочь сегодня?"
-        } else if lowercased.contains("как дела") || lowercased.contains("как жизнь") {
-            return "У меня всё отлично! Я виртуальный помощник, всегда готов помочь вам!"
-        } else if lowercased.contains("что ты умеешь") || lowercased.contains("возможности") {
-            return "Я умею отвечать на вопросы, поддерживать беседу и помогать с базовыми запросами. Спрашивайте!"
-        } else if lowercased.contains("спасибо") {
-            return "Пожалуйста! Всегда рад помочь!"
-        } else if lowercased.contains("пока") || lowercased.contains("до свидания") {
-            return "До свидания! Обращайтесь ещё!"
-        } else if lowercased.contains("кто ты") || lowercased.contains("что ты") {
-            return "Я SupportBot - виртуальный помощник, созданный для демонстрации TUI на Swift с использованием TauTUI."
-        } else if lowercased.contains("помощь") || lowercased.contains("help") {
-            return "Просто напишите сообщение и нажмите Enter. Я постараюсь ответить!"
-        } else if lowercased.contains("время") || lowercased.contains("дата") {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "dd.MM.yyyy HH:mm"
-            return "Сейчас: \(formatter.string(from: Date()))"
-        } else {
-            let responses = [
-                "Интересный вопрос! Расскажите подробнее.",
-                "Понял вас. Есть ещё вопросы?",
-                "Хорошо, я вас услышал. Чем ещё могу помочь?",
-                "Спасибо за сообщение! Я продолжаю учиться.",
-                "Принято! Жду ваших следующих вопросов."
-            ]
-            return responses.randomElement() ?? "Я вас понял!"
+        do {
+            print("Запуск TUI цикла...")
+            try tui.start()
+        } catch {
+            print("Ошибка запуска TUI: \(error)")
+            exit(1)
         }
+
+        print("Запуск RunLoop...")
+        RunLoop.current.run()
+    }
+    
+    /// Инициализация сервиса
+    static func initializeService() async throws {
+        // Загружаем конфигурацию
+        let config = try ConfigManager.shared.load()
+
+        // Создаем сервис
+        supportBotService = try SupportBotService(config: config)
+
+        // Инициализируем
+        try supportBotService.initialize()
+
+        // Индексируем базу знаний
+        print("Индексация базы знаний...")
+        state.status = "Индексация..."
+        try await supportBotService.indexKnowledgeBase()
+        print("База знаний проиндексирована")
+
+        isInitialized = true
+    }
+    
+    /// Обработка ввода пользователя
+    static func handleUserInput(_ value: String) {
+        guard !value.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return
+        }
+        
+        let input = value.trimmingCharacters(in: .whitespaces)
+        
+        // Проверяем команды
+        if input.hasPrefix("/") {
+            handleCommand(input)
+            inputField.setValue("")
+            return
+        }
+        
+        // Добавляем сообщение пользователя
+        state.addMessage(value, sender: .user)
+        chatHistory.text = state.getHistoryText()
+        infoText.text = state.getInfoText()
+        
+        // Очищаем поле ввода
+        inputField.setValue("")
+        
+        // Устанавливаем статус "печатает"
+        state.isTyping = true
+        self.tui?.requestRender()
+
+        // Генерируем ответ бота
+        Task {
+            do {
+                guard let service = supportBotService else {
+                    throw ServiceError.notInitialized
+                }
+
+                let botResponse = try await service.processMessage(value)
+
+                await MainActor.run {
+                    state.addMessage(botResponse, sender: .bot)
+                    chatHistory.text = state.getHistoryText()
+                    state.isTyping = false
+                    infoText.text = state.getInfoText(serviceStatus: service.getServiceStatus())
+                    self.tui?.requestRender()
+                }
+            } catch {
+                await MainActor.run {
+                    state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+                    state.isTyping = false
+                    infoText.text = state.getInfoText()
+                    self.tui?.requestRender()
+                }
+            }
+        }
+    }
+    
+    /// Обработка команд
+    static func handleCommand(_ command: String) {
+        let parts = command.split(separator: " ", maxSplits: 1)
+        let cmd = parts[0].lowercased()
+        
+        switch cmd {
+        case "/help":
+            let helpText = """
+            Доступные команды:
+            /help - показать эту справку
+            /clear - очистить историю чата
+            /new - начать новую сессию
+            /index - переиндексировать базу знаний
+            /status - показать статус сервиса
+            
+            Просто введите вопрос для получения ответа.
+            """
+            state.addMessage(helpText, sender: .bot)
+            
+        case "/clear":
+            do {
+                try supportBotService?.clearChat()
+                state.messages.removeAll()
+                state.addMessage("История чата очищена", sender: .bot)
+                chatHistory.text = state.getHistoryText()
+            } catch {
+                state.addMessage("Ошибка очистки: \(error.localizedDescription)", sender: .bot)
+            }
+            
+        case "/new":
+            do {
+                try supportBotService?.newSession()
+                state.messages.removeAll()
+                state.addMessage("Начата новая сессия", sender: .bot)
+                chatHistory.text = state.getHistoryText()
+            } catch {
+                state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+            }
+            
+        case "/index":
+            Task {
+                do {
+                    state.addMessage("Начинаю индексацию базы знаний...", sender: .bot)
+                    chatHistory.text = state.getHistoryText()
+                    try await supportBotService?.indexKnowledgeBase()
+                    state.addMessage("Индексация завершена успешно", sender: .bot)
+                    chatHistory.text = state.getHistoryText()
+                } catch {
+                    state.addMessage("Ошибка индексации: \(error.localizedDescription)", sender: .bot)
+                    chatHistory.text = state.getHistoryText()
+                }
+            }
+            
+        case "/status":
+            if let status = supportBotService?.getServiceStatus() {
+                let statusText = """
+                Статус сервиса:
+                - Инициализирован: \(status.isInitialized ? "Да" : "Нет")
+                - База знаний: \(status.isKnowledgeBaseIndexed ? "Проиндексирована" : "Не проиндексирована")
+                - Сообщений: \(status.messageCount)
+                - Сессия: \(status.sessionId ?? "N/A")
+                """
+                state.addMessage(statusText, sender: .bot)
+                chatHistory.text = state.getHistoryText()
+            }
+            
+        default:
+            state.addMessage("Неизвестная команда: \(cmd). Введите /help для справки.", sender: .bot)
+        }
+        
+        infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
     }
 }
