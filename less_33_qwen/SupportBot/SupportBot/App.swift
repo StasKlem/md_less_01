@@ -31,40 +31,42 @@ final class ChatState {
     func getHistoryText() -> String {
         var content = ""
         for message in messages {
-            content += "[\(message.formattedTime)] \(message.sender.emoji) [\(message.sender.displayName)]: \(message.text)\n\n"
+            let timePrefix = "[\(message.formattedTime)]"
+            let senderInfo = "\(message.sender.emoji) \(message.sender.displayName)"
+            content += "\(timePrefix) \(senderInfo):\n  \(message.text)\n\n"
         }
         return content
     }
 
     func getInfoText(serviceStatus: ServiceStatus? = nil) -> String {
-        let statusText = isTyping ? "Печатает..." : (serviceStatus?.isKnowledgeBaseIndexed == true ? "Активен" : "Индексация...")
-        let sessionText = serviceStatus?.sessionId.map { String($0.prefix(8)) } ?? "N/A"
-        let version = "1.0.0"
+        let statusText = isTyping ? "⏳ Печатает..." : (serviceStatus?.isKnowledgeBaseIndexed == true ? "✅ Активен" : "⏳ Индексация...")
+        let sessionText = serviceStatus?.sessionId.map { String($0.prefix(8)).uppercased() } ?? "N/A"
+        let version = "v1.0.0"
 
         return """
-        ╔══════════════════════════════╗
-        ║     SupportBot Info          ║
-        ╠══════════════════════════════╣
-        ║ Сообщений: \(messageCount)
-        ║ Статус: \(statusText)
-        ║ Сессия: \(sessionText)
-        ║ Версия: \(version)
-        ╠══════════════════════════════╣
-        ║ Команды:                     ║
-        ║ /help - справка              ║
-        ║ /clear - очистить историю    ║
-        ║ /new - новая сессия          ║
-        ║ /index - индексировать KB    ║
-        ║ /status - статус             ║
-        ║ Ctrl+C - выход               ║
-        ╚══════════════════════════════╝
+        ╔══════════════════════════════════╗
+        ║  📊 SupportBot Info              ║
+        ╠══════════════════════════════════╣
+        ║  💬 Сообщений: \(messageCount)
+        ║  🟢 Статус: \(statusText)
+        ║  🔑 Сессия: \(sessionText)
+        ║  📦 Версия: \(version)
+        ╠══════════════════════════════════╣
+        ║  ⌨️  Команды:                    ║
+        ║     /help - справка              ║
+        ║     /clear - очистить историю    ║
+        ║     /new - новая сессия          ║
+        ║     /index - индексировать KB    ║
+        ║     /status - статус             ║
+        ║     Ctrl+C - выход               ║
+        ╚══════════════════════════════════╝
         """
     }
 }
 
 // MARK: - Horizontal Layout Component
 
-/// Простой горизонтальный лейаут для размещения компонентов рядом
+/// Горизонтальный лейаут для размещения компонентов рядом
 @MainActor
 final class HorizontalLayout: @MainActor Component {
     var children: [Component] = []
@@ -90,7 +92,7 @@ final class HorizontalLayout: @MainActor Component {
         let rightLines = children[1].render(width: rightWidth)
 
         var result: [String] = []
-        let maxLines = max(leftLines.count, rightLines.count)
+        let maxLines = Swift.max(leftLines.count, rightLines.count)
 
         for i in 0..<maxLines {
             let leftLine = i < leftLines.count ? leftLines[i] : String(repeating: " ", count: leftWidth)
@@ -125,34 +127,35 @@ struct SupportBotApp {
 
     static func main() {
         print("=== SupportBot запускается ===")
-        
+
         let terminal = ProcessTerminal()
         let tuiInstance = TUI(terminal: terminal)
         self.tui = tuiInstance
 
         print("Создание UI компонентов...")
-        
-        // Создаём UI компоненты сразу
-        chatHistory = Text(text: state.getHistoryText(), paddingX: 1, paddingY: 1)
+
+        // Создаём UI компоненты
+        chatHistory = Text(text: state.getHistoryText(), paddingX: 2, paddingY: 1)
         inputField = Input(value: "")
-        infoText = Text(text: state.getInfoText(), paddingX: 1, paddingY: 1)
 
         // Основной контейнер с историей и вводом
-        mainBox = Box(paddingX: 1, paddingY: 1)
+        mainBox = Box(paddingX: 0, paddingY: 0)
         mainBox.addChild(chatHistory)
         mainBox.addChild(inputField)
 
         // Информационная панель
-        infoBox = Box(paddingX: 1, paddingY: 1)
+        infoText = Text(text: state.getInfoText(), paddingX: 1, paddingY: 1)
+        infoBox = Box(paddingX: 0, paddingY: 0)
         infoBox.addChild(infoText)
 
-        // Горизонтальный лейаут
-        let horizontalLayout = HorizontalLayout()
+        // Горизонтальный лейаут (75% чат, 25% инфо)
+        let horizontalLayout = HorizontalLayout(ratio: 0.75)
         horizontalLayout.addChild(mainBox)
         horizontalLayout.addChild(infoBox)
 
         // Заголовок приложения
-        let title = Text(text: " SupportBot v1.0.0 - AI Support Assistant with RAG ", paddingX: 1, paddingY: 0)
+        let title = Text(text: " ══ SupportBot v1.0.0 - AI Support Assistant with RAG ══ ", paddingX: 0, paddingY: 1)
+        title.background = Text.Background(red: 62, green: 72, blue: 104)
 
         // Верхний контейнер с заголовком
         let rootBox = Box(paddingX: 0, paddingY: 0)
