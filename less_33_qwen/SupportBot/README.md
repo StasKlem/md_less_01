@@ -48,7 +48,21 @@ swift run
 
 Откройте `Config/config.yaml` и настройте параметры:
 
-### Вариант 1: OpenAI API
+### Вариант 1: RouterAI API (DeepSeek)
+```yaml
+llm:
+  provider: routerai
+  api_key: ${ROUTERAI_API_KEY}
+  model: deepseek/deepseek-v3.2
+  base_url: https://routerai.ru/api/v1
+  
+embeddings:
+  provider: local
+  model: text-embedding-bge-m3
+  base_url: http://127.0.0.1:1234/v1
+```
+
+### Вариант 2: OpenAI API
 ```yaml
 llm:
   provider: openai
@@ -60,7 +74,7 @@ embeddings:
   model: text-embedding-3-small
 ```
 
-### Вариант 2: Локальный API (Ollama, LM Studio, etc.)
+### Вариант 3: Локальный API (Ollama, LM Studio, etc.)
 ```yaml
 llm:
   provider: local

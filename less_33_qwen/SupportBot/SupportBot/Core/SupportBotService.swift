@@ -70,7 +70,17 @@ final class SupportBotService {
             model: config.llm.model,
             timeout: config.llm.timeout
         )
-        self.llmProvider = OpenAIProvider(config: llmConfig)
+        
+        switch config.llm.provider.lowercased() {
+        case "openai", "routerai":
+            self.llmProvider = OpenAIProvider(config: llmConfig)
+            logger.info("Используется LLM провайдер: \(config.llm.provider) (модель: \(config.llm.model))")
+        case "local", "ollama":
+            self.llmProvider = OpenAIProvider(config: llmConfig)
+            logger.info("Используется локальная LLM: \(config.llm.baseURL)")
+        default:
+            throw ServiceError.invalidConfig("Неизвестный LLM провайдер: \(config.llm.provider)")
+        }
         
         // Инициализация RAG сервиса
         self.ragService = RAGService(

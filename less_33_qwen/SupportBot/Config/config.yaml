@@ -5,11 +5,11 @@ app:
   version: 1.0.0
 
 llm:
-  provider: openai  # openai | ollama | mlx | local
-  api_key: ${OPENAI_API_KEY}  # переменная окружения
-  model: gpt-4o-mini
-  base_url: https://api.openai.com/v1
-  timeout: 30  # секунд
+  provider: routerai  # routerai | openai | local
+  api_key: ${ROUTERAI_API_KEY}  # переменная окружения
+  model: deepseek/deepseek-v3.2
+  base_url: https://routerai.ru/api/v1
+  timeout: 60  # секунд
 
 embeddings:
   provider: local  # openai | local | ollama | lmstudio
