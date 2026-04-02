@@ -237,27 +237,26 @@ struct SupportBotApp {
         guard !value.trimmingCharacters(in: .whitespaces).isEmpty else {
             return
         }
-        
+
         let input = value.trimmingCharacters(in: .whitespaces)
-        
+
         // Проверяем команды
         if input.hasPrefix("/") {
             handleCommand(input)
             inputField.setValue("")
             return
         }
-        
-        // Добавляем сообщение пользователя
+
+        // === Обновление истории: ДОБАВЛЕНО СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ ===
         state.addMessage(value, sender: .user)
         chatHistory.text = state.getHistoryText()
-        infoText.text = state.getInfoText()
-        
-        // Очищаем поле ввода
+        infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
         inputField.setValue("")
-        
+        self.tui?.requestRender()
+        // ============================================================
+
         // Устанавливаем статус "печатает"
         state.isTyping = true
-        self.tui?.requestRender()
 
         // Генерируем ответ бота
         Task {
@@ -268,6 +267,7 @@ struct SupportBotApp {
 
                 let botResponse = try await service.processMessage(value)
 
+                // === Обновление истории: ПОЛУЧЕН ОТВЕТ БОТА ===
                 await MainActor.run {
                     state.addMessage(botResponse, sender: .bot)
                     chatHistory.text = state.getHistoryText()
@@ -275,17 +275,21 @@ struct SupportBotApp {
                     infoText.text = state.getInfoText(serviceStatus: service.getServiceStatus())
                     self.tui?.requestRender()
                 }
+                // ================================================
             } catch {
+                // === Обновление истории: ПРОИЗОШЛА ОШИБКА ===
                 await MainActor.run {
                     state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
                     state.isTyping = false
-                    infoText.text = state.getInfoText()
+                    infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                    chatHistory.text = state.getHistoryText()
                     self.tui?.requestRender()
                 }
+                // ==============================================
             }
         }
     }
-    
+
     /// Обработка команд
     static func handleCommand(_ command: String) {
         let parts = command.split(separator: " ", maxSplits: 1)
