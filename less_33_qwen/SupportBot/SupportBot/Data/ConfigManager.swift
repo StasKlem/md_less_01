@@ -37,6 +37,14 @@ struct EmbeddingsConfig: Codable {
     let provider: String
     let model: String
     let dimension: Int
+    let baseURL: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case dimension
+        case baseURL = "base_url"
+    }
 }
 
 /// Конфигурация RAG

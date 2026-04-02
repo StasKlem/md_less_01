@@ -5,16 +5,17 @@ app:
   version: 1.0.0
 
 llm:
-  provider: openai  # openai | ollama | mlx
+  provider: openai  # openai | ollama | mlx | local
   api_key: your-api-key-here  # замените на ваш API ключ или используйте ${OPENAI_API_KEY}
   model: gpt-4o-mini
   base_url: https://api.openai.com/v1
   timeout: 30
 
 embeddings:
-  provider: openai
-  model: text-embedding-3-small
-  dimension: 1536
+  provider: local  # openai | local | ollama | lmstudio
+  model: text-embedding-bge-m3
+  dimension: 1024
+  base_url: http://127.0.0.1:1234/v1  # URL локального API (Ollama, LM Studio, etc.)
 
 rag:
   chunk_size: 500

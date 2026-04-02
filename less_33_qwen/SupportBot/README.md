@@ -48,6 +48,7 @@ swift run
 
 Откройте `Config/config.yaml` и настройте параметры:
 
+### Вариант 1: OpenAI API
 ```yaml
 llm:
   provider: openai
@@ -57,13 +58,21 @@ llm:
 embeddings:
   provider: openai
   model: text-embedding-3-small
-
-rag:
-  chunk_size: 500
-  chunk_overlap: 50
-  top_k: 5
-  min_score: 0.7
 ```
+
+### Вариант 2: Локальный API (Ollama, LM Studio, etc.)
+```yaml
+llm:
+  provider: local
+  model: local-model
+  
+embeddings:
+  provider: local
+  model: text-embedding-bge-m3
+  base_url: http://127.0.0.1:1234/v1
+```
+
+Для локального API используется формат, совместимый с OpenAI API.
 
 ## Команды
 

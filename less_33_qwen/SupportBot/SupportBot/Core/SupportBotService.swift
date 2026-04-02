@@ -38,15 +38,29 @@ final class SupportBotService {
         self.chatHistoryDB = ChatHistoryDB(dbPath: dbPath)
         self.documentDB = DocumentDB(dbPath: dbPath.replacingOccurrences(of: ".db", with: "_documents.db"))
         self.vectorStore = VectorStore(dbPath: dbPath.replacingOccurrences(of: ".db", with: "_vectors.db"))
-        
+
         // Инициализация embedding модели
-        self.embeddingModel = OpenAIEmbedding(
-            modelName: config.embeddings.model,
-            dimension: config.embeddings.dimension,
-            apiKey: config.llm.apiKey,
-            baseURL: config.llm.baseURL,
-            timeout: config.llm.timeout
-        )
+        switch config.embeddings.provider.lowercased() {
+        case "openai":
+            self.embeddingModel = OpenAIEmbedding(
+                modelName: config.embeddings.model,
+                dimension: config.embeddings.dimension,
+                apiKey: config.llm.apiKey,
+                baseURL: config.llm.baseURL,
+                timeout: config.llm.timeout
+            )
+        case "local", "ollama", "lmstudio":
+            let localBaseURL = config.embeddings.baseURL ?? "http://127.0.0.1:1234/v1"
+            self.embeddingModel = LocalEmbedding(
+                modelName: config.embeddings.model,
+                dimension: config.embeddings.dimension,
+                baseURL: localBaseURL,
+                timeout: config.llm.timeout
+            )
+            logger.info("Используется локальная embedding модель: \(localBaseURL)")
+        default:
+            throw ServiceError.invalidConfig("Неизвестный провайдер эмбеддингов: \(config.embeddings.provider)")
+        }
         
         // Инициализация LLM провайдера
         let llmConfig = LLMProviderConfig(
@@ -182,6 +196,7 @@ enum ServiceError: LocalizedError {
     case notInitialized
     case indexingFailed(String)
     case generationFailed(String)
+    case invalidConfig(String)
     
     var errorDescription: String? {
         switch self {
@@ -191,6 +206,8 @@ enum ServiceError: LocalizedError {
             return "Ошибка индексации: \(message)"
         case .generationFailed(let message):
             return "Ошибка генерации: \(message)"
+        case .invalidConfig(let message):
+            return "Ошибка конфигурации: \(message)"
         }
     }
 }
