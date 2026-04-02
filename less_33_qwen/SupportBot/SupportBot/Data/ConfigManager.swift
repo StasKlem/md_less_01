@@ -149,21 +149,22 @@ final class ConfigManager {
         var result = yaml
         let pattern = #"\$\{(\w+)\}"#
         let regex = try NSRegularExpression(pattern: pattern)
-        
+
         let matches = regex.matches(in: yaml, range: NSRange(yaml.startIndex..., in: yaml))
-        
+
         for match in matches.reversed() {
             guard let range = Range(match.range(at: 1), in: yaml) else { continue }
             let envVar = String(yaml[range])
-            
+
             if let envValue = ProcessInfo.processInfo.environment[envVar] {
                 guard let matchRange = Range(match.range, in: yaml) else { continue }
                 result.replaceSubrange(matchRange, with: envValue)
+                logger.debug("Environment variable '\(envVar)' replaced")
             } else {
                 logger.warning("Environment variable not found: \(envVar)")
             }
         }
-        
+
         return result
     }
     
