@@ -127,22 +127,33 @@ final class RAGService {
     /// - Returns: Сгенерированный ответ
     func generateResponse(query: String, history: [Message]) async throws -> String {
         logger.info("Generating response for query: \(query)")
-        
+
         // Находим релевантный контекст
         let context = try await findRelevantContext(query: query)
         
+        // Логируем найденный контекст
+        if context.isEmpty {
+            logger.warning("⚠️ RAG: Контекст не найден для запроса: \(query)")
+        } else {
+            logger.info("✅ RAG: Найдено \(context.count) релевантных фрагментов:")
+            for (i, item) in context.enumerated() {
+                logger.info("   [\(i+1)] \(item.source) (score: \(String(format: "%.3f", item.score)))")
+                logger.info("       \(item.content.prefix(100).replacingOccurrences(of: "\n", with: " "))...")
+            }
+        }
+
         // Строим промпт
         let prompt = promptBuilder.buildPrompt(
             query: query,
             context: context,
             history: history
         )
-        
+
         logger.debug("Prompt length: \(prompt.count) characters")
-        
+
         // Генерируем ответ через LLM
         let response = try await llmProvider.generate(prompt: prompt, model: nil)
-        
+
         logger.info("Response generated successfully")
         return response
     }
