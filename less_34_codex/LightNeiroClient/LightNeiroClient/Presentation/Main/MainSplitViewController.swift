@@ -1,16 +1,14 @@
 import Cocoa
 
 final class MainSplitViewController: NSSplitViewController {
-    private let viewModel: MainViewModel
-
-    init(viewModel: MainViewModel) {
-        self.viewModel = viewModel
+    init() {
         super.init(nibName: nil, bundle: nil)
 
-        let chatVC = ChatSidebarViewController(viewModel: viewModel.chatViewModel)
-        let settingsVC = SettingsViewController(viewModel: viewModel.settingsViewModel)
-        let invariantsVC = InvariantsSettingsViewController(viewModel: viewModel.settingsViewModel)
-        let sessionInfoVC = SessionInfoViewController(viewModel: viewModel.sessionInfoViewModel)
+        let chatVC = ChatSidebarViewController()
+        let settingsVC = SettingsViewController()
+        let invariantsVC = InvariantsSettingsViewController()
+        let sessionInfoVC = SessionInfoViewController()
+
         let rightVC = RightPaneSplitViewController(
             settingsViewController: settingsVC,
             invariantsViewController: invariantsVC,
@@ -20,12 +18,11 @@ final class MainSplitViewController: NSSplitViewController {
         let leftItem = NSSplitViewItem(sidebarWithViewController: chatVC)
         leftItem.minimumThickness = 420
         leftItem.collapseBehavior = .useConstraints
-        
+
         let rightItem = NSSplitViewItem(viewController: rightVC)
         rightItem.collapseBehavior = .useConstraints
         rightItem.minimumThickness = 420
         rightItem.maximumThickness = 420
-
 
         addSplitViewItem(leftItem)
         addSplitViewItem(rightItem)
