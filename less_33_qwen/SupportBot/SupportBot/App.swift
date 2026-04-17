@@ -41,7 +41,7 @@ final class ChatState {
     func getInfoText(serviceStatus: ServiceStatus? = nil) -> String {
         let statusText = isTyping ? "⏳ Печатает..." : (serviceStatus?.isKnowledgeBaseIndexed == true ? "✅ Активен" : "⏳ Индексация...")
         let sessionText = serviceStatus?.sessionId.map { String($0.prefix(8)).uppercased() } ?? "N/A"
-        let version = "v1.0.0"
+        let version = "v1.1.0"
 
         return """
         ╔══════════════════════════════════╗
@@ -58,6 +58,11 @@ final class ChatState {
         ║     /new - новая сессия          ║
         ║     /index - индексировать KB    ║
         ║     /status - статус             ║
+        ║     /files - прочитать файл      ║
+        ║     /search - поиск в файлах     ║
+        ║     /list - список файлов        ║
+        ║     /analyze - анализ проекта    ║
+        ║     /invariants - проверка       ║
         ║     Ctrl+C - выход               ║
         ╚══════════════════════════════════╝
         """
@@ -154,7 +159,7 @@ struct SupportBotApp {
         horizontalLayout.addChild(infoBox)
 
         // Заголовок приложения
-        let title = Text(text: " ══ SupportBot v1.0.0 - AI Support Assistant with RAG ══ ", paddingX: 0, paddingY: 1)
+        let title = Text(text: " ══ SupportBot v1.1.0 - AI File Assistant with RAG ══ ", paddingX: 0, paddingY: 1)
         title.background = Text.Background(red: 62, green: 72, blue: 104)
 
         // Верхний контейнер с заголовком
@@ -294,21 +299,31 @@ struct SupportBotApp {
     static func handleCommand(_ command: String) {
         let parts = command.split(separator: " ", maxSplits: 1)
         let cmd = parts[0].lowercased()
-        
+        let args = parts.count > 1 ? String(parts[1]).split(separator: " ").map(String.init) : []
+
         switch cmd {
         case "/help":
             let helpText = """
             Доступные команды:
+
+            📋 Основные:
             /help - показать эту справку
             /clear - очистить историю чата
             /new - начать новую сессию
             /index - переиндексировать базу знаний
             /status - показать статус сервиса
-            
+
+            📁 Работа с файлами:
+            /files <path> - прочитать файл или директорию
+            /search <pattern> [path] - поиск по содержимому файлов
+            /list [path] - список файлов в директории
+            /analyze - анализ структуры проекта
+            /invariants - проверка соответствия правилам
+
             Просто введите вопрос для получения ответа.
             """
             state.addMessage(helpText, sender: .bot)
-            
+
         case "/clear":
             do {
                 try supportBotService?.clearChat()
@@ -318,7 +333,7 @@ struct SupportBotApp {
             } catch {
                 state.addMessage("Ошибка очистки: \(error.localizedDescription)", sender: .bot)
             }
-            
+
         case "/new":
             do {
                 try supportBotService?.newSession()
@@ -328,7 +343,7 @@ struct SupportBotApp {
             } catch {
                 state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
             }
-            
+
         case "/index":
             Task {
                 do {
@@ -342,7 +357,7 @@ struct SupportBotApp {
                     chatHistory.text = state.getHistoryText()
                 }
             }
-            
+
         case "/status":
             if let status = supportBotService?.getServiceStatus() {
                 let statusText = """
@@ -355,11 +370,119 @@ struct SupportBotApp {
                 state.addMessage(statusText, sender: .bot)
                 chatHistory.text = state.getHistoryText()
             }
-            
+
+        // MARK: - File Commands
+
+        case "/files":
+            Task {
+                do {
+                    state.isTyping = true
+                    infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                    chatHistory.text = state.getHistoryText()
+                    self.tui?.requestRender()
+
+                    let result = try await supportBotService?.executeTool(tool: .read, arguments: args)
+                    if let result = result {
+                        state.addMessage(result.formatted(), sender: .bot)
+                    }
+                } catch {
+                    state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+                }
+                state.isTyping = false
+                infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                chatHistory.text = state.getHistoryText()
+                self.tui?.requestRender()
+            }
+
+        case "/search":
+            Task {
+                do {
+                    state.isTyping = true
+                    infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                    chatHistory.text = state.getHistoryText()
+                    self.tui?.requestRender()
+
+                    let result = try await supportBotService?.executeTool(tool: .search, arguments: args)
+                    if let result = result {
+                        state.addMessage(result.formatted(), sender: .bot)
+                    }
+                } catch {
+                    state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+                }
+                state.isTyping = false
+                infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                chatHistory.text = state.getHistoryText()
+                self.tui?.requestRender()
+            }
+
+        case "/list":
+            Task {
+                do {
+                    state.isTyping = true
+                    infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                    chatHistory.text = state.getHistoryText()
+                    self.tui?.requestRender()
+
+                    let result = try await supportBotService?.executeTool(tool: .list, arguments: args)
+                    if let result = result {
+                        state.addMessage(result.formatted(), sender: .bot)
+                    }
+                } catch {
+                    state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+                }
+                state.isTyping = false
+                infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                chatHistory.text = state.getHistoryText()
+                self.tui?.requestRender()
+            }
+
+        case "/analyze":
+            Task {
+                do {
+                    state.addMessage("🔬 Анализирую проект...", sender: .bot)
+                    state.isTyping = true
+                    infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                    chatHistory.text = state.getHistoryText()
+                    self.tui?.requestRender()
+
+                    let result = try await supportBotService?.executeTool(tool: .analyze, arguments: [])
+                    if let result = result {
+                        state.addMessage(result.formatted(), sender: .bot)
+                    }
+                } catch {
+                    state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+                }
+                state.isTyping = false
+                infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                chatHistory.text = state.getHistoryText()
+                self.tui?.requestRender()
+            }
+
+        case "/invariants":
+            Task {
+                do {
+                    state.isTyping = true
+                    infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                    chatHistory.text = state.getHistoryText()
+                    self.tui?.requestRender()
+
+                    let result = try await supportBotService?.executeTool(tool: .invariants, arguments: [])
+                    if let result = result {
+                        state.addMessage(result.formatted(), sender: .bot)
+                    }
+                } catch {
+                    state.addMessage("Ошибка: \(error.localizedDescription)", sender: .bot)
+                }
+                state.isTyping = false
+                infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
+                chatHistory.text = state.getHistoryText()
+                self.tui?.requestRender()
+            }
+
         default:
             state.addMessage("Неизвестная команда: \(cmd). Введите /help для справки.", sender: .bot)
         }
-        
+
         infoText.text = state.getInfoText(serviceStatus: supportBotService?.getServiceStatus())
     }
 }

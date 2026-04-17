@@ -7,10 +7,17 @@ enum ProjectMCPServerApp {
             let config = AppConfiguration.fromEnvironment()
             let logger = StderrLogger(component: "ProjectMCPServer", minLevel: config.logLevel)
             let repository = GitProjectRepository(rootDirectory: config.repositoryDirectory)
+            let workspaceRepository = FileSystemProjectWorkspaceRepository(rootDirectory: config.repositoryDirectory)
             let service = ProjectToolService(
                 getCurrentGitBranchUseCase: GetCurrentGitBranchUseCase(repository: repository),
                 listProjectFilesUseCase: ListProjectFilesUseCase(repository: repository),
                 getUncommittedChangesUseCase: GetUncommittedChangesUseCase(repository: repository),
+                readProjectFileUseCase: ReadProjectFileUseCase(repository: workspaceRepository),
+                searchProjectFilesUseCase: SearchProjectFilesUseCase(
+                    projectRepository: repository,
+                    workspaceRepository: workspaceRepository
+                ),
+                writeProjectFileUseCase: WriteProjectFileUseCase(repository: workspaceRepository),
                 logger: logger
             )
 
@@ -19,7 +26,7 @@ enum ProjectMCPServerApp {
             let server = Server(
                 name: "project-mcp-server",
                 version: "1.0.0",
-                instructions: "Use project_git_branch, project_list_files, and project_uncommitted_changes to inspect the project.",
+                instructions: "Use project_git_branch, project_list_files, project_uncommitted_changes, project_read_file, project_search_files, and project_write_file to inspect and update the project.",
                 capabilities: .init(
                     tools: .init(listChanged: false)
                 )

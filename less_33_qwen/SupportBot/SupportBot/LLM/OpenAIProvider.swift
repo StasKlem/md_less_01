@@ -26,7 +26,7 @@ final class OpenAIProvider: LLMProvider {
     
     init(config: LLMProviderConfig) {
         self.defaultModel = config.model
-        self.apiKey = config.apiKey
+        self.apiKey = "sk-1yDhC2RWnMX_RUo2F3FBtLKgBOKvoUFb"//config.apiKey
         self.baseURL = config.baseURL
         self.timeout = config.timeout
         self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)

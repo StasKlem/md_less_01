@@ -2,7 +2,7 @@
 
 app:
   name: SupportBot
-  version: 1.0.0
+  version: 1.1.0
 
 llm:
   provider: routerai  # routerai | openai | local
@@ -30,6 +30,21 @@ context:
 storage:
   database_path: ~/Library/Application Support/SupportBot/bot.db
   knowledge_base_path: ./KnowledgeBase
+
+# Настройки файловых инструментов
+file_tools:
+  project_root: ./  # Корень анализируемого проекта
+  max_file_size: 1048576  # Максимальный размер файла для чтения (1MB)
+  allowed_extensions:  # Разрешённые расширения для поиска
+    - .swift
+    - .md
+    - .txt
+    - .yaml
+    - .yml
+    - .json
+    - .plist
+    - .sh
+    - .py
 
 logging:
   level: info

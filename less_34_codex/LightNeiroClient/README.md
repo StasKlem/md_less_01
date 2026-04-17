@@ -188,6 +188,8 @@ xcodebuild -project LightNeiroClient.xcodeproj -scheme LightNeiroClient -destina
 - запускает review-task для незакоммиченных изменений
 - получает diff через MCP, использует RAG и формирует текст ревью
 - если RAG или LLM недоступны, использует локальный fallback-разбор без падения task-а
+- для работы с кодом и документами использует MCP-инструменты `project_read_file`, `project_search_files` и `project_write_file`
+- умеет искать использование API по нескольким файлам, читать содержимое файлов и сохранять изменения в проекте
 
 ## MCP-интеграции
 
